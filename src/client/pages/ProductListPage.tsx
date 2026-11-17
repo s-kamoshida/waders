@@ -6,7 +6,8 @@
  *  - 商品の一覧を読み込み、発売月が当月以降の商品を年・月のグループ（見出しに個数と合計金額の見込み）で表示する。
  *    0 件の月も表示する。当月より前の商品はアーカイブの画面に表示する（issue #9）
  *  - 年・月の折りたたみと、暦年・年度の切り替え（端末ごとに記憶）
- *  - ＋ボタンで追加、商品を押して編集・削除のモーダルを開き、保存後に読み込み直す
+ *  - ＋ボタン・月の見出しの＋ボタン（その月を発売月にする。issue #16）で追加、商品を押して編集・削除のモーダルを開き、保存後に読み込み直す
+ *  - 「保存して続けて追加」で保存した場合は、モーダルを開いたまま読み込み直す（issue #16）
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ProductListItem } from '../../shared/productContract.ts';
@@ -132,15 +133,17 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           formatSummary={formatGroupSummary}
           today={today}
           onSelect={(selected) => setEditorMode({ kind: 'edit', product: selected })}
+          onAddToMonth={(month) => setEditorMode({ kind: 'create', defaultReleaseMonth: month })}
         />
       )}
 
       {editorMode !== null && (
         <ProductEditorDialog
-          key={editorMode.kind === 'edit' ? editorMode.product.id : 'create'}
+          key={editorMode.kind === 'edit' ? editorMode.product.id : `create-${editorMode.defaultReleaseMonth}`}
           mode={editorMode}
           onClose={() => setEditorMode(null)}
           onSaved={handleSaved}
+          onSavedAndContinued={() => void loadProducts()}
         />
       )}
     </div>

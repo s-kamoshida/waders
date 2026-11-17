@@ -7,9 +7,11 @@
  *  - 送信前に共有の検証ルールで確かめ、誤りは入力欄の下に表示する。サーバーが返した入力の誤りも同様に表示する
  *  - 削除は確認のうえで行う（元に戻せない）
  *  - アーカイブされた商品の編集では、発売月を変更できなくし、「リストに戻す」ボタンを表示する（issue #9）
- * 保存・削除に成功したら onSaved を呼ぶ。
+ *  - 追加では、保存ボタンの横のプルダウンで保存の方法（「保存」「保存して続けて追加」）を選べる。選んだ方法はモーダルを
+ *    開いている間保つ。「保存して続けて追加」では、保存した後もモーダルを開いたまま次の商品を入力できる（issue #16）
+ * 保存・削除に成功したら onSaved を、「保存して続けて追加」で保存したら onSavedAndContinued を呼ぶ。
  */
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
   PRODUCT_STATUSES,
   collectFieldErrors,
@@ -36,6 +38,19 @@ export type ProductEditorDialogProps = {
    * 渡した場合、発売月は変更できない（発売月は「リストに戻す」で変える）。
    */
   readonly onRestoreRequested?: () => void;
+  /**
+   * 追加の場合に渡すと、保存ボタンの横に保存の方法のプルダウンを表示する。「保存して続けて追加」で保存したときに呼ぶ（モーダルは閉じない）。
+   * 次の入力では、商品名・金額・送料・URL を空に戻し、発売月・ステータス・キャンセル可・受注期限を残す。
+   */
+  readonly onSavedAndContinued?: () => void;
+};
+
+/** 保存の方法。save は保存して閉じる、saveAndContinue は保存して続けて追加する。 */
+type SaveMethod = 'save' | 'saveAndContinue';
+
+const SAVE_METHOD_LABELS: Readonly<Record<SaveMethod, string>> = {
+  save: '保存',
+  saveAndContinue: '保存して続けて追加',
 };
 
 /** 入力欄の値（入力中は文字列で持つ）。 */
@@ -80,16 +95,21 @@ function convertToTextOrNull(value: string): string | null {
 }
 
 /** 商品の追加・編集のモーダルを描画する。 */
-export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested }: ProductEditorDialogProps) {
+export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested, onSavedAndContinued }: ProductEditorDialogProps) {
   const [values, setValues] = useState<FormValues>(() => createInitialValues(mode));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [saveMethod, setSaveMethod] = useState<SaveMethod>('save');
+  const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
+  const saveMenuToggleRef = useRef<HTMLButtonElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const idPrefix = useId();
   const title = mode.kind === 'create' ? '商品を追加' : '商品を編集';
   const isArchived = mode.kind === 'edit' && onRestoreRequested !== undefined;
+  const canChooseSaveMethod = mode.kind === 'create' && onSavedAndContinued !== undefined;
 
   useEffect(() => {
     nameInputRef.current?.focus();
@@ -97,10 +117,25 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
 
   const updateValue = <FieldName extends keyof FormValues>(fieldName: FieldName, value: FormValues[FieldName]) => {
     setValues((current) => ({ ...current, [fieldName]: value }));
+    setSavedNotice(null);
   };
 
-  const submitProduct = async (event: FormEvent) => {
-    event.preventDefault();
+  /** 「保存して続けて追加」で保存した後、次の商品の入力に備える。 */
+  const prepareNextProduct = (savedName: string) => {
+    setValues((current) => ({ ...current, name: '', price: '', shippingFee: '', url: '' }));
+    setSavedNotice(SCREEN_MESSAGES.productAddedAndContinue(savedName));
+    setIsSubmitting(false);
+    nameInputRef.current?.focus();
+    onSavedAndContinued?.();
+  };
+
+  /**
+   * 入力を検証して保存する。
+   * @param continuesAdding 「保存して続けて追加」で保存する場合は true（モーダルを閉じない）
+   */
+  const saveProduct = async (continuesAdding: boolean) => {
+    setIsSaveMenuOpen(false);
+    setSavedNotice(null);
     const parsed = productInputSchema.safeParse({
       name: values.name,
       releaseMonth: values.releaseMonth,
@@ -122,7 +157,8 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
     try {
       if (mode.kind === 'create') await createProduct(parsed.data);
       else await updateProduct(mode.product.id, parsed.data);
-      onSaved();
+      if (continuesAdding) prepareNextProduct(parsed.data.name);
+      else onSaved();
     } catch (error) {
       const serverFieldErrors = error instanceof ApiRequestError ? error.fieldErrors : {};
       if (Object.keys(serverFieldErrors).length > 0) setFieldErrors(serverFieldErrors);
@@ -142,6 +178,30 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
       setGeneralError(SCREEN_MESSAGES.productDeleteFailed);
       setIsSubmitting(false);
     }
+  };
+
+  /** 保存の方法を選び、プルダウンを閉じる（保存はしない）。 */
+  const chooseSaveMethod = (nextSaveMethod: SaveMethod) => {
+    setSaveMethod(nextSaveMethod);
+    setIsSaveMenuOpen(false);
+    saveMenuToggleRef.current?.focus();
+  };
+
+  /** プルダウンのキーボード操作。Esc はプルダウンだけを閉じ（モーダルは閉じない）、上下の矢印で項目を移る。 */
+  const handleSaveMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!isSaveMenuOpen) return;
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      setIsSaveMenuOpen(false);
+      saveMenuToggleRef.current?.focus();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+    const currentIndex = items.findIndex((item) => item === document.activeElement);
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    items.at((currentIndex + step) % items.length)?.focus();
   };
 
   /** 入力欄の id と、誤りの文言の id を作る。 */
@@ -165,7 +225,13 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
           if (event.key === 'Escape' && !isSubmitting) onClose();
         }}
       >
-        <form noValidate onSubmit={(event) => void submitProduct(event)}>
+        <form
+          noValidate
+          onSubmit={(event: FormEvent) => {
+            event.preventDefault();
+            void saveProduct(saveMethod === 'saveAndContinue');
+          }}
+        >
           <h2 id={`${idPrefix}-title`} className="dialog-title">
             {title}
           </h2>
@@ -173,6 +239,11 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
             {generalError !== null && (
               <p role="alert" className="dialog-error">
                 {generalError}
+              </p>
+            )}
+            {savedNotice !== null && (
+              <p role="status" className="dialog-notice">
+                {savedNotice}
               </p>
             )}
             <div className="field">
@@ -226,7 +297,7 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
               />
               <label htmlFor={fieldId('cancelable')}>キャンセル可</label>
             </div>
-            <div className="field-row">
+            <div className="field-row field-row--keep-columns">
               <div className="field">
                 <label htmlFor={fieldId('price')}>金額（税込）</label>
                 <input
@@ -300,9 +371,51 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
             <button type="button" className="button" disabled={isSubmitting} onClick={onClose}>
               キャンセル
             </button>
-            <button type="submit" className="button button--primary" disabled={isSubmitting}>
-              保存
-            </button>
+            {!canChooseSaveMethod && (
+              <button type="submit" className="button button--primary" disabled={isSubmitting}>
+                保存
+              </button>
+            )}
+            {canChooseSaveMethod && (
+              <div className="split-button" onKeyDown={handleSaveMenuKeyDown}>
+                <button type="submit" className="button button--primary split-button-main" disabled={isSubmitting}>
+                  {SAVE_METHOD_LABELS[saveMethod]}
+                </button>
+                <button
+                  ref={saveMenuToggleRef}
+                  type="button"
+                  className="button button--primary split-button-toggle"
+                  aria-label="保存方法を選ぶ"
+                  aria-haspopup="menu"
+                  aria-expanded={isSaveMenuOpen}
+                  aria-controls={`${idPrefix}-save-menu`}
+                  disabled={isSubmitting}
+                  onClick={() => setIsSaveMenuOpen((current) => !current)}
+                >
+                  <span className="split-button-caret" aria-hidden="true" />
+                </button>
+                {isSaveMenuOpen && (
+                  <>
+                    <div className="split-button-overlay" aria-hidden="true" onClick={() => setIsSaveMenuOpen(false)} />
+                    <div id={`${idPrefix}-save-menu`} className="split-button-menu" role="menu" aria-label="保存の方法">
+                      {(Object.keys(SAVE_METHOD_LABELS) as SaveMethod[]).map((method) => (
+                        <button
+                          key={method}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={saveMethod === method}
+                          className="split-button-item"
+                          autoFocus={saveMethod === method}
+                          onClick={() => chooseSaveMethod(method)}
+                        >
+                          {SAVE_METHOD_LABELS[method]}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </form>
       </div>
