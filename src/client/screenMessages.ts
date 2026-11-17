@@ -11,6 +11,8 @@ export const SCREEN_MESSAGES = {
   emptyMonth: '商品はありません',
   deleteConfirmationTitle: '商品を削除しますか？',
   deleteConfirmationNote: '削除した商品は元に戻せません。',
+  /** 「保存して続けて追加」で保存した場合の文言（issue #16）。 */
+  productAddedAndContinue: (productName: string) => `「${productName}」を追加しました。`,
   archiveEmpty: 'アーカイブされた商品はありません',
   archivedReleaseMonthHint: '発売月は「リストに戻す」で変更します。',
   restoreTitle: 'リストに戻す',

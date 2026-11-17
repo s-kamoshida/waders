@@ -256,6 +256,8 @@ select {
 }
 
 .product-card-main {
+  /* 余った高さをボタン（押せる範囲）が受け持ち、購入先のリンクをカードの下端にそろえる（issue #16） */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   border: 0;
@@ -415,6 +417,7 @@ select {
 .field {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .field label {
@@ -426,6 +429,7 @@ select {
 .field input,
 .field select {
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 9px;
@@ -453,7 +457,8 @@ select {
 }
 
 @media (max-width: 600px) {
-  .field-row {
+  /* 金額と送料は短いため、スマートフォンの幅でも横に並べる（issue #16） */
+  .field-row:not(.field-row--keep-columns) {
     grid-template-columns: 1fr;
   }
 }
@@ -570,4 +575,153 @@ select {
 
 .confirmation-item .segmented {
   justify-self: start;
+}
+
+/* 月の見出しの追加ボタン（issue #16） */
+.month-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.month-heading .group-toggle {
+  flex: 1;
+  min-width: 0;
+}
+
+.month-add-button {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.month-add-button:hover {
+  border-color: var(--accent);
+}
+
+/* 「保存して続けて追加」で保存したことの表示（issue #16） */
+.dialog-notice {
+  margin: 0;
+  background: #e8f1fd;
+  border: 1px solid #b6cff5;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+/*
+ * iOS Safari の年月・日付の入力欄は独自の最小の幅と中央寄せを持ち、入力欄の幅からはみ出すため、
+ * 標準の見た目を外して幅に収める（issue #16）
+ */
+.field input[type="month"],
+.field input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  min-height: 38px;
+  text-align: left;
+}
+
+.field input[type="month"]::-webkit-date-and-time-value,
+.field input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+}
+
+/*
+ * iOS Safari は文字が 16px 未満の入力欄をタップすると画面を拡大するため、スマートフォン・タッチ操作の端末では 16px にする。
+ * 画面全体のズームは禁止しない（指での拡大はできるまま）（issue #16）
+ */
+@media (max-width: 600px), (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* モーダルを開いている間は、背景の一覧をスクロールさせない（issue #16） */
+html:has(.dialog-backdrop),
+html:has(.dialog-backdrop) body {
+  overflow: hidden;
+}
+
+.dialog-backdrop,
+.dialog {
+  overscroll-behavior: contain;
+}
+
+/* 保存ボタンと保存の方法のプルダウン（issue #16） */
+.split-button {
+  position: relative;
+  display: inline-flex;
+}
+
+.split-button-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.split-button-toggle {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left-color: rgba(255, 255, 255, 0.5);
+  padding: 8px 10px;
+}
+
+.split-button-caret::before {
+  content: "▾";
+}
+
+.split-button-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.split-button-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 2;
+  display: grid;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.split-button-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+  color: inherit;
+  cursor: pointer;
+}
+
+.split-button-item::before {
+  content: "";
+  width: 1em;
+}
+
+.split-button-item[aria-checked="true"]::before {
+  content: "✓";
+}
+
+.split-button-item:hover,
+.split-button-item:focus-visible {
+  background: var(--background);
 }

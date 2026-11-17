@@ -79,6 +79,15 @@ describe('アーカイブの表示', () => {
     expect(await screen.findByRole('button', { name: /^FY25/ })).toBeInTheDocument();
   });
 
+  it('月の見出しに追加ボタンを表示しない（issue #16）', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ releaseMonth: '2026-10' })] } }) });
+
+    render(<ArchivePage currentTime={currentTime} />);
+
+    await screen.findByRole('region', { name: '2026/10' });
+    expect(screen.queryByRole('button', { name: /に商品を追加$/ })).not.toBeInTheDocument();
+  });
+
   it('読み込みに失敗した場合、失敗したことを表示する', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ status: 500, body: { error: { code: 'INTERNAL_ERROR', message: 'x' } } }) });
 
