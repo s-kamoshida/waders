@@ -16,6 +16,8 @@ GitHub への操作とコミットは、すべて `../agent-tools/as-agent` を�
 | B. テストの承認（手順7） | PR 上の Approve（会話の「OK」では進まない） |
 | C. マージ（手順10） | 人のマージ |
 
+**テストの PR は、実装まで同じ PR で進め、実装を含めてからマージする。** テストだけを先にマージすると、main でテストが失敗する状態になるため。テストを承認する人には、承認してもマージしないよう伝える（手順7）。
+
 ## 0. 準備
 
 ```sh
@@ -89,6 +91,7 @@ PR の本文は [pr-template.md](pr-template.md) の「テストレビュー用�
 人に PR の URL と次を伝えて止まる:
 - テスト名と対応する要件の一覧、私が決めたこと、テストにしていない振る舞い
 - 承認は「Files changed」タブ右上の **Review changes → Approve → Submit review** で行うこと（会話欄のコメントは承認として記録されない）
+- **承認してもマージはしないこと。** 実装を同じ PR に追加し、改めて承認を受けてからマージする（main でテストが失敗する状態を作らないため）
 
 「承認した」と言われたら、GitHub 上の記録を確かめる:
 
@@ -99,8 +102,9 @@ as-agent gh api repos/s-kamoshida/waders/pulls/<PR番号>/reviews \
 
 - 承認者が `kamo-agent[bot]` 以外であること
 - 承認の対象（`commit_id`）がテストのコミットであること（承認後にテストを変えていないこと）
+- PR がまだマージされていないこと（`as-agent gh pr view <PR番号> -R s-kamoshida/waders --json state --jq .state` が `OPEN`）
 
-どちらかを満たさなければ実装に進まず、その旨を人に伝える。変更を求めるレビュー（CHANGES_REQUESTED）やコメントがあれば、テストを直して手順6から繰り返す。
+いずれかを満たさなければ実装に進まず、その旨を人に伝える。テストだけの PR がマージされていた場合は、実装用の PR を新しく作ってよいか確認する（main でテストが失敗していることも伝える）。変更を求めるレビュー（CHANGES_REQUESTED）やコメントがあれば、テストを直して手順6から繰り返す。
 
 ## 8. 実装する
 
@@ -123,6 +127,7 @@ npm run build && npm start          # 画面・サーバーに関わる変更は
 ```sh
 git add <変更したファイル>
 as-agent git commit -m "<何をなぜ変えたか>（issue #<番号>）" -m "<変更点の箇条書き>" -m "Refs #<番号>" -m "テストレビュー承認済み: <テストのコミットのハッシュ>（PR #<PR番号>）"
+as-agent gh pr view <PR番号> -R s-kamoshida/waders --json state --jq .state   # OPEN であることを確かめる
 as-agent git push
 as-agent gh pr ready <PR番号> -R s-kamoshida/waders
 as-agent gh pr comment <PR番号> -R s-kamoshida/waders --body-file <本文のファイル>   # pr-template.md の「実装レビュー用」
@@ -130,7 +135,7 @@ as-agent gh pr comment <PR番号> -R s-kamoshida/waders --body-file <本文の�
 
 ## 10. 【関門C】マージを待ち、後片付けをする
 
-マージは人が行う（`as-agent` は `gh pr merge` を拒否する）。マージされたら:
+マージは人が行う（`as-agent` は `gh pr merge` を拒否する）。新しいプッシュでテストの承認は取り消されるため（ブランチ保護）、実装を含めた状態での承認が改めて必要になる。マージされたら:
 
 ```sh
 as-agent gh pr view <PR番号> -R s-kamoshida/waders --json state,mergedBy --jq '"\(.state) \(.mergedBy.login)"'
