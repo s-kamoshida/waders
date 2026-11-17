@@ -77,6 +77,22 @@ describe('一覧の表示', () => {
   });
 });
 
+describe('アーカイブとの振り分け（issue #9）', () => {
+  it('発売月が当月より前の商品は、リストに表示しない', async () => {
+    const products = [
+      createProduct({ name: 'アーカイブされた商品', releaseMonth: '2026-10', status: 'purchased' }),
+      createProduct({ name: '今月の商品', releaseMonth: '2026-11' }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ProductListPage currentTime={currentTime} />);
+
+    expect(await screen.findByText('今月の商品')).toBeInTheDocument();
+    expect(screen.queryByText('アーカイブされた商品')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '2026/10' })).not.toBeInTheDocument();
+  });
+});
+
 describe('折りたたみ', () => {
   it('月の見出しを押した場合、その月の商品を隠し、もう一度押すと表示する', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '11月の商品' })] } }) });

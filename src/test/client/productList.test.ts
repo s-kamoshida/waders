@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildProductListGroups, formatGroupSummary } from '../../client/productList.ts';
+import {
+  buildArchiveGroups,
+  buildProductListGroups,
+  formatArchiveSummary,
+  formatGroupSummary,
+  splitProductsByArchive,
+} from '../../client/productList.ts';
 import type { ProductResponse } from '../../shared/productContract.ts';
 
 let createdCount = 0;
@@ -132,5 +138,57 @@ describe('見出しの個数と合計金額', () => {
 
   it('見出しの集計を「3個（合計 44,000円見込）」と表記する', () => {
     expect(formatGroupSummary({ count: 3, totalYen: 44000 })).toBe('3個（合計 44,000円見込）');
+  });
+});
+
+describe('アーカイブの振り分け（issue #9）', () => {
+  it('発売月が当月より前の商品をアーカイブ、当月以降の商品をリストに振り分ける', () => {
+    const october = createProduct({ releaseMonth: '2026-10' });
+    const november = createProduct({ releaseMonth: '2026-11' });
+    const january = createProduct({ releaseMonth: '2027-01' });
+
+    const { active, archived } = splitProductsByArchive([october, november, january], '2026-11');
+
+    expect(active.map((product) => product.id)).toEqual([november.id, january.id]);
+    expect(archived.map((product) => product.id)).toEqual([october.id]);
+  });
+});
+
+describe('アーカイブのグループ（issue #9）', () => {
+  it('新しい月から順に並べ、商品のある月だけを表示する', () => {
+    const products = [
+      createProduct({ releaseMonth: '2026-08' }),
+      createProduct({ releaseMonth: '2026-10' }),
+      createProduct({ releaseMonth: '2025-12' }),
+    ];
+
+    const groups = buildArchiveGroups(products, { yearMode: 'calendar' });
+
+    expect(groups.map((group) => [group.label, group.months.map((month) => month.month)])).toEqual([
+      ['2026年', ['2026-10', '2026-08']],
+      ['2025年', ['2025-12']],
+    ]);
+  });
+
+  it('年度でまとめることもできる', () => {
+    const groups = buildArchiveGroups([createProduct({ releaseMonth: '2026-03' }), createProduct({ releaseMonth: '2026-04' })], {
+      yearMode: 'fiscal',
+    });
+
+    expect(groups.map((group) => group.label)).toEqual(['FY26', 'FY25']);
+  });
+
+  it('同じ月の中の並び順と集計は、リストと同じ規則にする', () => {
+    const unpurchased = createProduct({ releaseMonth: '2026-10', status: 'unpurchased', price: 18700 });
+    const purchased = createProduct({ releaseMonth: '2026-10', status: 'purchased', price: 22000, shippingFee: 800 });
+
+    const [yearGroup] = buildArchiveGroups([unpurchased, purchased], { yearMode: 'calendar' });
+
+    expect(yearGroup?.months[0]?.products.map((product) => product.id)).toEqual([purchased.id, unpurchased.id]);
+    expect(yearGroup?.months[0]?.summary).toEqual({ count: 1, totalYen: 22800 });
+  });
+
+  it('アーカイブの見出しの集計は、見込みではないため「1個（合計 22,800円）」と表記する', () => {
+    expect(formatArchiveSummary({ count: 1, totalYen: 22800 })).toBe('1個（合計 22,800円）');
   });
 });

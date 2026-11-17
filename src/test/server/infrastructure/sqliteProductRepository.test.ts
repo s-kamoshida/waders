@@ -1,11 +1,12 @@
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Product, ProductId } from '../../../server/domain/product.ts';
 import {
   LATEST_SCHEMA_VERSION,
+  SCHEMA_MIGRATIONS,
   createSqliteProductRepository,
   openProductDatabase,
   type ProductRepository,
@@ -250,3 +251,101 @@ describe('スキーマの移行', () => {
     reopenedDatabase.close();
   });
 });
+
+describe('延期の確認待ち（issue #9）', () => {
+  it('確認待ちの印を付けた場合、確認待ちの一覧に含まれ、外すと含まれなくなる', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+
+    repository.markDeliveryConfirmationPending(product.id);
+    expect(repository.listDeliveryConfirmationPendingProductIds()).toEqual([product.id]);
+
+    repository.clearDeliveryConfirmationPending(product.id);
+    expect(repository.listDeliveryConfirmationPendingProductIds()).toEqual([]);
+  });
+
+  it('同じ商品に二度印を付けても、一覧には 1 件だけ含まれる', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+
+    repository.markDeliveryConfirmationPending(product.id);
+    repository.markDeliveryConfirmationPending(product.id);
+
+    expect(repository.listDeliveryConfirmationPendingProductIds()).toEqual([product.id]);
+  });
+
+  it('商品を削除した場合、確認待ちの印も消える', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+    repository.markDeliveryConfirmationPending(product.id);
+
+    repository.deleteProduct(product.id);
+
+    expect(repository.listDeliveryConfirmationPendingProductIds()).toEqual([]);
+  });
+});
+
+describe('スキーマの移行（版数 1 → 2）', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), 'waders-migration-'));
+  });
+
+  afterEach(() => {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  it('最新のスキーマの版数は 2 である', () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(2);
+  });
+
+  it('版数 1 の DB を開いた場合、版数 2 に移行し、既存の商品と履歴を保ち、確認待ちは空になる', () => {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const versionOneDatabase = new DatabaseSync(databaseFilePath);
+    versionOneDatabase.exec(SCHEMA_MIGRATIONS[0] ?? '');
+    versionOneDatabase.exec('PRAGMA user_version = 1');
+    versionOneDatabase.exec('PRAGMA foreign_keys = ON');
+    const product = createProduct();
+    createSqliteProductRepositoryForVersionOne(versionOneDatabase, product);
+    versionOneDatabase.close();
+
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
+    expect(version.user_version).toBe(2);
+    expect(migratedRepository.findProductById(product.id)).toEqual(product);
+    expect(migratedRepository.listProductHistory(product.id)).toHaveLength(2);
+    expect(migratedRepository.listDeliveryConfirmationPendingProductIds()).toEqual([]);
+    migratedDatabase.close();
+  });
+});
+
+/** 版数 1 の DB に、版数 1 の時点の形で商品と登録時の履歴を書き込む。 */
+function createSqliteProductRepositoryForVersionOne(versionOneDatabase: DatabaseSync, product: Product): void {
+  versionOneDatabase
+    .prepare(
+      `INSERT INTO products (id, name, release_month, status, cancelable, price, shipping_fee, order_deadline, url, category, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      product.id,
+      product.name,
+      product.releaseMonth,
+      product.status,
+      product.cancelable ? 1 : 0,
+      product.price,
+      product.shippingFee,
+      product.orderDeadline,
+      product.url,
+      product.category,
+      product.createdAt,
+      product.updatedAt,
+    );
+  const insertHistory = versionOneDatabase.prepare(
+    `INSERT INTO product_history (product_id, changed_at, change_kind, field, value_before, value_after) VALUES (?, ?, 'user', ?, NULL, ?)`,
+  );
+  insertHistory.run(product.id, product.createdAt, 'status', product.status);
+  insertHistory.run(product.id, product.createdAt, 'release_month', product.releaseMonth);
+}
