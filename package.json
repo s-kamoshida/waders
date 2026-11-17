@@ -1,0 +1,48 @@
+{
+  "name": "waders",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ホビーの予約購入を発売月ごとに管理するセルフホスト型 Web アプリ",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "concurrently --names server,client --prefix-colors blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "node --watch src/server/main.ts",
+    "dev:client": "vite",
+    "build": "vite build",
+    "start": "node src/server/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p .",
+    "lint": "eslint .",
+    "check": "npm run typecheck && npm run lint && npm test"
+  },
+  "dependencies": {
+    "express": "5.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@types/express": "5.0.6",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/supertest": "7.2.1",
+    "@vitejs/plugin-react": "6.3.0",
+    "concurrently": "10.0.7",
+    "eslint": "10.14.0",
+    "jsdom": "31.0.0",
+    "supertest": "7.3.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
+  }
+}
