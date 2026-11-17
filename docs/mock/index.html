@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waders モック</title>
+<style>
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --text: #1f2328;
+  --muted: #656d76;
+  --border: #d0d7de;
+  --accent: #2f6fde;
+  --danger: #c4314b;
+  --consider-bg: #fff4c2;
+  --consider-line: #e0b400;
+  --reserved-bg: #ffffff;
+  --reserved-line: #8c959f;
+  --cancelable-bg: #dce9fc;
+  --cancelable-line: #3b78d8;
+  --purchased-bg: #e3e5e8;
+  --purchased-line: #9aa1a9;
+  --unpurchased-line: #c4314b;
+  --mock-bg: #fff8e6;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 14px; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+
+/* モック用の操作バー（アプリの一部ではない） */
+.mock-bar { background: var(--mock-bg); border-bottom: 2px dashed #e0b400; padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+.mock-bar strong { margin-right: 4px; }
+.mock-bar button { border: 1px solid #d4a800; background: #fff; border-radius: 4px; padding: 3px 8px; }
+.mock-bar button.on { background: #e0b400; color: #fff; }
+.mock-bar .sep { width: 1px; height: 18px; background: #d4a800; margin: 0 4px; }
+
+.frame { margin: 0 auto; background: var(--bg); min-height: calc(100vh - 44px); }
+.frame.phone { max-width: 390px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+
+/* ヘッダー */
+.app-header { position: sticky; top: 0; z-index: 5; background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
+.app-title { font-weight: 700; font-size: 16px; white-space: nowrap; }
+.tabs { display: flex; gap: 2px; background: var(--bg); border-radius: 8px; padding: 2px; }
+.tabs button { white-space: nowrap; border: 0; background: transparent; padding: 5px 12px; border-radius: 6px; color: var(--muted); }
+.tabs button.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.spacer { flex: 1; }
+.icon-button { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; width: 36px; height: 36px; display: grid; place-items: center; color: var(--muted); }
+.add-button { border: 0; background: var(--accent); color: #fff; border-radius: 50%; width: 40px; height: 40px; font-size: 24px; line-height: 1; display: grid; place-items: center; box-shadow: 0 2px 6px rgba(47,111,222,.4); }
+
+/* ツールバー */
+.toolbar { padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.dropdown { position: relative; }
+.dropdown-button { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 5px 30px 5px 12px; font-size: 13px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: relative; }
+.dropdown-button::after { content: "▾"; position: absolute; right: 10px; color: var(--muted); }
+.dropdown-button.active { border-color: var(--accent); color: var(--accent); }
+.dropdown-panel { position: absolute; top: calc(100% + 4px); left: 0; z-index: 10; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.15); padding: 6px; min-width: 220px; display: grid; gap: 2px; }
+.dropdown-panel label { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.dropdown-panel label:hover { background: var(--bg); }
+.dropdown-panel .divider { height: 1px; background: var(--border); margin: 4px 0; }
+.dropdown-panel .clear { border: 0; background: transparent; color: var(--accent); text-align: left; padding: 6px 8px; font-size: 13px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 4px 12px; font-size: 13px; }
+.chip.on { background: var(--text); color: #fff; border-color: var(--text); }
+.segment { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segment button { border: 0; background: var(--surface); padding: 4px 10px; font-size: 13px; }
+.segment button.on { background: var(--text); color: #fff; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; border: 2px solid var(--line); background: var(--fill); }
+.legend .consider { --fill: var(--consider-bg); --line: var(--consider-line); }
+.legend .reserved { --fill: var(--reserved-bg); --line: var(--reserved-line); }
+.legend .cancelable { --fill: var(--cancelable-bg); --line: var(--cancelable-line); }
+.legend .purchased { --fill: var(--purchased-bg); --line: var(--purchased-line); }
+.legend .unpurchased::before { border-style: dashed; border-color: var(--unpurchased-line); background: #fff; }
+
+/* グループ */
+.list { padding: 0 16px 80px; }
+details.year { margin-bottom: 12px; }
+details.year > summary { list-style: none; cursor: pointer; padding: 8px 4px; display: flex; align-items: baseline; gap: 10px; border-bottom: 2px solid var(--text); }
+details.year > summary .label { font-size: 18px; font-weight: 700; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary .caret { display: inline-block; width: 12px; color: var(--muted); transition: transform .15s; }
+details[open] > summary .caret { transform: rotate(90deg); }
+.summary-text { color: var(--muted); font-size: 13px; }
+details.month { margin: 8px 0 0 8px; border-radius: 8px; }
+details.month > summary { list-style: none; cursor: pointer; padding: 6px 4px; display: flex; align-items: baseline; gap: 10px; }
+details.month > summary .label { font-weight: 700; font-size: 15px; }
+details.month.drop-target { outline: 2px dashed var(--accent); outline-offset: 2px; background: rgba(47,111,222,.06); }
+.empty-month { color: var(--muted); font-size: 13px; padding: 4px 8px 10px 24px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; padding: 4px 0 8px 16px; }
+.frame.phone .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); padding-left: 0; }
+
+/* 商品カード */
+.card { background: var(--card-bg); border: 1px solid var(--border); border-left: 5px solid var(--card-line); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; cursor: pointer; text-align: left; padding: 0; color: inherit; }
+.card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.card[draggable="true"] { cursor: grab; }
+.card.consider { --card-bg: var(--consider-bg); --card-line: var(--consider-line); }
+.card.reserved { --card-bg: var(--reserved-bg); --card-line: var(--reserved-line); }
+.card.cancelable { --card-bg: var(--cancelable-bg); --card-line: var(--cancelable-line); }
+.card.purchased { --card-bg: var(--purchased-bg); --card-line: var(--purchased-line); color: var(--muted); }
+.card.unpurchased { --card-bg: #fff; --card-line: var(--unpurchased-line); border: 2px dashed var(--unpurchased-line); border-left-width: 5px; }
+.card.unpurchased .thumb { opacity: .45; }
+.thumb { aspect-ratio: 4 / 3; background: #eceef1; display: grid; place-items: center; color: #a3aab2; position: relative; }
+.thumb svg { width: 44px; height: 44px; }
+.thumb .source { position: absolute; right: 4px; bottom: 4px; font-size: 10px; background: rgba(255,255,255,.85); border-radius: 3px; padding: 0 4px; color: var(--muted); }
+.thumb.card-image { background: linear-gradient(135deg, #cfd8e6, #e9d7e6); color: #6c7a90; }
+.thumb.uploaded { background: linear-gradient(135deg, #d6e7d6, #f1e6c8); color: #6b7a5d; }
+.badge { position: absolute; left: 6px; top: 6px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--card-line); color: #fff; }
+.card.reserved .badge { background: #57606a; }
+.card.unpurchased .badge { background: #fff; color: var(--unpurchased-line); border: 1px solid var(--unpurchased-line); }
+.body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 4px; }
+.name { font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.price { font-size: 13px; }
+.price small { color: var(--muted); }
+.meta { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; }
+.meta a { color: var(--accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deadline { white-space: nowrap; }
+.deadline.soon { color: var(--danger); font-weight: 600; }
+
+/* モーダル */
+dialog { border: 0; border-radius: 12px; padding: 0; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-shadow: 0 10px 40px rgba(0,0,0,.25); color: var(--text); }
+dialog::backdrop { background: rgba(15,20,30,.45); }
+.dialog-head { padding: 14px 18px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
+.dialog-body { padding: 14px 18px; display: grid; gap: 12px; overflow: auto; }
+.dialog-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+.field { display: grid; gap: 4px; }
+.field label, .field .label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.field input, .field select { border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; background: #fff; width: 100%; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.required::after { content: " *"; color: var(--danger); }
+.hint { font-size: 12px; color: var(--muted); }
+.image-pick { display: flex; gap: 10px; align-items: center; }
+.image-pick .thumb { width: 96px; border-radius: 6px; flex: none; }
+.image-pick .actions { display: grid; gap: 6px; }
+.btn { border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 7px 14px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.danger { color: var(--danger); border-color: var(--danger); }
+.btn.danger-fill { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.small { padding: 3px 9px; font-size: 12px; }
+.check { display: flex; gap: 6px; align-items: center; }
+.notice { background: #fff4e5; border: 1px solid #f0c27a; border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.confirm-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
+.confirm-item .title { font-weight: 600; }
+.choice { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice button { border: 1px solid var(--border); background: #fff; border-radius: 999px; padding: 4px 12px; font-size: 13px; }
+.choice button.on { background: var(--text); color: #fff; border-color: var(--text); }
+.category-row { display: flex; gap: 8px; align-items: center; }
+.category-row input { flex: 1; }
+.category-row .count { font-size: 12px; color: var(--muted); width: 48px; text-align: right; }
+
+/* ログイン */
+.login { max-width: 360px; margin: 12vh auto 0; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; display: grid; gap: 14px; }
+.login h1 { margin: 0; font-size: 18px; text-align: center; }
+.error { color: var(--danger); font-size: 13px; }
+
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #1f2328; color: #fff; padding: 8px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.show { opacity: 1; }
+
+.frame.phone .app-title { display: none; }
+.frame.phone .app-header { gap: 8px; }
+.frame.phone .row { grid-template-columns: 1fr; }
+@media (max-width: 600px) {
+  .app-header { gap: 8px; }
+  .app-title { display: none; }
+  .row { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="mock-bar">
+  <strong>モック:</strong>
+  <button data-screen="list" class="on">リスト</button>
+  <button data-screen="archive">アーカイブ</button>
+  <button data-screen="login">ログイン</button>
+  <button data-open="delayDialog">延期の確認</button>
+  <button data-open="categoryDialog">カテゴリーの管理</button>
+  <button data-open="mismatchDialog">カテゴリーの不整合</button>
+  <span class="sep"></span>
+  <button data-width="pc" class="on">PC</button>
+  <button data-width="phone">スマートフォン</button>
+  <span class="sep"></span>
+  <span>今日を 2026/11/17 として表示。データはサンプル。</span>
+</div>
+
+<div class="frame" id="frame">
+  <div id="appScreen">
+    <header class="app-header">
+      <div class="app-title">Waders</div>
+      <nav class="tabs">
+        <button data-screen="list" class="on">リスト</button>
+        <button data-screen="archive">アーカイブ</button>
+      </nav>
+      <div class="spacer"></div>
+      <button class="icon-button" title="カテゴリーの管理" data-open="categoryDialog">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
+      </button>
+      <button class="add-button" title="商品を追加" id="addButton">＋</button>
+    </header>
+
+    <div class="toolbar">
+      <div class="dropdown" id="categoryFilter"><button type="button" class="dropdown-button" id="categoryButton"></button><div class="dropdown-panel" id="categoryPanel" hidden></div></div>
+      <div class="segment" id="yearMode">
+        <button data-mode="calendar" class="on">暦年</button>
+        <button data-mode="fiscal">年度</button>
+      </div>
+      <div class="legend">
+        <span class="reserved">予約済</span>
+        <span class="cancelable">予約済（キャンセル可）</span>
+        <span class="consider">検討中</span>
+        <span class="unpurchased">未購入</span>
+        <span class="purchased">購入済</span>
+      </div>
+    </div>
+
+    <main class="list" id="list"></main>
+  </div>
+
+  <div id="loginScreen" hidden>
+    <form class="login" id="loginForm">
+      <h1>Waders</h1>
+      <div class="field"><label for="loginId">ID</label><input id="loginId" autocomplete="username"></div>
+      <div class="field"><label for="loginPassword">パスワード</label><input id="loginPassword" type="password" autocomplete="current-password"></div>
+      <div class="error" id="loginError" hidden>ID またはパスワードが違います。</div>
+      <button class="btn primary" type="submit">ログイン</button>
+      <div class="hint">認証が有効な場合のみ表示する。失敗が続くと一定時間ログインできなくなる。</div>
+    </form>
+  </div>
+</div>
+
+<!-- 商品の追加・編集 -->
+<dialog id="editDialog">
+  <form method="dialog" id="editForm">
+    <div class="dialog-head"><span id="editTitle">商品を編集</span><button class="icon-button" value="cancel" formnovalidate>✕</button></div>
+    <div class="dialog-body">
+      <div class="image-pick">
+        <div class="thumb" id="editThumb"></div>
+        <div class="actions">
+          <button type="button" class="btn small">画像をアップロード</button>
+          <button type="button" class="btn small">URL からカード画像を取得</button>
+          <span class="hint">優先: アップロード → カード画像 → 共通アイコン</span>
+        </div>
+      </div>
+      <div class="field"><label class="required" for="fieldName">商品名</label><input id="fieldName" required></div>
+      <div class="row">
+        <div class="field"><label class="required" for="fieldMonth">発売月</label><input id="fieldMonth" type="month" required></div>
+        <div class="field"><label class="required" for="fieldStatus">ステータス</label>
+          <select id="fieldStatus"><option>検討中</option><option>予約済</option><option>購入済</option><option>未購入</option></select>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="fieldCancelable"> キャンセル可（予約済のとき）</label>
+      <div class="row">
+        <div class="field"><label for="fieldPrice">金額（税込）</label><input id="fieldPrice" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label for="fieldShipping">送料（税込）</label><input id="fieldShipping" type="number" min="0" inputmode="numeric"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="fieldDeadline">受注期限</label><input id="fieldDeadline" type="date"></div>
+        <div class="field"><label for="fieldCategory">カテゴリー</label><select id="fieldCategory"></select></div>
+      </div>
+      <div class="field"><label for="fieldUrl">URL</label><input id="fieldUrl" type="url" placeholder="https://"><span class="hint">購入先はドメインから表示（例: shop-a.example.jp）</span></div>
+    </div>
+    <div class="dialog-foot">
+      <button type="button" class="btn danger" id="deleteButton">削除</button>
+      <div class="spacer"></div>
+      <button class="btn" value="cancel" formnovalidate>キャンセル</button>
+      <button class="btn primary" value="save" id="saveButton">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 削除の確認 -->
+<dialog id="deleteDialog">
+  <form method="dialog">
+    <div class="dialog-head">商品を削除しますか？</div>
+    <div class="dialog-body"><div id="deleteName"></div><div class="hint">削除した商品は元に戻せません。</div></div>
+    <div class="dialog-foot"><div class="spacer"></div><button class="btn" value="cancel">キャンセル</button><button class="btn danger-fill" value="delete">削除する</button></div>
+  </form>
+</dialog>
+
+<!-- アーカイブからの復帰 -->
+<dialog id="restoreDialog">
+  <form method="dialog" id="restoreForm">
+    <div class="dialog-head">リストに戻す</div>
+    <div class="dialog-body">
+      <div id="restoreName" class="confirm-item"></div>
+      <div class="notice">発売月が過去のため、当月以降の発売月を設定してください。</div>
+      <div class="field"><label class="required" for="restoreMonth">新しい発売月</label><input id="restoreMonth" type="month" min="2026-11" required></div>
+      <div class="hint">ステータスはアーカイブ時に自動で変わる前（<span id="restoreStatus"></span>）に戻ります。</div>
+    </div>
+    <div class="dialog-foot"><div class="spacer"></div><button class="btn" value="cancel" formnovalidate>キャンセル</button><button class="btn primary" value="restore">戻す</button></div>
+  </form>
+</dialog>
+
+<!-- 延期の確認（起動時） -->
+<dialog id="delayDialog">
+  <form method="dialog">
+    <div class="dialog-head">発売月を過ぎた予約商品の確認</div>
+    <div class="dialog-body">
+      <div class="hint">次の商品は発売月を過ぎたため、購入済にしてアーカイブしました。届いたかどうかを教えてください。回答しなかった商品は次回も表示します。</div>
+      <div class="confirm-item">
+        <div class="title">メタルフレーム ＜試作機＞ 改修型</div>
+        <div class="hint">発売月 2026/10 ・ 予約済 → 購入済</div>
+        <div class="choice" data-choice><button type="button">届いた</button><button type="button" data-delay>延期された</button><button type="button">買わなかった</button></div>
+        <div class="field" hidden><label>新しい発売月</label><input type="month" min="2026-11"></div>
+      </div>
+      <div class="confirm-item">
+        <div class="title">アクションフィギュア ハナ</div>
+        <div class="hint">発売月 2026/10 ・ 予約済（キャンセル可） → 購入済</div>
+        <div class="choice" data-choice><button type="button">届いた</button><button type="button" data-delay>延期された</button><button type="button">買わなかった</button></div>
+        <div class="field" hidden><label>新しい発売月</label><input type="month" min="2026-11"></div>
+      </div>
+    </div>
+    <div class="dialog-foot"><button class="btn" value="later">あとで</button><div class="spacer"></div><button class="btn primary" value="ok">回答を保存</button></div>
+  </form>
+</dialog>
+
+<!-- カテゴリーの管理 -->
+<dialog id="categoryDialog">
+  <form method="dialog">
+    <div class="dialog-head">カテゴリーの管理<button class="icon-button" value="cancel">✕</button></div>
+    <div class="dialog-body">
+      <div class="category-row"><input value="スケールフィギュア"><span class="count">9件</span><button type="button" class="btn small danger" data-category-delete>削除</button></div>
+      <div class="category-row"><input value="可動フィギュア"><span class="count">6件</span><button type="button" class="btn small danger" data-category-delete>削除</button></div>
+      <div class="category-row"><input placeholder="新しいカテゴリー"><span class="count"></span><button type="button" class="btn small">追加</button></div>
+      <div class="hint">変更はカテゴリーの定義（デプロイした環境の設定）に保存します。名前を変えると、そのカテゴリーの商品も新しい名前になります。</div>
+      <div class="notice" id="categoryDeleteNotice" hidden>
+        「可動フィギュア」は 6 件の商品が使っています。商品をどうしますか？
+        <div class="choice" style="margin-top:8px"><button type="button">「スケールフィギュア」に移す</button><button type="button">カテゴリー未設定にする</button></div>
+      </div>
+    </div>
+    <div class="dialog-foot"><div class="spacer"></div><button class="btn" value="cancel">閉じる</button><button class="btn primary" value="save">保存</button></div>
+  </form>
+</dialog>
+
+<!-- カテゴリーの不整合 -->
+<dialog id="mismatchDialog">
+  <form method="dialog">
+    <div class="dialog-head">カテゴリーの定義にないカテゴリーがあります</div>
+    <div class="dialog-body">
+      <div class="hint">カテゴリーの定義が変更されたため、次のカテゴリーを使っている商品があります。</div>
+      <div class="confirm-item">
+        <div class="title">「プライズ」（3 件）</div>
+        <div class="choice" data-choice><button type="button">定義に追加する</button><button type="button" data-move>別のカテゴリーに移す</button><button type="button">カテゴリー未設定にする</button></div>
+        <div class="field" hidden><label>移す先</label><select><option>スケールフィギュア</option><option>可動フィギュア</option></select></div>
+      </div>
+    </div>
+    <div class="dialog-foot"><button class="btn" value="later">あとで</button><div class="spacer"></div><button class="btn primary" value="ok">反映する</button></div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const TODAY = new Date(2026, 10, 17);
+const CURRENT_MONTH = "2026-11";
+let categories = ["スケールフィギュア", "可動フィギュア"];
+
+// status: 検討中 / 予約済 / 購入済 / 未購入。archived: アーカイブ済み。previousStatus: 自動遷移の前
+let products = [
+  { id: 1, name: "メタルフレーム ＜試作機＞ 宇宙仕様 可動フィギュア", month: "2026-11", status: "予約済", cancelable: false, price: 19800, shipping: 0, category: "可動フィギュア", url: "https://shop-a.example.jp/item/1001", image: "card" },
+  { id: 2, name: "〇〇レーン △△ 昼寝Ver. 1/4 完成品フィギュア（再販）", month: "2026-11", status: "予約済", cancelable: true, price: 32780, shipping: 800, category: "スケールフィギュア", url: "https://shop-b.example.com/products/22", image: "uploaded" },
+  { id: 3, name: "オリジナルキャラクター シュガー ver. 1/7 フィギュア", month: "2026-11", status: "検討中", price: 24200, shipping: 0, deadline: "2026-11-20", category: "スケールフィギュア", url: "https://shop-c.example.net/p/3" },
+  { id: 4, name: "ファンタジー剣士 カナリア 1/7 フィギュア", month: "2026-11", status: "未購入", price: 18700, shipping: 660, deadline: "2026-11-10", category: "スケールフィギュア" },
+  { id: 5, name: "ロボットアクション ＜機動兵器＞ Z型 アニメカラー", month: "2026-12", status: "予約済", cancelable: false, price: 9900, shipping: 0, category: "可動フィギュア", url: "https://shop-a.example.jp/item/1005", image: "card" },
+  { id: 6, name: "アクションフィギュア セカンド・フォーム", month: "2026-12", status: "検討中", price: 13200, deadline: "2026-12-10", category: "可動フィギュア", url: "https://shop-b.example.com/products/56" },
+  { id: 7, name: "メイド武装 ブレード ストロベリーVer. 1/6 完成品フィギュア", month: "2026-12", status: "予約済", cancelable: true, price: 27500, shipping: 1000, category: "スケールフィギュア", url: "https://shop-d.example.jp/goods/7" },
+  { id: 8, name: "【限定販売】エルフの村人 パイン 1/6 完成品フィギュア", month: "2027-01", status: "予約済", cancelable: false, price: 30800, shipping: 0, category: "スケールフィギュア", url: "https://shop-e.example.jp/limited/8", image: "uploaded" },
+  { id: 9, name: "メタルフレーム ＜試作機＞ 第二形態", month: "2027-01", status: "検討中", price: 26400, deadline: "2026-11-22", category: "可動フィギュア", url: "https://shop-a.example.jp/item/1009" },
+  { id: 10, name: "てのひらサイズ ミニキャラ 完成品フィギュア", month: "2027-02", status: "予約済", cancelable: true, price: 6600, shipping: 0, category: "スケールフィギュア" },
+  { id: 11, name: "【限定販売】楽園シリーズ ガブリエラ 完成品フィギュア", month: "2027-02", status: "検討中", price: 22000, deadline: "2027-01-15", category: "スケールフィギュア", url: "https://shop-f.example.com/item/11" },
+  { id: 12, name: "〇〇レーン 大鳥 ナイトプール 1/6 完成品フィギュア", month: "2027-03", status: "予約済", cancelable: false, price: 35200, shipping: 0, category: "スケールフィギュア", image: "card", url: "https://shop-b.example.com/products/12" },
+  { id: 13, name: "ぷにもふ マオ（フィギュア）【限定品】", month: "2027-03", status: "予約済", cancelable: false, category: "スケールフィギュア" },
+  { id: 14, name: "アクションフィギュア バニースーツ シルヴァ", month: "2027-04", status: "予約済", cancelable: false, price: 16500, shipping: 0, category: "可動フィギュア", url: "https://shop-g.example.jp/item/14" },
+  { id: 15, name: "アクションフィギュア アニー：サマーVer.", month: "2027-06", status: "検討中", price: 14300, deadline: "2027-02-28", category: "可動フィギュア" },
+  // アーカイブ
+  { id: 20, name: "メタルフレーム ＜試作機＞ 改修型", month: "2026-10", status: "購入済", previousStatus: "予約済", archived: true, price: 22000, shipping: 0, category: "可動フィギュア", image: "card", url: "https://shop-a.example.jp/item/1020" },
+  { id: 21, name: "アクションフィギュア ハナ", month: "2026-10", status: "購入済", previousStatus: "予約済", cancelable: true, archived: true, price: 12100, shipping: 0, category: "可動フィギュア" },
+  { id: 22, name: "スイムスーツシルエット 競泳水着Ver. 1/7 フィギュア", month: "2026-10", status: "未購入", previousStatus: "検討中", archived: true, price: 19800, category: "スケールフィギュア" },
+  { id: 23, name: "すーぱーキャット White ver. 1/7 フィギュア", month: "2026-09", status: "購入済", previousStatus: "予約済", archived: true, price: 17600, shipping: 900, category: "スケールフィギュア", image: "uploaded" },
+];
+
+let screen = "list";
+let selectedCategories = new Set(); // 空ならすべて表示
+const UNSET_CATEGORY = "カテゴリー未設定";
+let yearMode = "calendar";
+let editingId = null;
+let draggingId = null;
+
+const statusOrder = { "予約済": 0, "予約済（キャンセル可）": 1, "検討中": 2, "未購入": 3, "購入済": 4 };
+const statusClass = { "予約済": "reserved", "予約済（キャンセル可）": "cancelable", "検討中": "consider", "未購入": "unpurchased", "購入済": "purchased" };
+
+function displayStatus(product) {
+  if (product.status === "予約済" && product.cancelable) return "予約済（キャンセル可）";
+  return product.status;
+}
+function formatYen(value) { return value.toLocaleString("ja-JP") + "円"; }
+function formatMonth(month) { return month.replace("-", "/"); }
+function daysUntil(dateText) { return Math.ceil((new Date(dateText + "T00:00:00") - TODAY) / 86400000); }
+function isDeadlineSoon(product) {
+  if (product.status !== "検討中" || !product.deadline) return false;
+  const days = daysUntil(product.deadline);
+  return days >= 0 && days <= 7;
+}
+function domainOf(url) { try { return new URL(url).hostname; } catch { return ""; } }
+function addMonths(month, count) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const date = new Date(year, monthNumber - 1 + count, 1);
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0");
+}
+function yearKeyOf(month) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (yearMode === "calendar") return { key: String(year), label: year + "年" };
+  const fiscalYear = monthNumber >= 4 ? year : year - 1;
+  return { key: "FY" + fiscalYear, label: "FY" + String(fiscalYear).slice(2) + "（" + fiscalYear + "/04〜" + (fiscalYear + 1) + "/03）" };
+}
+function summarize(items) {
+  const counted = items.filter(product => product.status !== "未購入");
+  const total = counted.reduce((sum, product) => sum + (product.price ?? 0) + (product.price != null ? (product.shipping ?? 0) : 0), 0);
+  return counted.length + "個（合計 " + formatYen(total) + (screen === "archive" ? "）" : "見込）");
+}
+
+const iconPlaceholder = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 11h18M12 7v13M12 7c-1.5-3-5-3.5-5-1.5S10 7 12 7Zm0 0c1.5-3 5-3.5 5-1.5S14 7 12 7Z"/></svg>';
+
+function thumbHtml(product) {
+  if (product.image === "uploaded") return '<div class="thumb uploaded">' + iconPlaceholder + '<span class="source">アップロード画像</span>';
+  if (product.image === "card") return '<div class="thumb card-image">' + iconPlaceholder + '<span class="source">カード画像</span>';
+  return '<div class="thumb">' + iconPlaceholder;
+}
+
+function cardHtml(product) {
+  const status = displayStatus(product);
+  const warning = isDeadlineSoon(product) ? "⚠️ " : "";
+  const price = product.price != null
+    ? formatYen(product.price) + (product.shipping ? " <small>＋送料 " + formatYen(product.shipping) + "</small>" : " <small>送料無料</small>")
+    : '<small>金額未入力</small>';
+  const deadline = product.deadline && product.status === "検討中"
+    ? '<span class="deadline' + (isDeadlineSoon(product) ? " soon" : "") + '">期限 ' + product.deadline.slice(5).replace("-", "/") + "</span>"
+    : "<span></span>";
+  const shop = product.url ? '<a href="' + product.url + '" target="_blank" rel="noopener" data-stop>' + domainOf(product.url) + "</a>" : "";
+  const draggable = product.archived ? "" : ' draggable="true"';
+  return '<button class="card ' + statusClass[status] + '" data-id="' + product.id + '"' + draggable + ">"
+    + thumbHtml(product) + '<span class="badge">' + status + "</span></div>"
+    + '<div class="body"><div class="name">' + warning + product.name + "</div>"
+    + '<div class="price">' + price + "</div>"
+    + '<div class="meta">' + deadline + shop + "</div></div></button>";
+}
+
+function visibleProducts() {
+  return products.filter(product => Boolean(product.archived) === (screen === "archive"))
+    .filter(product => selectedCategories.size === 0 || selectedCategories.has(product.category ?? UNSET_CATEGORY));
+}
+
+function monthsToShow(items) {
+  if (screen === "archive") return [...new Set(items.map(product => product.month))].sort().reverse();
+  const activeMonths = products.filter(product => !product.archived).map(product => product.month);
+  const lastMonth = activeMonths.sort().at(-1) ?? CURRENT_MONTH;
+  const months = [];
+  for (let month = CURRENT_MONTH; month <= lastMonth; month = addMonths(month, 1)) months.push(month);
+  return months;
+}
+
+function render() {
+  const items = visibleProducts();
+  const years = new Map();
+  for (const month of monthsToShow(items)) {
+    const year = yearKeyOf(month);
+    if (!years.has(year.key)) years.set(year.key, { label: year.label, months: [] });
+    years.get(year.key).months.push(month);
+  }
+  let html = "";
+  for (const year of years.values()) {
+    const yearItems = items.filter(product => year.months.includes(product.month));
+    html += '<details class="year" open><summary><span class="caret">▶</span><span class="label">' + year.label + '</span><span class="summary-text">' + summarize(yearItems) + "</span></summary>";
+    for (const month of year.months) {
+      const monthItems = items.filter(product => product.month === month)
+        .sort((left, right) => statusOrder[displayStatus(left)] - statusOrder[displayStatus(right)] || left.id - right.id);
+      html += '<details class="month" open data-month="' + month + '"><summary><span class="caret">▶</span><span class="label">' + formatMonth(month) + '</span><span class="summary-text">' + summarize(monthItems) + "</span></summary>";
+      html += monthItems.length
+        ? '<div class="grid">' + monthItems.map(cardHtml).join("") + "</div>"
+        : '<div class="empty-month">商品はありません' + (screen === "list" ? "（ここへドラッグして移動できます）" : "") + "</div>";
+      html += "</details>";
+    }
+    html += "</details>";
+  }
+  if (!years.size) html = '<div class="empty-month">表示する商品はありません</div>';
+  document.getElementById("list").innerHTML = html;
+}
+
+function renderChips() {
+  const button = document.getElementById("categoryButton");
+  button.textContent = "カテゴリー: " + (selectedCategories.size === 0 ? "すべて" : [...selectedCategories].join("、"));
+  button.classList.toggle("active", selectedCategories.size > 0);
+  const names = [...categories, UNSET_CATEGORY];
+  document.getElementById("categoryPanel").innerHTML = names
+    .map((name, index) => (index === categories.length ? '<div class="divider"></div>' : "")
+      + '<label><input type="checkbox" data-filter-category="' + name + '"' + (selectedCategories.has(name) ? " checked" : "") + "> " + name + "</label>").join("")
+    + '<div class="divider"></div><button type="button" class="clear" data-filter-clear>選択を解除（すべて表示）</button>';
+  document.getElementById("fieldCategory").innerHTML = '<option value="">（未設定）</option>' + categories.map(name => "<option>" + name + "</option>").join("");
+}
+
+function showToast(text) {
+  const toast = document.getElementById("toast");
+  toast.textContent = text;
+  toast.classList.add("show");
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.remove("show"), 2200);
+}
+
+function setScreen(name) {
+  screen = name;
+  document.querySelectorAll("[data-screen]").forEach(button => button.classList.toggle("on", button.dataset.screen === name));
+  document.getElementById("appScreen").hidden = name === "login";
+  document.getElementById("loginScreen").hidden = name !== "login";
+  document.getElementById("addButton").hidden = name === "archive";
+  if (name !== "login") render();
+}
+
+function openEditor(product) {
+  editingId = product ? product.id : null;
+  document.getElementById("editTitle").textContent = product ? "商品を編集" : "商品を追加";
+  document.getElementById("deleteButton").hidden = !product;
+  document.getElementById("editThumb").outerHTML = (product ? thumbHtml(product) : '<div class="thumb">' + iconPlaceholder).replace('class="thumb', 'id="editThumb" class="thumb') + "</div>";
+  document.getElementById("fieldName").value = product?.name ?? "";
+  document.getElementById("fieldMonth").value = product?.month ?? CURRENT_MONTH;
+  document.getElementById("fieldStatus").value = product?.status ?? "検討中";
+  document.getElementById("fieldCancelable").checked = Boolean(product?.cancelable);
+  document.getElementById("fieldPrice").value = product?.price ?? "";
+  document.getElementById("fieldShipping").value = product?.shipping ?? "";
+  document.getElementById("fieldDeadline").value = product?.deadline ?? "";
+  document.getElementById("fieldCategory").value = product?.category ?? "";
+  document.getElementById("fieldUrl").value = product?.url ?? "";
+  document.getElementById("editDialog").showModal();
+}
+
+function openRestore(product) {
+  editingId = product.id;
+  document.getElementById("restoreName").innerHTML = '<div class="title">' + product.name + '</div><div class="hint">発売月 ' + formatMonth(product.month) + " ・ " + product.status + "</div>";
+  document.getElementById("restoreStatus").textContent = product.previousStatus;
+  document.getElementById("restoreMonth").value = CURRENT_MONTH;
+  document.getElementById("restoreDialog").showModal();
+}
+
+document.addEventListener("click", event => {
+  const target = event.target;
+  if (target.closest("[data-stop]")) { event.stopPropagation(); return; }
+  const screenButton = target.closest("[data-screen]");
+  if (screenButton) { setScreen(screenButton.dataset.screen); return; }
+  const openButton = target.closest("[data-open]");
+  if (openButton) { document.getElementById(openButton.dataset.open).showModal(); return; }
+  const widthButton = target.closest("[data-width]");
+  if (widthButton) {
+    document.querySelectorAll("[data-width]").forEach(button => button.classList.toggle("on", button === widthButton));
+    document.getElementById("frame").classList.toggle("phone", widthButton.dataset.width === "phone");
+    return;
+  }
+  const panel = document.getElementById("categoryPanel");
+  if (target.closest("#categoryButton")) { panel.hidden = !panel.hidden; return; }
+  if (target.closest("[data-filter-clear]")) { selectedCategories.clear(); renderChips(); render(); return; }
+  if (!target.closest("#categoryPanel")) panel.hidden = true;
+  const modeButton = target.closest("[data-mode]");
+  if (modeButton) {
+    yearMode = modeButton.dataset.mode;
+    document.querySelectorAll("[data-mode]").forEach(button => button.classList.toggle("on", button === modeButton));
+    render();
+    return;
+  }
+  const card = target.closest(".card");
+  if (card) {
+    const product = products.find(item => item.id === Number(card.dataset.id));
+    if (product.archived) openRestore(product); else openEditor(product);
+    return;
+  }
+  const choiceButton = target.closest("[data-choice] button");
+  if (choiceButton) {
+    const group = choiceButton.parentElement;
+    group.querySelectorAll("button").forEach(button => button.classList.toggle("on", button === choiceButton));
+    const extra = group.nextElementSibling;
+    if (extra?.classList.contains("field")) extra.hidden = !(choiceButton.hasAttribute("data-delay") || choiceButton.hasAttribute("data-move"));
+    return;
+  }
+  if (target.closest("[data-category-delete]")) { document.getElementById("categoryDeleteNotice").hidden = false; return; }
+});
+
+document.getElementById("categoryPanel").addEventListener("change", event => {
+  const name = event.target.dataset.filterCategory;
+  if (!name) return;
+  if (event.target.checked) selectedCategories.add(name); else selectedCategories.delete(name);
+  renderChips();
+  render();
+});
+document.getElementById("addButton").addEventListener("click", () => openEditor(null));
+document.getElementById("deleteButton").addEventListener("click", () => {
+  document.getElementById("deleteName").textContent = products.find(item => item.id === editingId).name;
+  document.getElementById("deleteDialog").showModal();
+});
+
+document.getElementById("editDialog").addEventListener("close", event => {
+  if (event.target.returnValue !== "save") return;
+  const numberOrNull = id => document.getElementById(id).value === "" ? null : Number(document.getElementById(id).value);
+  const values = {
+    name: document.getElementById("fieldName").value,
+    month: document.getElementById("fieldMonth").value,
+    status: document.getElementById("fieldStatus").value,
+    cancelable: document.getElementById("fieldCancelable").checked,
+    price: numberOrNull("fieldPrice"),
+    shipping: numberOrNull("fieldShipping"),
+    deadline: document.getElementById("fieldDeadline").value || null,
+    category: document.getElementById("fieldCategory").value || null,
+    url: document.getElementById("fieldUrl").value || null,
+  };
+  if (editingId == null) {
+    products.push({ id: Math.max(...products.map(item => item.id)) + 1, ...values });
+    showToast("商品を追加しました");
+  } else {
+    Object.assign(products.find(item => item.id === editingId), values);
+    showToast("商品を保存しました");
+  }
+  render();
+});
+
+document.getElementById("deleteDialog").addEventListener("close", event => {
+  if (event.target.returnValue !== "delete") return;
+  products = products.filter(item => item.id !== editingId);
+  document.getElementById("editDialog").close();
+  showToast("商品を削除しました");
+  render();
+});
+
+document.getElementById("restoreDialog").addEventListener("close", event => {
+  if (event.target.returnValue !== "restore") return;
+  const product = products.find(item => item.id === editingId);
+  product.month = document.getElementById("restoreMonth").value;
+  product.status = product.previousStatus;
+  product.archived = false;
+  showToast("リストに戻しました（" + formatMonth(product.month) + "）");
+  render();
+});
+
+document.getElementById("loginForm").addEventListener("submit", event => {
+  event.preventDefault();
+  if (!document.getElementById("loginPassword").value) { document.getElementById("loginError").hidden = false; return; }
+  setScreen("list");
+});
+
+// ドラッグアンドドロップで発売月を移動する（モックは PC のみ。実装ではタッチの長押しにも対応する）
+const list = document.getElementById("list");
+list.addEventListener("dragstart", event => {
+  const card = event.target.closest(".card");
+  if (!card) return;
+  draggingId = Number(card.dataset.id);
+  event.dataTransfer.effectAllowed = "move";
+});
+list.addEventListener("dragover", event => {
+  const month = event.target.closest("details.month");
+  if (!month || draggingId == null) return;
+  event.preventDefault();
+  list.querySelectorAll(".drop-target").forEach(element => element.classList.toggle("drop-target", element === month));
+  month.classList.add("drop-target");
+});
+list.addEventListener("dragleave", event => {
+  const month = event.target.closest("details.month");
+  if (month && !month.contains(event.relatedTarget)) month.classList.remove("drop-target");
+});
+list.addEventListener("drop", event => {
+  const month = event.target.closest("details.month");
+  if (!month || draggingId == null) return;
+  event.preventDefault();
+  const product = products.find(item => item.id === draggingId);
+  draggingId = null;
+  if (product.month === month.dataset.month) { render(); return; }
+  product.month = month.dataset.month;
+  showToast("発売月を " + formatMonth(product.month) + " に移動しました");
+  render();
+});
+list.addEventListener("dragend", () => { draggingId = null; list.querySelectorAll(".drop-target").forEach(element => element.classList.remove("drop-target")); });
+
+renderChips();
+render();
+if (location.hash === "#phone") document.querySelector('[data-width="phone"]').click();
+if (location.hash === "#archive") setScreen("archive");
+</script>
+</body>
+</html>
