@@ -41,7 +41,9 @@
 
 ## 技術スタック（前提）
 
-todoApp と同じ構成を前提とする: Node.js 24（TypeScript を型除去で直接実行）/ React / Express / SQLite（better-sqlite3）/ Zod / Vitest / Vite。変える場合は先に本書を更新する。
+Node.js 24（TypeScript を型除去で直接実行）/ React / Express / SQLite（Node.js 標準の `node:sqlite`）/ Zod / Vitest / Vite。変える場合は先に本書を更新する。
+
+- SQLite は Node.js 標準の `node:sqlite` を使う（issue #7）。ネイティブモジュールの better-sqlite3 と違い、Raspberry Pi でのビルドやインストール時スクリプトの許可が要らないため。
 
 ## コーディング規約
 
@@ -94,7 +96,7 @@ todoApp と同じ構成を前提とする: Node.js 24（TypeScript を型除去�
 
 - Node.js 24 以上が必要。
 - 動作環境は Raspberry Pi 3B / 3B+（Homebridge の Raspbian イメージ 64-bit 版、arm64、メモリ 1GB。空き容量も少ない）。Node.js 24 には 32-bit ARM（armv7l）の公式ビルドがないため、32-bit 版のイメージでは動かない。
-  - ネイティブモジュールを含むパッケージ（better-sqlite3 など）を追加するときは、linux-arm64 で動くことを確かめる。画像処理など重い処理を Raspberry Pi で行う場合は、メモリと時間に収まるかを確かめる。
+  - ネイティブモジュールを含むパッケージを追加するときは（できるだけ避ける）、linux-arm64 で動くことを確かめる。画像処理など重い処理を Raspberry Pi で行う場合は、メモリと時間に収まるかを確かめる。
   - Homebridge が使うポートと重ならないようにする。Homebridge のサービスや設定を変更しない。
   - Node.js は Homebridge のもの（`/opt/homebridge/bin/node`）を共用する。Homebridge の更新で Node.js の版が変わり得るため、Node.js 24 以降の特定の版にしかない機能に頼らない。
   - 画面のビルドは PC で行い、Raspberry Pi では `npm ci --omit=dev` だけを行う。**サーバーが実行時に読み込むパッケージは `dependencies` に入れる**（`devDependencies` は Raspberry Pi に入らない）。
