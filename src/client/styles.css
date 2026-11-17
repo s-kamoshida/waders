@@ -391,6 +391,8 @@ select {
 
 .dialog-footer {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
   padding: 12px 18px;
@@ -428,6 +430,11 @@ select {
   border-radius: 6px;
   padding: 8px 9px;
   background: #ffffff;
+}
+
+.field input:disabled {
+  background: var(--background);
+  color: var(--muted);
 }
 
 .field input[aria-invalid="true"] {
@@ -473,6 +480,7 @@ select {
   background: #ffffff;
   border-radius: 6px;
   padding: 8px 14px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -496,4 +504,70 @@ select {
   background: var(--danger);
   border-color: var(--danger);
   color: #ffffff;
+}
+
+/* タブ（リスト・アーカイブ。issue #9） */
+.application-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--background);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.tab {
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  padding: 5px 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab--selected {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* アーカイブ（issue #9） */
+.archive-page {
+  padding-top: 12px;
+}
+
+.empty-archive {
+  margin: 24px 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* 延期の確認（issue #9） */
+.confirmation-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.confirmation-item-name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.confirmation-item .segmented {
+  justify-self: start;
 }

@@ -117,8 +117,38 @@ export const productSchema = z.object({
 /** API が返す商品。 */
 export type ProductResponse = z.infer<typeof productSchema>;
 
+/**
+ * 一覧（GET /api/products）の商品のスキーマ。
+ * deliveryConfirmationPending は、予約済から自動で購入済になり、延期の確認（届いたかどうか）を待っているか（issue #9）。
+ */
+export const productListItemSchema = productSchema.extend({ deliveryConfirmationPending: z.boolean().default(false) });
+
+/** 一覧の商品。 */
+export type ProductListItem = z.infer<typeof productListItemSchema>;
+
 /** 商品の一覧（GET /api/products）の応答のスキーマ。 */
-export const productListResponseSchema = z.object({ products: z.array(productSchema) });
+export const productListResponseSchema = z.object({ products: z.array(productListItemSchema) });
+
+/** リストに戻す（POST /api/products/:productId/restore）の本文のスキーマ。当月以降かはサーバーが現在時刻で確かめる。 */
+export const restoreRequestSchema = z.object({ releaseMonth: releaseMonthSchema });
+
+/** リストに戻すの本文。 */
+export type RestoreRequest = z.infer<typeof restoreRequestSchema>;
+
+/**
+ * 延期の確認への回答（POST /api/products/:productId/delivery-confirmation）の本文のスキーマ。
+ *  - arrived: 届いた（購入済のまま）
+ *  - postponed: 延期された（新しい発売月で予約済に戻す。当月以降かはサーバーが確かめる）
+ *  - notPurchased: 買わなかった（未購入にする）
+ */
+export const deliveryConfirmationRequestSchema = z.discriminatedUnion('answer', [
+  z.object({ answer: z.literal('arrived') }),
+  z.object({ answer: z.literal('postponed'), releaseMonth: releaseMonthSchema }),
+  z.object({ answer: z.literal('notPurchased') }),
+]);
+
+/** 延期の確認への回答。 */
+export type DeliveryConfirmationRequest = z.infer<typeof deliveryConfirmationRequestSchema>;
 
 /** API のエラーの応答のスキーマ。fieldErrors は入力の誤りがあった項目ごとの文言。 */
 export const apiErrorResponseSchema = z.object({

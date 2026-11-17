@@ -3,24 +3,25 @@
  *
  * 所属: クライアント（画面）
  * 責務:
- *  - 商品の一覧を読み込み、年・月のグループ（見出しに個数と合計金額の見込み）で表示する。0 件の月も表示する
+ *  - 商品の一覧を読み込み、発売月が当月以降の商品を年・月のグループ（見出しに個数と合計金額の見込み）で表示する。
+ *    0 件の月も表示する。当月より前の商品はアーカイブの画面に表示する（issue #9）
  *  - 年・月の折りたたみと、暦年・年度の切り替え（端末ごとに記憶）
  *  - ＋ボタンで追加、商品を押して編集・削除のモーダルを開き、保存後に読み込み直す
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ProductResponse } from '../../shared/productContract.ts';
-import { ProductCard } from '../components/ProductCard.tsx';
+import type { ProductListItem } from '../../shared/productContract.ts';
 import { ProductEditorDialog, type ProductEditorMode } from '../components/ProductEditorDialog.tsx';
+import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { fetchProducts } from '../productApiClient.ts';
 import { formatDateInJapan, formatMonthInJapan } from '../productDisplay.ts';
-import { buildProductListGroups, formatGroupSummary, type YearMode } from '../productList.ts';
+import { buildProductListGroups, formatGroupSummary, splitProductsByArchive, type YearMode } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 
 /** 暦年・年度の切り替えを覚えておくための、ブラウザの保存領域のキー。 */
 export const YEAR_MODE_STORAGE_KEY = 'waders.yearMode';
 
-/** 保存されている年のまとめ方を読む。読めない・不正な値なら暦年。 */
-function readStoredYearMode(): YearMode {
+/** 保存されている年のまとめ方を読む。読めない・不正な値なら暦年。アーカイブの画面でも使う。 */
+export function readStoredYearMode(): YearMode {
   try {
     const storedValue = localStorage.getItem(YEAR_MODE_STORAGE_KEY);
     return storedValue === 'fiscal' ? 'fiscal' : 'calendar';
@@ -38,27 +39,19 @@ function storeYearMode(yearMode: YearMode): void {
   }
 }
 
-/** 集合に値があれば取り除き、なければ加えた新しい集合を返す。 */
-function toggleSetValue(values: ReadonlySet<string>, value: string): Set<string> {
-  const nextValues = new Set(values);
-  if (nextValues.has(value)) nextValues.delete(value);
-  else nextValues.add(value);
-  return nextValues;
-}
-
 /** ProductListPage の引数。 */
 export type ProductListPageProps = {
   /** 現在時刻。日本時間の当月・今日の判定に使う。 */
   readonly currentTime: Date;
+  /** 一覧を読み込んだときに、読み込んだすべての商品（アーカイブを含む）を渡す。同じ関数を渡し続けること。 */
+  readonly onProductsLoaded?: (products: readonly ProductListItem[]) => void;
 };
 
 /** 商品の一覧の画面を描画する。 */
-export function ProductListPage({ currentTime }: ProductListPageProps) {
-  const [products, setProducts] = useState<ProductResponse[] | null>(null);
+export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPageProps) {
+  const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [hasLoadError, setHasLoadError] = useState(false);
   const [yearMode, setYearMode] = useState<YearMode>(readStoredYearMode);
-  const [collapsedYearKeys, setCollapsedYearKeys] = useState<ReadonlySet<string>>(new Set());
-  const [collapsedMonths, setCollapsedMonths] = useState<ReadonlySet<string>>(new Set());
   const [editorMode, setEditorMode] = useState<ProductEditorMode | null>(null);
 
   const today = formatDateInJapan(currentTime);
@@ -66,19 +59,21 @@ export function ProductListPage({ currentTime }: ProductListPageProps) {
 
   const loadProducts = useCallback(async () => {
     try {
-      setProducts(await fetchProducts());
+      const loadedProducts = await fetchProducts();
+      setProducts(loadedProducts);
       setHasLoadError(false);
+      onProductsLoaded?.(loadedProducts);
     } catch {
       setHasLoadError(true);
     }
-  }, []);
+  }, [onProductsLoaded]);
 
   useEffect(() => {
     void loadProducts();
   }, [loadProducts]);
 
   const yearGroups = useMemo(
-    () => buildProductListGroups(products ?? [], { currentMonth, yearMode }),
+    () => buildProductListGroups(splitProductsByArchive(products ?? [], currentMonth).active, { currentMonth, yearMode }),
     [products, currentMonth, yearMode],
   );
 
@@ -131,59 +126,14 @@ export function ProductListPage({ currentTime }: ProductListPageProps) {
         </p>
       )}
 
-      {products !== null &&
-        yearGroups.map((yearGroup) => {
-          const isYearExpanded = !collapsedYearKeys.has(yearGroup.key);
-          return (
-            <section key={yearGroup.key} className="year-group">
-              <h2 className="year-heading">
-                <button
-                  type="button"
-                  className="group-toggle"
-                  aria-expanded={isYearExpanded}
-                  onClick={() => setCollapsedYearKeys((current) => toggleSetValue(current, yearGroup.key))}
-                >
-                  <span className="group-caret" aria-hidden="true" />
-                  <span className="group-label">{yearGroup.label}</span>{' '}
-                  <span className="group-summary">{formatGroupSummary(yearGroup.summary)}</span>
-                </button>
-              </h2>
-              {isYearExpanded &&
-                yearGroup.months.map((monthGroup) => {
-                  const isMonthExpanded = !collapsedMonths.has(monthGroup.month);
-                  return (
-                    <section key={monthGroup.month} className="month-group" aria-label={monthGroup.label}>
-                      <h3 className="month-heading">
-                        <button
-                          type="button"
-                          className="group-toggle"
-                          aria-expanded={isMonthExpanded}
-                          onClick={() => setCollapsedMonths((current) => toggleSetValue(current, monthGroup.month))}
-                        >
-                          <span className="group-caret" aria-hidden="true" />
-                          <span className="group-label">{monthGroup.label}</span>{' '}
-                          <span className="group-summary">{formatGroupSummary(monthGroup.summary)}</span>
-                        </button>
-                      </h3>
-                      {isMonthExpanded && monthGroup.products.length === 0 && <p className="empty-month">{SCREEN_MESSAGES.emptyMonth}</p>}
-                      {isMonthExpanded && monthGroup.products.length > 0 && (
-                        <div className="product-grid">
-                          {monthGroup.products.map((product) => (
-                            <ProductCard
-                              key={product.id}
-                              product={product}
-                              today={today}
-                              onSelect={(selected) => setEditorMode({ kind: 'edit', product: selected })}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </section>
-                  );
-                })}
-            </section>
-          );
-        })}
+      {products !== null && (
+        <ProductGroupList
+          yearGroups={yearGroups}
+          formatSummary={formatGroupSummary}
+          today={today}
+          onSelect={(selected) => setEditorMode({ kind: 'edit', product: selected })}
+        />
+      )}
 
       {editorMode !== null && (
         <ProductEditorDialog

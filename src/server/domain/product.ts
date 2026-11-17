@@ -62,3 +62,35 @@ export class ProductNotFoundError extends Error {
     this.name = 'ProductNotFoundError';
   }
 }
+
+/** アーカイブされていない商品をリストに戻そうとした場合のエラー。 */
+export class ProductNotArchivedError extends Error {
+  constructor(productId: ProductId) {
+    super(`商品はアーカイブされていません: ${productId}`);
+    this.name = 'ProductNotArchivedError';
+  }
+}
+
+/** リストに戻す・延期の確認で指定した新しい発売月が、当月より前の場合のエラー。 */
+export class RestoreReleaseMonthInPastError extends Error {
+  constructor(releaseMonth: string) {
+    super(`新しい発売月が当月より前です: ${releaseMonth}`);
+    this.name = 'RestoreReleaseMonthInPastError';
+  }
+}
+
+/** 延期の確認を待っていない商品に回答した場合のエラー（回答済み・手で購入済にした商品など）。 */
+export class DeliveryConfirmationNotPendingError extends Error {
+  constructor(productId: ProductId) {
+    super(`商品は延期の確認を待っていません: ${productId}`);
+    this.name = 'DeliveryConfirmationNotPendingError';
+  }
+}
+
+/** アーカイブされた商品の発売月を、編集で変えようとした場合のエラー（発売月は「リストに戻す」で変える）。 */
+export class ArchivedReleaseMonthChangeError extends Error {
+  constructor(productId: ProductId) {
+    super(`アーカイブされた商品の発売月は編集で変更できません: ${productId}`);
+    this.name = 'ArchivedReleaseMonthChangeError';
+  }
+}
