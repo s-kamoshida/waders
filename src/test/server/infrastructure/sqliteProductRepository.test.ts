@@ -42,6 +42,11 @@ function createProduct(overrides: Partial<Product> = {}): Product {
   };
 }
 
+/** 登録時に記録される履歴を除いた、変更の履歴を返す。 */
+function listChangesAfterRegistration(productId: ProductId) {
+  return repository.listProductHistory(productId).filter((entry) => entry.valueBefore !== null);
+}
+
 describe('登録と取得', () => {
   it('商品を登録した場合、ID で取得でき、すべての項目が保存されている', () => {
     const product = createProduct();
@@ -82,6 +87,17 @@ describe('登録と取得', () => {
 describe('更新と変更履歴', () => {
   const change = { changedAt: '2026-11-18T00:00:00.000Z', changeKind: 'user' } as const;
 
+  it('商品を登録した場合、登録日時に、登録時のステータスと発売月を変更前なしの履歴として記録する', () => {
+    const product = createProduct({ status: 'considering', releaseMonth: '2026-12' });
+
+    repository.insertProduct(product);
+
+    expect(repository.listProductHistory(product.id)).toEqual([
+      { changedAt: product.createdAt, changeKind: 'user', field: 'status', valueBefore: null, valueAfter: 'considering' },
+      { changedAt: product.createdAt, changeKind: 'user', field: 'releaseMonth', valueBefore: null, valueAfter: '2026-12' },
+    ]);
+  });
+
   it('商品を更新した場合、変更が保存され、true を返す', () => {
     const product = createProduct();
     repository.insertProduct(product);
@@ -104,7 +120,7 @@ describe('更新と変更履歴', () => {
       { changedAt: change.changedAt, changeKind: 'automatic' },
     );
 
-    expect(repository.listProductHistory(product.id)).toEqual([
+    expect(listChangesAfterRegistration(product.id)).toEqual([
       { changedAt: change.changedAt, changeKind: 'automatic', field: 'status', valueBefore: 'reserved', valueAfter: 'purchased' },
     ]);
   });
@@ -115,7 +131,7 @@ describe('更新と変更履歴', () => {
 
     repository.updateProduct({ ...product, releaseMonth: '2027-02', updatedAt: change.changedAt }, change);
 
-    expect(repository.listProductHistory(product.id)).toEqual([
+    expect(listChangesAfterRegistration(product.id)).toEqual([
       { changedAt: change.changedAt, changeKind: 'user', field: 'releaseMonth', valueBefore: '2026-12', valueAfter: '2027-02' },
     ]);
   });
@@ -129,7 +145,7 @@ describe('更新と変更履歴', () => {
       change,
     );
 
-    expect(repository.listProductHistory(product.id).map((entry) => entry.field).sort()).toEqual([
+    expect(listChangesAfterRegistration(product.id).map((entry) => entry.field).sort()).toEqual([
       'releaseMonth',
       'status',
     ]);
@@ -141,7 +157,7 @@ describe('更新と変更履歴', () => {
 
     repository.updateProduct({ ...product, name: '変更後の名前', updatedAt: change.changedAt }, change);
 
-    expect(repository.listProductHistory(product.id)).toEqual([]);
+    expect(listChangesAfterRegistration(product.id)).toEqual([]);
   });
 
   it('履歴は古い順に返す', () => {
@@ -152,7 +168,12 @@ describe('更新と変更履歴', () => {
     const purchased = { ...reserved, status: 'purchased' as const, updatedAt: '2026-12-01T00:00:00.000Z' };
     repository.updateProduct(purchased, { changedAt: purchased.updatedAt, changeKind: 'automatic' });
 
-    expect(repository.listProductHistory(product.id).map((entry) => entry.valueAfter)).toEqual(['reserved', 'purchased']);
+    expect(repository.listProductHistory(product.id).map((entry) => `${entry.field}:${entry.valueAfter}`)).toEqual([
+      'status:considering',
+      'releaseMonth:2026-12',
+      'status:reserved',
+      'status:purchased',
+    ]);
   });
 });
 
