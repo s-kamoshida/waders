@@ -4,12 +4,15 @@
  * 責務:
  *  - 設定の読み込み（設定ファイルがなければひな形から作成）
  *  - 商品の DB を開き、スキーマを最新の版数に移行する
- *  - Web アプリケーションの組み立てと、HTTP サーバーの起動
+ *  - 各層の組み立て（依存の注入）と、HTTP サーバーの起動
  *  - 終了シグナルを受けたときの後始末
  * 実行: `node src/server/main.ts`（Node.js 24 の型除去機能で TypeScript を直接実行する）
  */
+import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
-import { openProductDatabase } from './infrastructure/sqliteProductRepository.ts';
+import { createProductService } from './application/productService.ts';
+import type { ProductId } from './domain/product.ts';
+import { createSqliteProductRepository, openProductDatabase } from './infrastructure/sqliteProductRepository.ts';
 import { createWebApplication } from './presentation/webApplication.ts';
 import { SETTINGS_TEMPLATE_FILE_PATH, ServerSettingsError, loadServerSettings } from './serverSettings.ts';
 import { writeStructuredLog } from './structuredLogger.ts';
@@ -39,7 +42,12 @@ function startServer(): void {
   const settings = loadSettingsOrExit();
   const databaseFilePath = join(settings.dataDirectory, DATABASE_FILE_NAME);
   const database = openProductDatabase(databaseFilePath);
-  const application = createWebApplication({ clientBuildDirectory: CLIENT_BUILD_DIRECTORY });
+  const productService = createProductService({
+    productRepository: createSqliteProductRepository(database),
+    clock: { now: () => new Date() },
+    generateProductId: () => randomUUID() as ProductId,
+  });
+  const application = createWebApplication({ clientBuildDirectory: CLIENT_BUILD_DIRECTORY, productService });
 
   const server = application.listen(settings.port, (error?: Error) => {
     if (error !== undefined) {
