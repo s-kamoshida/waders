@@ -52,7 +52,7 @@ describe('一覧の表示', () => {
 
     const november = await screen.findByRole('region', { name: '2026/11' });
     expect(within(november).getByText('11月の予約商品')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /2026\/11/ })).toHaveTextContent('1個（合計 19,800円見込）');
+    expect(screen.getByRole('button', { name: /^2026\/11 / })).toHaveTextContent('1個（合計 19,800円見込）');
     expect(within(screen.getByRole('region', { name: '2026/12' })).getByText('商品はありません')).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: '2027/01' })).getByText('1月の予約商品')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^2026年/ })).toHaveTextContent('1個（合計 19,800円見込）');
@@ -97,7 +97,7 @@ describe('折りたたみ', () => {
   it('月の見出しを押した場合、その月の商品を隠し、もう一度押すと表示する', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '11月の商品' })] } }) });
     render(<ProductListPage currentTime={currentTime} />);
-    const monthHeading = await screen.findByRole('button', { name: /2026\/11/ });
+    const monthHeading = await screen.findByRole('button', { name: /^2026\/11 / });
     expect(monthHeading).toHaveAttribute('aria-expanded', 'true');
 
     await userEvent.click(monthHeading);
@@ -214,7 +214,7 @@ describe('月ごとの追加ボタン（issue #16）', () => {
     render(<ProductListPage currentTime={currentTime} />);
     await screen.findByText('商品 ' + String(createdCount));
 
-    await userEvent.click(screen.getByRole('button', { name: /^2026\/11/ }));
+    await userEvent.click(screen.getByRole('button', { name: /^2026\/11 / }));
     await userEvent.click(screen.getByRole('button', { name: '2026/11に商品を追加' }));
 
     expect(within(screen.getByRole('dialog', { name: '商品を追加' })).getByLabelText('発売月')).toHaveValue('2026-11');
