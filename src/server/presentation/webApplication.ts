@@ -4,14 +4,18 @@
  * 所属: プレゼンテーション層
  * 責務:
  *  - すべての応答（API・画面のファイル）へのセキュリティヘッダーの付与
- *  - API のルーティングと、存在しない API への 404 の応答
+ *  - API のミドルウェアとルーティングの順序（Content-Type の確認 → JSON の解析 → 各 API → 404）
+ *  - 状態を変えるリクエストに Content-Type: application/json を必須にする（CSRF 対策）
  *  - ビルド済みの画面の配信（画面の URL には index.html を返す）
  *  - 想定外のエラーを 500 の応答に変え、詳細はログにだけ出す
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import type { ProductService } from '../application/productService.ts';
 import { writeStructuredLog } from '../structuredLogger.ts';
+import type { ApiErrorResponse } from '../../shared/productContract.ts';
+import { createProductRouter } from './productRouter.ts';
 
 /**
  * すべての応答に付けるセキュリティヘッダー。
@@ -45,16 +49,54 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
 };
 
-/** API のエラーの応答の形式。 */
-export type ApiErrorResponse = {
-  readonly error: { readonly code: string; readonly message: string };
-};
-
 /** createWebApplication の引数。 */
 export type WebApplicationOptions = {
   /** ビルド済みの画面のフォルダ。存在しなければ画面は配信せず、API だけを提供する（開発時は Vite が画面を配信する）。 */
   readonly clientBuildDirectory: string;
+  /** 商品の操作。 */
+  readonly productService: ProductService;
 };
+
+/** 状態を変える HTTP メソッド。 */
+const STATE_CHANGING_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** エラーの応答を返す。 */
+function sendApiError(response: Response, status: number, code: string, message: string): void {
+  const body: ApiErrorResponse = { error: { code, message } };
+  response.status(status).json(body);
+}
+
+/**
+ * 状態を変えるリクエストに Content-Type: application/json を必須にするミドルウェア。
+ * HTML のフォームなど、ブラウザが事前確認（CORS のプリフライト）なしに他のサイトから送れる形式を拒否する。
+ * 本文のないリクエスト（削除など）も対象とする。
+ */
+function rejectNonJsonStateChangingRequests(request: Request, response: Response, next: NextFunction): void {
+  if (!STATE_CHANGING_METHODS.has(request.method)) {
+    next();
+    return;
+  }
+  const mediaType = (request.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase();
+  if (mediaType === 'application/json') {
+    next();
+    return;
+  }
+  sendApiError(response, 415, 'UNSUPPORTED_MEDIA_TYPE', 'Content-Type は application/json にしてください。');
+}
+
+/** 本文の JSON の解析に失敗したなど、リクエストそのものの誤りを 4xx にする。それ以外は次のエラー処理へ渡す。 */
+function handleRequestBodyError(error: unknown, _request: Request, response: Response, next: NextFunction): void {
+  const errorType = typeof error === 'object' && error !== null && 'type' in error ? error.type : undefined;
+  if (errorType === 'entity.parse.failed') {
+    sendApiError(response, 400, 'INVALID_JSON', 'リクエストの本文を JSON として読めません。');
+    return;
+  }
+  if (errorType === 'entity.too.large') {
+    sendApiError(response, 413, 'PAYLOAD_TOO_LARGE', 'リクエストの本文が大きすぎます。');
+    return;
+  }
+  next(error);
+}
 
 /** すべての応答にセキュリティヘッダーを付けるミドルウェア。 */
 function applySecurityHeaders(_request: Request, response: Response, next: NextFunction): void {
@@ -64,8 +106,7 @@ function applySecurityHeaders(_request: Request, response: Response, next: NextF
 
 /** 存在しない API に 404 を返す。 */
 function respondApiNotFound(_request: Request, response: Response): void {
-  const body: ApiErrorResponse = { error: { code: 'API_NOT_FOUND', message: '指定された API はありません。' } };
-  response.status(404).json(body);
+  sendApiError(response, 404, 'API_NOT_FOUND', '指定された API はありません。');
 }
 
 /** 想定外のエラーを 500 にする。詳細は利用者に返さず、ログにだけ出す。 */
@@ -75,13 +116,12 @@ function handleUnexpectedError(error: unknown, request: Request, response: Respo
     path: request.path,
     error: error instanceof Error ? (error.stack ?? error.message) : String(error),
   });
-  const body: ApiErrorResponse = { error: { code: 'INTERNAL_ERROR', message: 'サーバーでエラーが発生しました。' } };
-  response.status(500).json(body);
+  sendApiError(response, 500, 'INTERNAL_ERROR', 'サーバーでエラーが発生しました。');
 }
 
 /**
  * Web アプリケーションを組み立てる。
- * @param options ビルド済みの画面のフォルダ
+ * @param options ビルド済みの画面のフォルダと、商品の操作
  * @returns 待ち受けを開始していない Express のアプリケーション
  */
 export function createWebApplication(options: WebApplicationOptions): express.Express {
@@ -90,10 +130,13 @@ export function createWebApplication(options: WebApplicationOptions): express.Ex
   application.use(applySecurityHeaders);
 
   const apiRouter = express.Router();
+  apiRouter.use(rejectNonJsonStateChangingRequests, express.json({ limit: '100kb' }));
   apiRouter.get('/health', (_request, response) => {
     response.json({ status: 'ok' });
   });
+  apiRouter.use('/products', createProductRouter(options.productService));
   apiRouter.use(respondApiNotFound);
+  apiRouter.use(handleRequestBodyError);
   application.use('/api', apiRouter);
 
   if (existsSync(options.clientBuildDirectory)) {

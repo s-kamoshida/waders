@@ -97,3 +97,50 @@ export const productInputSchema = z.object({
 
 /** 検証済みの商品の入力。 */
 export type ProductInput = z.infer<typeof productInputSchema>;
+
+/** API が返す商品のスキーマ（保存済みの商品。日時は UTC の ISO 8601 文字列）。 */
+export const productSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  releaseMonth: z.string(),
+  status: productStatusSchema,
+  cancelable: z.boolean(),
+  price: z.number().int().nullable(),
+  shippingFee: z.number().int().nullable(),
+  orderDeadline: z.string().nullable(),
+  url: z.string().nullable(),
+  category: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+/** API が返す商品。 */
+export type ProductResponse = z.infer<typeof productSchema>;
+
+/** 商品の一覧（GET /api/products）の応答のスキーマ。 */
+export const productListResponseSchema = z.object({ products: z.array(productSchema) });
+
+/** API のエラーの応答のスキーマ。fieldErrors は入力の誤りがあった項目ごとの文言。 */
+export const apiErrorResponseSchema = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    fieldErrors: z.record(z.string(), z.string()).optional(),
+  }),
+});
+
+/** API のエラーの応答。 */
+export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
+
+/**
+ * 検証のエラーを、項目ごとの最初の文言にまとめる（画面の入力欄の下に表示するため）。
+ * @returns 項目名をキー、文言を値とするオブジェクト
+ */
+export function collectFieldErrors(error: z.ZodError): Record<string, string> {
+  const fieldErrors: Record<string, string> = {};
+  for (const issue of error.issues) {
+    const fieldName = String(issue.path[0] ?? 'form');
+    fieldErrors[fieldName] ??= issue.message;
+  }
+  return fieldErrors;
+}

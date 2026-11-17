@@ -54,3 +54,11 @@ export type ProductHistoryEntry = {
   readonly valueBefore: string | null;
   readonly valueAfter: string;
 };
+
+/** 指定した商品が存在しない場合のエラー。 */
+export class ProductNotFoundError extends Error {
+  constructor(productId: ProductId) {
+    super(`商品が見つかりません: ${productId}`);
+    this.name = 'ProductNotFoundError';
+  }
+}

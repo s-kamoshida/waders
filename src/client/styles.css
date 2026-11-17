@@ -1,7 +1,24 @@
-/* 画面のスタイル。CSP によりインラインのスタイルは使えないため、すべてここにクラスで定義する。 */
+/*
+ * 画面のスタイル。CSP によりインラインのスタイルは使えないため、すべてここにクラスで定義する。
+ * 配色はモック（docs/mock/index.html）に合わせる。
+ */
 :root {
   --background: #f4f5f7;
+  --surface: #ffffff;
   --text: #1f2328;
+  --muted: #656d76;
+  --border: #d0d7de;
+  --accent: #2f6fde;
+  --danger: #c4314b;
+  --considering-background: #fff4c2;
+  --considering-line: #e0b400;
+  --reserved-background: #ffffff;
+  --reserved-line: #8c959f;
+  --cancelable-background: #dce9fc;
+  --cancelable-line: #3b78d8;
+  --purchased-background: #e3e5e8;
+  --purchased-line: #9aa1a9;
+  --unpurchased-line: #c4314b;
 }
 
 * {
@@ -13,13 +30,470 @@ body {
   background: var(--background);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-size: 14px;
 }
 
-.application {
-  padding: 16px;
+button,
+input,
+select {
+  font: inherit;
+}
+
+/* ヘッダー */
+.application-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
 }
 
 .application-title {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
+}
+
+.application-main {
+  padding: 0 16px 80px;
+}
+
+/* ツールバー */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.segmented-option {
+  padding: 5px 12px;
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.segmented-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented-option--selected {
+  background: var(--text);
+  color: #ffffff;
+}
+
+.segmented-option:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.add-button {
+  border: 0;
+  background: var(--accent);
+  color: #ffffff;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(47, 111, 222, 0.4);
+}
+
+.page-error {
+  background: #fdecee;
+  border: 1px solid #f1b8c1;
+  color: var(--danger);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+/* 年・月のグループ */
+.year-group {
+  margin-bottom: 12px;
+}
+
+.year-heading,
+.month-heading {
+  margin: 0;
+  font-size: inherit;
+}
+
+.year-heading {
+  border-bottom: 2px solid var(--text);
+}
+
+.group-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 8px 4px;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.year-heading .group-label {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.month-group {
+  margin: 4px 0 0 8px;
+}
+
+.month-heading .group-label {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.group-summary {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.group-caret::before {
+  content: "▼";
+  display: inline-block;
+  width: 12px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.group-toggle[aria-expanded="false"] .group-caret::before {
+  content: "▶";
+}
+
+.empty-month {
+  margin: 0;
+  padding: 4px 8px 10px 26px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* 1 行の列数は画面の横幅に合わせる */
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 4px 0 8px 18px;
+}
+
+@media (max-width: 600px) {
+  .application-main {
+    padding: 0 12px 80px;
+  }
+
+  .month-group {
+    margin-left: 0;
+  }
+
+  .product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    padding-left: 0;
+  }
+}
+
+/* 商品のカード（ステータスを色で区別する） */
+.product-card {
+  --card-background: var(--reserved-background);
+  --card-line: var(--reserved-line);
+  display: flex;
+  flex-direction: column;
+  background: var(--card-background);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--card-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.product-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.product-card--considering {
+  --card-background: var(--considering-background);
+  --card-line: var(--considering-line);
+}
+
+.product-card--cancelable {
+  --card-background: var(--cancelable-background);
+  --card-line: var(--cancelable-line);
+}
+
+.product-card--purchased {
+  --card-background: var(--purchased-background);
+  --card-line: var(--purchased-line);
+  color: var(--muted);
+}
+
+/* 未購入は購入済のグレーと見分けがつくよう、赤い破線の枠と薄い画像で表す（取り消し線は付けない） */
+.product-card--unpurchased {
+  --card-background: #ffffff;
+  --card-line: var(--unpurchased-line);
+  border: 2px dashed var(--unpurchased-line);
+  border-left-width: 5px;
+}
+
+.product-card--unpurchased .product-card-placeholder {
+  opacity: 0.45;
+}
+
+.product-card-main {
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.product-card-thumbnail {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  background: #eceef1;
+  color: #a3aab2;
+}
+
+.product-card-placeholder {
+  width: 44px;
+  height: 44px;
+}
+
+.product-card-status {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--card-line);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.product-card--reserved .product-card-status {
+  background: #57606a;
+}
+
+.product-card--unpurchased .product-card-status {
+  background: #ffffff;
+  color: var(--unpurchased-line);
+  border: 1px solid var(--unpurchased-line);
+}
+
+.product-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px 4px;
+}
+
+.product-card-name {
+  font-weight: 600;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.product-card-price {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.product-card-shipping {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.product-card-deadline {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.product-card-deadline--warning {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.product-card-shop {
+  padding: 0 10px 8px;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* モーダル */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 20, 30, 0.45);
+}
+
+.dialog {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+
+.dialog--small {
+  width: min(400px, 100%);
+}
+
+.dialog-title {
+  margin: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 16px;
+}
+
+.dialog-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.dialog-footer-spacer {
+  flex: 1;
+}
+
+.dialog-error {
+  margin: 0;
+  background: #fdecee;
+  border: 1px solid #f1b8c1;
+  color: var(--danger);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+}
+
+.field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.field input,
+.field select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 9px;
+  background: #ffffff;
+}
+
+.field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 600px) {
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.delete-target {
+  margin: 0;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.button {
+  border: 1px solid var(--border);
+  background: #ffffff;
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.button--danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.button--danger-filled {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
 }

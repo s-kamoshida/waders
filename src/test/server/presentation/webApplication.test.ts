@@ -3,10 +3,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createWebApplication } from '../../../server/presentation/webApplication.ts';
+import { createWebApplicationTestHarness } from './webApplicationTestHarness.ts';
 
 let temporaryDirectory: string;
 let clientBuildDirectory: string;
+
+/** テスト用の Web アプリケーションを組み立てる。 */
+function createWebApplication(options: { clientBuildDirectory: string }) {
+  return createWebApplicationTestHarness(options.clientBuildDirectory).application;
+}
 
 beforeEach(() => {
   temporaryDirectory = mkdtempSync(join(tmpdir(), 'waders-web-'));
