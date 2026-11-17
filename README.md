@@ -56,7 +56,7 @@ cd waders
 npm ci
 npm run build
 rsync -az --delete --exclude '/data/' --exclude '/node_modules/' -R \
-  package.json package-lock.json config deploy src/server dist/client \
+  package.json package-lock.json config deploy src/server src/shared dist/client \
   pi@raspberrypi.local:/home/pi/waders/
 ```
 
@@ -81,7 +81,7 @@ git pull
 npm ci
 npm run build
 rsync -az --delete --exclude '/data/' --exclude '/node_modules/' -R \
-  package.json package-lock.json config deploy src/server dist/client \
+  package.json package-lock.json config deploy src/server src/shared dist/client \
   pi@raspberrypi.local:/home/pi/waders/
 ```
 
@@ -133,6 +133,13 @@ sudo systemctl restart waders
 | --- | --- | --- |
 | `WADERS_PORT` | 待ち受けるポート番号 | 設定ファイルの `port` |
 | `WADERS_DATA_DIRECTORY` | データのフォルダ（設定ファイルなどを置く場所） | 起動したフォルダの `data` |
+
+データのフォルダには、次のファイルが作られます。バックアップする場合は、Waders を止めてからフォルダごとコピーしてください（バックアップのコマンドは今後追加します）。
+
+| ファイル | 内容 |
+| --- | --- |
+| `settings.json` | 設定 |
+| `waders.sqlite` | 商品と変更履歴の DB |
 
 設定に誤りがある場合は、理由をログに出して起動を止めます。
 
