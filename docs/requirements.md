@@ -137,7 +137,7 @@
 
 ### 動作環境
 
-* 想定する環境は Raspberry Pi 3B+ に Homebridge の Raspbian イメージ（64-bit 版）を入れたもの（<https://github.com/homebridge/homebridge-raspbian-image>）
+* 想定する環境は Raspberry Pi 3B または 3B+ に Homebridge の Raspbian イメージ（64-bit 版）を入れたもの（<https://github.com/homebridge/homebridge-raspbian-image>）（issue #2 で 3B での動作を確認）
 * 同じ機器で動く Homebridge の動作を妨げない（使うポートを分ける、Homebridge とは別のサービスとして動かす）
 * 既定のポートは 8080 とする（issue #1）
 * ポートなどの設定は、デプロイする人が変更できる（issue #1）
