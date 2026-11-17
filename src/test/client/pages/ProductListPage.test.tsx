@@ -237,6 +237,8 @@ describe('連続追加（issue #16）', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
     await userEvent.type(screen.getByLabelText('商品名'), '続けて追加した商品');
+    await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+    await userEvent.click(screen.getByRole('menuitemradio', { name: '保存して続けて追加' }));
     await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
 
     expect(await screen.findByRole('button', { name: /続けて追加した商品/ })).toBeInTheDocument();

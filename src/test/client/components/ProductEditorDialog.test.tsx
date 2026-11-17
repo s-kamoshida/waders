@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProductEditorDialog } from '../../../client/components/ProductEditorDialog.tsx';
@@ -252,34 +252,87 @@ describe('連続追加（issue #16）', () => {
     await userEvent.type(screen.getByLabelText('購入先の URL'), 'https://shop.example.jp/item/1');
   }
 
-  it('追加の場合は「保存して続けて追加」ボタンを表示し、編集の場合は表示しない', () => {
+  /** 保存ボタンの横のプルダウンで、保存の方法を選ぶ。 */
+  async function chooseSaveMethod(label: '保存' | '保存して続けて追加') {
+    await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+    await userEvent.click(screen.getByRole('menuitemradio', { name: label }));
+  }
+
+  /** 追加のモーダルを表示する。 */
+  function renderCreateDialog(callbacks: { onSaved?: () => void; onSavedAndContinued?: () => void } = {}) {
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
+        onClose={vi.fn()}
+        onSaved={callbacks.onSaved ?? vi.fn()}
+        onSavedAndContinued={callbacks.onSavedAndContinued ?? vi.fn()}
+      />,
+    );
+  }
+
+  it('追加の場合は保存ボタンの横に保存の方法のプルダウンを表示し、編集の場合は表示しない', () => {
     stubFetchRoutes({});
     const { unmount } = render(
       <ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} onSavedAndContinued={vi.fn()} />,
     );
-    expect(screen.getByRole('button', { name: '保存して続けて追加' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存方法を選ぶ' })).toHaveAttribute('aria-haspopup', 'menu');
     unmount();
 
     render(<ProductEditorDialog mode={{ kind: 'edit', product: createProduct() }} onClose={vi.fn()} onSaved={vi.fn()} onSavedAndContinued={vi.fn()} />);
-    expect(screen.queryByRole('button', { name: '保存して続けて追加' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '保存方法を選ぶ' })).not.toBeInTheDocument();
   });
 
-  it('「保存して続けて追加」を押した場合、保存して onSavedAndContinued を呼び、モーダルを開いたまま次の入力に備える', async () => {
+  it('プルダウンを開いた場合、「保存」「保存して続けて追加」を表示し、今の方法（最初は「保存」）に印を付ける', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+
+    await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+
+    expect(screen.getByRole('button', { name: '保存方法を選ぶ' })).toHaveAttribute('aria-expanded', 'true');
+    const items = within(screen.getByRole('menu')).getAllByRole('menuitemradio');
+    expect(items.map((item) => [item.textContent, item.getAttribute('aria-checked')])).toEqual([
+      ['保存', 'true'],
+      ['保存して続けて追加', 'false'],
+    ]);
+  });
+
+  it('「保存して続けて追加」を選んだ場合、保存はせずにプルダウンを閉じ、保存ボタンの表示を「保存して続けて追加」にする', async () => {
+    const { requests } = stubFetchRoutes({});
+    renderCreateDialog();
+
+    await chooseSaveMethod('保存して続けて追加');
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存して続けて追加' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
+    expect(requests).toEqual([]);
+  });
+
+  it('プルダウンを Esc キーで閉じた場合、モーダルは閉じない', async () => {
+    stubFetchRoutes({});
+    const onClose = vi.fn();
+    render(
+      <ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={onClose} onSaved={vi.fn()} onSavedAndContinued={vi.fn()} />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+    await userEvent.keyboard('{Escape}');
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '商品を追加' })).toBeInTheDocument();
+  });
+
+  it('「保存して続けて追加」で保存した場合、onSavedAndContinued を呼び、モーダルを開いたまま、保存したことを表示する', async () => {
     const { requests } = stubFetchRoutes({
       'POST /api/products': () => ({ status: 201, body: createProduct({ name: '1つ目の商品' }) }),
     });
     const onSaved = vi.fn();
     const onSavedAndContinued = vi.fn();
-    render(
-      <ProductEditorDialog
-        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
-        onClose={vi.fn()}
-        onSaved={onSaved}
-        onSavedAndContinued={onSavedAndContinued}
-      />,
-    );
+    renderCreateDialog({ onSaved, onSavedAndContinued });
 
     await fillAllFields('1つ目の商品');
+    await chooseSaveMethod('保存して続けて追加');
     await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
 
     await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
@@ -294,16 +347,10 @@ describe('連続追加（issue #16）', () => {
       'POST /api/products': () => ({ status: 201, body: createProduct({ name: '1つ目の商品' }) }),
     });
     const onSavedAndContinued = vi.fn();
-    render(
-      <ProductEditorDialog
-        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
-        onClose={vi.fn()}
-        onSaved={vi.fn()}
-        onSavedAndContinued={onSavedAndContinued}
-      />,
-    );
+    renderCreateDialog({ onSavedAndContinued });
 
     await fillAllFields('1つ目の商品');
+    await chooseSaveMethod('保存して続けて追加');
     await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
     await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
 
@@ -318,28 +365,21 @@ describe('連続追加（issue #16）', () => {
     expect(screen.getByLabelText('商品名')).toHaveFocus();
   });
 
-  it('続けて入力した 2 つ目を「保存」した場合、残した値とともに送り、onSaved を呼ぶ', async () => {
+  it('選んだ方法は保たれ、2 つ目も選び直さずに「保存して続けて追加」で保存でき、残した値とともに送る', async () => {
     const { requests } = stubFetchRoutes({
       'POST /api/products': () => ({ status: 201, body: createProduct() }),
     });
-    const onSaved = vi.fn();
     const onSavedAndContinued = vi.fn();
-    render(
-      <ProductEditorDialog
-        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
-        onClose={vi.fn()}
-        onSaved={onSaved}
-        onSavedAndContinued={onSavedAndContinued}
-      />,
-    );
+    renderCreateDialog({ onSavedAndContinued });
     await fillAllFields('1つ目の商品');
+    await chooseSaveMethod('保存して続けて追加');
     await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
-    await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
+    await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalledTimes(1));
 
     await userEvent.type(screen.getByLabelText('商品名'), '2つ目の商品');
-    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
 
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalledTimes(2));
     expect(requests[1]?.body).toEqual({
       name: '2つ目の商品',
       releaseMonth: '2027-01',
@@ -353,19 +393,33 @@ describe('連続追加（issue #16）', () => {
     });
   });
 
+  it('続けて入力した後に「保存」に戻して保存した場合、onSaved を呼ぶ', async () => {
+    stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+    });
+    const onSaved = vi.fn();
+    const onSavedAndContinued = vi.fn();
+    renderCreateDialog({ onSaved, onSavedAndContinued });
+    await fillAllFields('1つ目の商品');
+    await chooseSaveMethod('保存して続けて追加');
+    await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
+    await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
+
+    await userEvent.type(screen.getByLabelText('商品名'), '最後の商品');
+    await chooseSaveMethod('保存');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(onSavedAndContinued).toHaveBeenCalledTimes(1);
+  });
+
   it('「保存して続けて追加」で入力に誤りがある場合、エラーの文言を表示し、送信せず、入力を残す', async () => {
     const { requests } = stubFetchRoutes({});
     const onSavedAndContinued = vi.fn();
-    render(
-      <ProductEditorDialog
-        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
-        onClose={vi.fn()}
-        onSaved={vi.fn()}
-        onSavedAndContinued={onSavedAndContinued}
-      />,
-    );
+    renderCreateDialog({ onSavedAndContinued });
 
     await userEvent.type(screen.getByLabelText('金額（税込）'), '13200');
+    await chooseSaveMethod('保存して続けて追加');
     await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
 
     expect(screen.getByText('商品名を入力してください。')).toBeInTheDocument();
@@ -379,16 +433,10 @@ describe('連続追加（issue #16）', () => {
       'POST /api/products': () => ({ status: 500, body: { error: { code: 'INTERNAL_ERROR', message: 'x' } } }),
     });
     const onSavedAndContinued = vi.fn();
-    render(
-      <ProductEditorDialog
-        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
-        onClose={vi.fn()}
-        onSaved={vi.fn()}
-        onSavedAndContinued={onSavedAndContinued}
-      />,
-    );
+    renderCreateDialog({ onSavedAndContinued });
 
     await userEvent.type(screen.getByLabelText('商品名'), '保存できない商品');
+    await chooseSaveMethod('保存して続けて追加');
     await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('保存できませんでした。');
