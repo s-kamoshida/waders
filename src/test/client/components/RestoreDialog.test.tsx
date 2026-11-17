@@ -21,6 +21,8 @@ const product: ProductResponse = {
   orderDeadline: null,
   url: null,
   category: null,
+  maker: null,
+  note: null,
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-06-01T00:00:00.000Z',
 };

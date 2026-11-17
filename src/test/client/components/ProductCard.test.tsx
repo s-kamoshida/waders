@@ -20,6 +20,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     orderDeadline: null,
     url: 'https://shop.example.jp/item/1',
     category: null,
+    maker: null,
+    note: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,
@@ -76,6 +78,28 @@ describe('ProductCard', () => {
     expect(screen.getByText('オリジナルキャラクター シュガー ver.')).toBeInTheDocument();
     expect(screen.queryByText(/⚠️/)).not.toBeInTheDocument();
     expect(screen.queryByText(/受注期限/)).not.toBeInTheDocument();
+  });
+
+  it('メーカーがある場合、商品名の上に表示する（issue #18）', () => {
+    render(<ProductCard product={createProduct({ maker: 'メーカーA' })} today={today} onSelect={vi.fn()} />);
+
+    const maker = screen.getByText('メーカーA');
+    const name = screen.getByText('オリジナルキャラクター シュガー ver.');
+    expect(maker.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('備考がある場合、本文は出さずに「備考あり」の印（📝）を表示する（issue #18）', () => {
+    render(<ProductCard product={createProduct({ note: '初回特典付き' })} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.getByRole('img', { name: '備考あり' })).toHaveTextContent('📝');
+    expect(screen.queryByText('初回特典付き')).not.toBeInTheDocument();
+  });
+
+  it('メーカーと備考が未入力の場合、どちらも表示しない（issue #18）', () => {
+    render(<ProductCard product={createProduct()} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.queryByRole('img', { name: '備考あり' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button').querySelector('.product-card-maker')).toBeNull();
   });
 
   it('カードをクリックした場合、その商品を onSelect に渡す', async () => {

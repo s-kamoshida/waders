@@ -26,6 +26,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     orderDeadline: null,
     url: null,
     category: null,
+    maker: null,
+    note: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
@@ -244,5 +246,35 @@ describe('連続追加（issue #16）', () => {
     expect(await screen.findByRole('button', { name: /続けて追加した商品/ })).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: '商品を追加' })).toBeInTheDocument();
     expect(requests.filter((recorded) => recorded.method === 'GET')).toHaveLength(2);
+  });
+});
+
+describe('メーカーの候補（issue #18）', () => {
+  it('追加のモーダルに、登録済みの商品（アーカイブを含む）のメーカーを、重複なく並べて候補として渡す', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({ maker: 'メーカーB' }),
+            createProduct({ maker: 'メーカーA' }),
+            createProduct({ maker: 'メーカーB' }),
+            createProduct({ maker: null }),
+            createProduct({ maker: 'メーカーC', releaseMonth: '2026-09', status: 'purchased' }),
+          ],
+        },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByRole('region', { name: '2026/11' });
+
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+
+    const makerInput = within(screen.getByRole('dialog', { name: '商品を追加' })).getByLabelText('メーカー');
+    const suggestionList = document.getElementById(makerInput.getAttribute('list') ?? '');
+    expect(Array.from(suggestionList?.querySelectorAll('option') ?? []).map((option) => option.value)).toEqual([
+      'メーカーA',
+      'メーカーB',
+      'メーカーC',
+    ]);
   });
 });

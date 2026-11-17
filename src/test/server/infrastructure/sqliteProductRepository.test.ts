@@ -37,6 +37,8 @@ function createProduct(overrides: Partial<Product> = {}): Product {
     orderDeadline: '2026-11-20',
     url: 'https://shop.example.jp/item/1',
     category: 'スケールフィギュア',
+    maker: 'メーカーA',
+    note: '初回特典付き\n分割で届く',
     createdAt: '2026-11-17T01:00:00.000Z',
     updatedAt: '2026-11-17T01:00:00.000Z',
     ...overrides,
@@ -65,6 +67,8 @@ describe('登録と取得', () => {
       orderDeadline: null,
       url: null,
       category: null,
+      maker: null,
+      note: null,
     });
 
     repository.insertProduct(product);
@@ -161,6 +165,17 @@ describe('更新と変更履歴', () => {
     expect(listChangesAfterRegistration(product.id)).toEqual([]);
   });
 
+  it('メーカーと備考を変更した場合、変更が保存され、履歴は記録しない（issue #18）', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+    const updated: Product = { ...product, maker: 'メーカーB', note: null, updatedAt: change.changedAt };
+
+    repository.updateProduct(updated, change);
+
+    expect(repository.findProductById(product.id)).toEqual(updated);
+    expect(listChangesAfterRegistration(product.id)).toEqual([]);
+  });
+
   it('履歴は古い順に返す', () => {
     const product = createProduct({ status: 'considering' });
     repository.insertProduct(product);
@@ -206,6 +221,9 @@ describe('DB の制約（業務ルールの最後の防御）', () => {
     ['上限を超える金額', { price: 10_000_000 }],
     ['負の送料', { shippingFee: -1 }],
     ['日付の形式でない受注期限', { orderDeadline: '2026/11/20' }],
+    ['空のメーカー（issue #18）', { maker: '' }],
+    ['上限の文字数を超えるメーカー（issue #18）', { maker: 'あ'.repeat(101) }],
+    ['上限の文字数を超える備考（issue #18）', { note: 'あ'.repeat(1001) }],
   ])('%s を保存しようとした場合、DB が拒否する', (_label, overrides) => {
     const invalidProduct = { ...createProduct(), ...overrides } as Product;
 
@@ -285,7 +303,7 @@ describe('延期の確認待ち（issue #9）', () => {
   });
 });
 
-describe('スキーマの移行（版数 1 → 2）', () => {
+describe('スキーマの移行（版数 1 から）', () => {
   let temporaryDirectory: string;
 
   beforeEach(() => {
@@ -296,17 +314,17 @@ describe('スキーマの移行（版数 1 → 2）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('最新のスキーマの版数は 2 である', () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(2);
+  it('最新のスキーマの版数は 3 である（issue #18）', () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(3);
   });
 
-  it('版数 1 の DB を開いた場合、版数 2 に移行し、既存の商品と履歴を保ち、確認待ちは空になる', () => {
+  it('版数 1 の DB を開いた場合、最新の版数に移行し、既存の商品と履歴を保ち、確認待ちは空、メーカーと備考は未入力になる', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
     const versionOneDatabase = new DatabaseSync(databaseFilePath);
     versionOneDatabase.exec(SCHEMA_MIGRATIONS[0] ?? '');
     versionOneDatabase.exec('PRAGMA user_version = 1');
     versionOneDatabase.exec('PRAGMA foreign_keys = ON');
-    const product = createProduct();
+    const product = createProduct({ maker: null, note: null });
     createSqliteProductRepositoryForVersionOne(versionOneDatabase, product);
     versionOneDatabase.close();
 
@@ -314,10 +332,45 @@ describe('スキーマの移行（版数 1 → 2）', () => {
     const migratedRepository = createSqliteProductRepository(migratedDatabase);
 
     const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
-    expect(version.user_version).toBe(2);
+    expect(version.user_version).toBe(LATEST_SCHEMA_VERSION);
     expect(migratedRepository.findProductById(product.id)).toEqual(product);
     expect(migratedRepository.listProductHistory(product.id)).toHaveLength(2);
     expect(migratedRepository.listDeliveryConfirmationPendingProductIds()).toEqual([]);
+    migratedDatabase.close();
+  });
+});
+
+describe('スキーマの移行（版数 2 → 3。issue #18）', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), 'waders-migration-'));
+  });
+
+  afterEach(() => {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  it('版数 2 の DB を開いた場合、版数 3 に移行し、既存の商品・履歴・確認待ちを保ち、メーカーと備考は未入力になる', () => {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const versionTwoDatabase = new DatabaseSync(databaseFilePath);
+    versionTwoDatabase.exec('PRAGMA foreign_keys = ON');
+    versionTwoDatabase.exec(SCHEMA_MIGRATIONS[0] ?? '');
+    versionTwoDatabase.exec(SCHEMA_MIGRATIONS[1] ?? '');
+    versionTwoDatabase.exec('PRAGMA user_version = 2');
+    const product = createProduct({ maker: null, note: null });
+    createSqliteProductRepositoryForVersionOne(versionTwoDatabase, product);
+    versionTwoDatabase.prepare('INSERT INTO delivery_confirmations (product_id) VALUES (?)').run(product.id);
+    versionTwoDatabase.close();
+
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
+    expect(version.user_version).toBe(3);
+    expect(migratedRepository.findProductById(product.id)).toEqual(product);
+    expect(migratedRepository.listProductHistory(product.id)).toHaveLength(2);
+    expect(migratedRepository.listDeliveryConfirmationPendingProductIds()).toEqual([product.id]);
     migratedDatabase.close();
   });
 });

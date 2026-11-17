@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAXIMUM_MAKER_LENGTH,
+  MAXIMUM_NOTE_LENGTH,
   MAXIMUM_PRICE_YEN,
   MAXIMUM_PRODUCT_NAME_LENGTH,
   productInputSchema,
@@ -27,6 +29,8 @@ describe('必須項目', () => {
       orderDeadline: null,
       url: null,
       category: null,
+      maker: null,
+      note: null,
     });
   });
 
@@ -121,4 +125,41 @@ describe('URL', () => {
       expect(isValid({ ...minimumInput, url })).toBe(false);
     },
   );
+});
+
+describe('メーカーと備考（issue #18）', () => {
+  it('メーカーの上限は 100 文字、備考の上限は 1,000 文字である', () => {
+    expect(MAXIMUM_MAKER_LENGTH).toBe(100);
+    expect(MAXIMUM_NOTE_LENGTH).toBe(1000);
+  });
+
+  it('前後の空白を取り除き、備考の途中の改行は残す', () => {
+    const product = productInputSchema.parse({ ...minimumInput, maker: '  メーカーA ', note: '\n 初回特典付き\n分割で届く \n' });
+
+    expect(product.maker).toBe('メーカーA');
+    expect(product.note).toBe('初回特典付き\n分割で届く');
+  });
+
+  it('メーカーは上限の文字数までは受け付け、超える場合は文言とともに拒否する', () => {
+    expect(isValid({ ...minimumInput, maker: 'あ'.repeat(MAXIMUM_MAKER_LENGTH) })).toBe(true);
+
+    const result = productInputSchema.safeParse({ ...minimumInput, maker: 'あ'.repeat(MAXIMUM_MAKER_LENGTH + 1) });
+
+    expect(result.error?.issues[0]?.message).toBe('メーカーは 100 文字以内で入力してください。');
+  });
+
+  it('備考は上限の文字数までは受け付け、超える場合は文言とともに拒否する', () => {
+    expect(isValid({ ...minimumInput, note: 'あ'.repeat(MAXIMUM_NOTE_LENGTH) })).toBe(true);
+
+    const result = productInputSchema.safeParse({ ...minimumInput, note: 'あ'.repeat(MAXIMUM_NOTE_LENGTH + 1) });
+
+    expect(result.error?.issues[0]?.message).toBe('備考は 1,000 文字以内で入力してください。');
+  });
+
+  it.each([
+    ['maker', '   '],
+    ['note', ' \n '],
+  ])('%s が空白だけの場合、拒否する（未入力は null で送る）', (fieldName, value) => {
+    expect(isValid({ ...minimumInput, [fieldName]: value })).toBe(false);
+  });
 });
