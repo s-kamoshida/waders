@@ -93,9 +93,13 @@ todoApp と同じ構成を前提とする: Node.js 24（TypeScript を型除去�
 ## 開発環境の注意
 
 - Node.js 24 以上が必要。
-- 動作環境は Raspberry Pi 3B+（Homebridge の Raspbian イメージ 64-bit 版、arm64、メモリ 1GB）。Node.js 24 には 32-bit ARM（armv7l）の公式ビルドがないため、32-bit 版のイメージでは動かない。
+- 動作環境は Raspberry Pi 3B / 3B+（Homebridge の Raspbian イメージ 64-bit 版、arm64、メモリ 1GB。空き容量も少ない）。Node.js 24 には 32-bit ARM（armv7l）の公式ビルドがないため、32-bit 版のイメージでは動かない。
   - ネイティブモジュールを含むパッケージ（better-sqlite3 など）を追加するときは、linux-arm64 で動くことを確かめる。画像処理など重い処理を Raspberry Pi で行う場合は、メモリと時間に収まるかを確かめる。
   - Homebridge が使うポートと重ならないようにする。Homebridge のサービスや設定を変更しない。
+  - Node.js は Homebridge のもの（`/opt/homebridge/bin/node`）を共用する。Homebridge の更新で Node.js の版が変わり得るため、Node.js 24 以降の特定の版にしかない機能に頼らない。
+  - 画面のビルドは PC で行い、Raspberry Pi では `npm ci --omit=dev` だけを行う。**サーバーが実行時に読み込むパッケージは `dependencies` に入れる**（`devDependencies` は Raspberry Pi に入らない）。
+  - サーバーが読み込むフォルダ（例: `src/shared`）を増やした場合は、README の転送（`rsync`）の対象にも加える。
+  - systemd のサービスは、データのフォルダ以外に書き込めない（`deploy/waders.service` の `ProtectSystem=strict`）。データのフォルダ以外に書き込む処理を加える場合は、定義ファイルも直す。
 - npm 11 以降はパッケージのインストール時スクリプトを止めるため、`npm install` の後に `npm install-scripts approve <パッケージ>` と `npm rebuild <パッケージ>` が必要な場合がある。新しいパッケージのスクリプトを許可する場合は、必要性を確認してから個別に許可する。
 - 依存パッケージは `^` を付けない完全一致のバージョンで追加する（`npm install --save-exact`）。
 

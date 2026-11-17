@@ -30,10 +30,87 @@ Waders は、その沼に入っても溺れないための装備を目指して�
 
 ## 動作環境（予定）
 
-- Raspberry Pi 3B+ に [Homebridge の Raspbian イメージ](https://github.com/homebridge/homebridge-raspbian-image)（64-bit 版）を入れた環境を想定しています
+- Raspberry Pi 3B / 3B+ に [Homebridge の Raspbian イメージ](https://github.com/homebridge/homebridge-raspbian-image)（64-bit 版）を入れた環境を想定しています（3B で動作を確認済み）
 - Node.js 24 以上
 
-Raspberry Pi へのインストールと自動起動の手順は、実機での確認（#2）の後に追記します。
+## Raspberry Pi へのインストール
+
+画面のビルドは PC で行い、ビルドしたものを Raspberry Pi に転送します。Raspberry Pi では、動かすのに必要なパッケージだけを入れます。Node.js は Homebridge が使うもの（`/opt/homebridge/bin/node`）を共用します。
+
+### 前提
+
+- Raspberry Pi に [Homebridge の Raspbian イメージ](https://github.com/homebridge/homebridge-raspbian-image)の **64-bit 版**が入っていること（Node.js 24 は 32-bit 版では動きません）
+- Homebridge の Node.js が 24 以上であること（Raspberry Pi で `/opt/homebridge/bin/node -v` を実行して確かめる）
+- PC から Raspberry Pi に SSH で接続できること（以下では `pi@raspberrypi.local`）
+- PC に Node.js 24 以上と rsync があること
+
+ユーザー名や置き場所を変える場合は、以下のコマンドと [deploy/waders.service](deploy/waders.service) の `User`・`WorkingDirectory`・`ReadWritePaths` を合わせて変えてください。
+
+### 初回のインストール
+
+PC で、ビルドして Raspberry Pi に転送します。
+
+```sh
+git clone https://github.com/s-kamoshida/waders.git
+cd waders
+npm ci
+npm run build
+rsync -az --delete --exclude '/data/' --exclude '/node_modules/' -R \
+  package.json package-lock.json config deploy src/server dist/client \
+  pi@raspberrypi.local:/home/pi/waders/
+```
+
+Raspberry Pi で、パッケージを入れてサービスとして登録します。
+
+```sh
+cd ~/waders
+PATH=/opt/homebridge/bin:$PATH npm ci --omit=dev
+sudo install -m 0644 deploy/waders.service /etc/systemd/system/waders.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now waders
+```
+
+同じ LAN の PC やスマートフォンのブラウザで `http://raspberrypi.local:8080` を開きます（開けない場合は Raspberry Pi の IP アドレスで `http://<IP アドレス>:8080`）。Raspberry Pi を再起動しても自動で起動します。
+
+### 更新
+
+PC で最新のコードを取得してビルドし、初回と同じ `rsync` で転送します（`data` フォルダは転送の対象から外しているので、データは消えません）。
+
+```sh
+git pull
+npm ci
+npm run build
+rsync -az --delete --exclude '/data/' --exclude '/node_modules/' -R \
+  package.json package-lock.json config deploy src/server dist/client \
+  pi@raspberrypi.local:/home/pi/waders/
+```
+
+Raspberry Pi で、パッケージを入れ直して再起動します。
+
+```sh
+cd ~/waders
+PATH=/opt/homebridge/bin:$PATH npm ci --omit=dev
+sudo systemctl restart waders
+```
+
+### 運用
+
+| やりたいこと | コマンド（Raspberry Pi） |
+| --- | --- |
+| 状態を見る | `systemctl status waders` |
+| ログを見る | `journalctl -u waders -f` |
+| 設定を変える | `~/waders/data/settings.json` を編集して `sudo systemctl restart waders` |
+| 止める・自動起動をやめる | `sudo systemctl disable --now waders` |
+
+設定に誤りがあると起動に失敗し、60秒間に3回失敗すると再起動をあきらめます。ログで理由を確かめて直してから、`sudo systemctl restart waders` で起動してください。
+
+### 参考: Raspberry Pi 3B での実績
+
+| 項目 | 結果 |
+| --- | --- |
+| `npm ci --omit=dev` | 約12秒（69パッケージ、21MB） |
+| 再起動から応答するまで | 約40秒 |
+| Waders のメモリ使用量 | 約80〜90MB |
 
 ## 設定
 
