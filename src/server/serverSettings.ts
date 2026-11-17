@@ -1,0 +1,118 @@
+/**
+ * サーバーの設定（ポート・データのフォルダ）の読み込みと検証。
+ *
+ * 所属: コンポジションルートの補助（main.ts と vite.config.ts から利用）
+ * 責務:
+ *  - データのフォルダに設定ファイルがなければ、リポジトリのひな形から作成する
+ *  - 設定ファイルと環境変数を読み、検証して型付きの設定値にする（環境変数を優先する）
+ * 設定ファイルはデプロイする人が手で編集するため、読み込むたびに Zod で検証する。
+ */
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { z } from 'zod';
+
+/** 環境変数 WADERS_DATA_DIRECTORY がない場合に使う、作業フォルダからのデータのフォルダの名前。 */
+export const DEFAULT_DATA_DIRECTORY_NAME = 'data';
+
+/** データのフォルダの中にある設定ファイルの名前。 */
+export const SETTINGS_FILE_NAME = 'settings.json';
+
+/** リポジトリに含める設定ファイルのひな形の場所。 */
+export const SETTINGS_TEMPLATE_FILE_PATH = resolve(import.meta.dirname, '../../config/settings.example.json');
+
+const portSchema = z.number().int().min(1).max(65535);
+
+/** 設定ファイルの形式（version 1）。 */
+const settingsFileSchema = z.object({
+  version: z.literal(1),
+  port: portSchema,
+});
+
+/** 環境変数のポート。数字だけからなる文字列を受け付ける（"80.5" や空文字は不可）。 */
+const environmentPortSchema = z
+  .string()
+  .regex(/^\d+$/)
+  .transform((value) => Number(value))
+  .pipe(portSchema);
+
+/** 検証済みのサーバーの設定。 */
+export type ServerSettings = {
+  /** 待ち受けるポート番号（1〜65535）。 */
+  readonly port: number;
+  /** データのフォルダの絶対パス。 */
+  readonly dataDirectory: string;
+};
+
+/** 設定ファイルや環境変数の内容に誤りがある場合のエラー。メッセージに誤りのある場所を含める。 */
+export class ServerSettingsError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ServerSettingsError';
+  }
+}
+
+/** loadServerSettings の引数。 */
+export type LoadServerSettingsOptions = {
+  /** 環境変数（通常は process.env）。WADERS_PORT・WADERS_DATA_DIRECTORY を読む。 */
+  readonly environment: Record<string, string | undefined>;
+  /** 設定ファイルがない場合に複製するひな形の場所。 */
+  readonly templateFilePath: string;
+  /** 相対パスのデータのフォルダを解決する基準（通常は process.cwd()）。 */
+  readonly workingDirectory: string;
+};
+
+/**
+ * 設定を読み込む。設定ファイルがなければ、データのフォルダとともにひな形から作成する（所有者のみ読み書き可）。
+ * 既存の設定ファイルは上書きしない。環境変数 WADERS_PORT があれば、設定ファイルのポートより優先する。
+ * @returns 検証済みの設定
+ * @throws {ServerSettingsError} 設定ファイルが JSON として読めない・形式に誤りがある、または環境変数の値が不正な場合
+ */
+export function loadServerSettings(options: LoadServerSettingsOptions): ServerSettings {
+  const dataDirectory = resolve(
+    options.workingDirectory,
+    options.environment.WADERS_DATA_DIRECTORY ?? DEFAULT_DATA_DIRECTORY_NAME,
+  );
+  const settingsFilePath = join(dataDirectory, SETTINGS_FILE_NAME);
+  createSettingsFileFromTemplateIfMissing(dataDirectory, settingsFilePath, options.templateFilePath);
+
+  const settingsFile = readSettingsFile(settingsFilePath);
+  const environmentPort = options.environment.WADERS_PORT;
+  const port = environmentPort === undefined ? settingsFile.port : parseEnvironmentPort(environmentPort);
+  return { port, dataDirectory };
+}
+
+/** 設定ファイルがなければ、データのフォルダを作り、ひな形を複製する。 */
+function createSettingsFileFromTemplateIfMissing(
+  dataDirectory: string,
+  settingsFilePath: string,
+  templateFilePath: string,
+): void {
+  if (existsSync(settingsFilePath)) return;
+  mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+  // flag 'wx': 同時に起動した別のプロセスが作成済みなら上書きせず失敗させる
+  writeFileSync(settingsFilePath, readFileSync(templateFilePath, 'utf8'), { mode: 0o600, flag: 'wx' });
+}
+
+/** 設定ファイルを読み、JSON として解釈して形式を検証する。 */
+function readSettingsFile(settingsFilePath: string): z.infer<typeof settingsFileSchema> {
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(readFileSync(settingsFilePath, 'utf8'));
+  } catch (error) {
+    throw new ServerSettingsError(`設定ファイルを JSON として読めません: ${settingsFilePath}`, { cause: error });
+  }
+  const result = settingsFileSchema.safeParse(parsedJson);
+  if (!result.success) {
+    throw new ServerSettingsError(`設定ファイルの内容に誤りがあります: ${settingsFilePath}\n${z.prettifyError(result.error)}`);
+  }
+  return result.data;
+}
+
+/** 環境変数 WADERS_PORT を検証してポート番号にする。 */
+function parseEnvironmentPort(value: string): number {
+  const result = environmentPortSchema.safeParse(value);
+  if (!result.success) {
+    throw new ServerSettingsError(`環境変数 WADERS_PORT の値が不正です（1〜65535 の整数を指定してください）: "${value}"`);
+  }
+  return result.data;
+}

@@ -33,7 +33,45 @@ Waders は、その沼に入っても溺れないための装備を目指して�
 - Raspberry Pi 3B+ に [Homebridge の Raspbian イメージ](https://github.com/homebridge/homebridge-raspbian-image)（64-bit 版）を入れた環境を想定しています
 - Node.js 24 以上
 
-インストールと実行の手順は、実装が進んだ段階でここに追記します。
+Raspberry Pi へのインストールと自動起動の手順は、実機での確認（#2）の後に追記します。
+
+## 設定
+
+設定は、データのフォルダにある `settings.json` に書きます。初めて起動したときに、ひな形（[config/settings.example.json](config/settings.example.json)）から自動で作られます。
+
+```json
+{
+  "version": 1,
+  "port": 8080
+}
+```
+
+| 項目 | 内容 | 既定値 |
+| --- | --- | --- |
+| `port` | 待ち受けるポート番号（1〜65535） | `8080` |
+
+次の環境変数を指定すると、設定ファイルより優先されます。
+
+| 環境変数 | 内容 | 既定値 |
+| --- | --- | --- |
+| `WADERS_PORT` | 待ち受けるポート番号 | 設定ファイルの `port` |
+| `WADERS_DATA_DIRECTORY` | データのフォルダ（設定ファイルなどを置く場所） | 起動したフォルダの `data` |
+
+設定に誤りがある場合は、理由をログに出して起動を止めます。
+
+## 開発
+
+Node.js 24 以上が必要です。
+
+```sh
+npm install
+npm run dev          # 開発用に起動（画面 http://localhost:5173 、API は設定のポート）
+npm run check        # 型チェック・ESLint・全テスト
+npm run build        # 画面をビルド（dist/client）
+npm start            # ビルドした画面とサーバーを起動（http://localhost:8080）
+```
+
+開発の決まりは [CLAUDE.md](CLAUDE.md) にあります。
 
 ## ライセンス
 
