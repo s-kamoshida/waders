@@ -9,7 +9,9 @@ import {
   apiErrorResponseSchema,
   productListResponseSchema,
   productSchema,
+  type DeliveryConfirmationRequest,
   type ProductInput,
+  type ProductListItem,
   type ProductResponse,
 } from '../shared/productContract.ts';
 
@@ -46,8 +48,8 @@ async function sendApiRequest(method: string, path: string, requestBody?: unknow
   return response.json();
 }
 
-/** 商品の一覧を取得する。 */
-export async function fetchProducts(): Promise<ProductResponse[]> {
+/** 商品の一覧を取得する（サーバーが自動遷移を反映した後の状態。延期の確認待ちかを含む）。 */
+export async function fetchProducts(): Promise<ProductListItem[]> {
   return productListResponseSchema.parse(await sendApiRequest('GET', '/api/products')).products;
 }
 
@@ -64,4 +66,16 @@ export async function updateProduct(productId: string, input: ProductInput): Pro
 /** 商品を削除する。 */
 export async function deleteProduct(productId: string): Promise<void> {
   await sendApiRequest('DELETE', `/api/products/${encodeURIComponent(productId)}`);
+}
+
+/** アーカイブされた商品を、新しい発売月でリストに戻す（issue #9）。 */
+export async function restoreProduct(productId: string, releaseMonth: string): Promise<ProductResponse> {
+  return productSchema.parse(await sendApiRequest('POST', `/api/products/${encodeURIComponent(productId)}/restore`, { releaseMonth }));
+}
+
+/** 延期の確認に回答する（issue #9）。 */
+export async function answerDeliveryConfirmation(productId: string, answer: DeliveryConfirmationRequest): Promise<ProductResponse> {
+  return productSchema.parse(
+    await sendApiRequest('POST', `/api/products/${encodeURIComponent(productId)}/delivery-confirmation`, answer),
+  );
 }

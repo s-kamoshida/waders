@@ -1,8 +1,8 @@
 /**
- * 一覧の組み立て（年・月のグループ、並び順、見出しの集計）。
+ * 一覧の組み立て（リストとアーカイブの振り分け、年・月のグループ、並び順、見出しの集計）。
  *
  * 所属: クライアント
- * 責務: 商品の一覧を、画面に表示する年・月のグループに組み立てる純粋な関数（要件「リストの構成」）。
+ * 責務: 商品の一覧を、画面に表示する年・月のグループに組み立てる純粋な関数（要件「リストの構成」「アーカイブ」）。
  */
 import type { ProductResponse } from '../shared/productContract.ts';
 import { formatYen } from './productDisplay.ts';
@@ -76,25 +76,19 @@ function identifyYear(month: string, yearMode: YearMode): { key: string; label: 
   return { key: `FY${fiscalYear}`, label: `FY${String(fiscalYear).slice(-2)}` };
 }
 
-/**
- * 商品の一覧を、年・月のグループに組み立てる。
- * @param products 商品（順不同）
- * @param options currentMonth は日本時間の当月（YYYY-MM）、yearMode は年のまとめ方
- */
-export function buildProductListGroups(
-  products: readonly ProductResponse[],
-  options: { readonly currentMonth: string; readonly yearMode: YearMode },
-): YearGroup[] {
-  const monthGroups: MonthGroup[] = listMonthsToShow(products, options.currentMonth).map((month) => {
-    const monthProducts = products
-      .filter((product) => product.releaseMonth === month)
-      .sort((left, right) => rankProduct(left) - rankProduct(right) || left.createdAt.localeCompare(right.createdAt));
-    return { month, label: month.replace('-', '/'), products: monthProducts, summary: summarizeProducts(monthProducts) };
-  });
+/** 月のグループを作る。商品はその月のものに絞り、並び替える。 */
+function buildMonthGroup(month: string, products: readonly ProductResponse[]): MonthGroup {
+  const monthProducts = products
+    .filter((product) => product.releaseMonth === month)
+    .sort((left, right) => rankProduct(left) - rankProduct(right) || left.createdAt.localeCompare(right.createdAt));
+  return { month, label: month.replace('-', '/'), products: monthProducts, summary: summarizeProducts(monthProducts) };
+}
 
+/** 並べ終えた月のグループを、続いている同じ年ごとにまとめる。 */
+function groupMonthsByYear(monthGroups: readonly MonthGroup[], yearMode: YearMode): YearGroup[] {
   const yearGroups: { key: string; label: string; months: MonthGroup[] }[] = [];
   for (const monthGroup of monthGroups) {
-    const year = identifyYear(monthGroup.month, options.yearMode);
+    const year = identifyYear(monthGroup.month, yearMode);
     const lastYearGroup = yearGroups.at(-1);
     if (lastYearGroup?.key === year.key) {
       lastYearGroup.months.push(monthGroup);
@@ -108,7 +102,51 @@ export function buildProductListGroups(
   }));
 }
 
-/** 見出しの集計を「3個（合計 44,000円見込）」の形にする。 */
+/**
+ * 商品の一覧（リスト）を、年・月のグループに組み立てる。月は古い順で、商品のない月も含める。
+ * @param products 商品（順不同）
+ * @param options currentMonth は日本時間の当月（YYYY-MM）、yearMode は年のまとめ方
+ */
+export function buildProductListGroups(
+  products: readonly ProductResponse[],
+  options: { readonly currentMonth: string; readonly yearMode: YearMode },
+): YearGroup[] {
+  const monthGroups = listMonthsToShow(products, options.currentMonth).map((month) => buildMonthGroup(month, products));
+  return groupMonthsByYear(monthGroups, options.yearMode);
+}
+
+/**
+ * 商品を、リスト（発売月が当月以降）とアーカイブ（発売月が当月より前）に振り分ける（issue #9）。
+ * @param currentMonth 日本時間の当月（YYYY-MM）
+ */
+export function splitProductsByArchive<Item extends ProductResponse>(
+  products: readonly Item[],
+  currentMonth: string,
+): { active: Item[]; archived: Item[] } {
+  return {
+    active: products.filter((product) => product.releaseMonth >= currentMonth),
+    archived: products.filter((product) => product.releaseMonth < currentMonth),
+  };
+}
+
+/**
+ * アーカイブの商品を、年・月のグループに組み立てる（issue #9）。月は新しい順で、商品のある月だけを含める。
+ * 同じ月の中の並び順と集計は、リストと同じ規則にする。
+ */
+export function buildArchiveGroups(products: readonly ProductResponse[], options: { readonly yearMode: YearMode }): YearGroup[] {
+  const months = [...new Set(products.map((product) => product.releaseMonth))].sort().reverse();
+  return groupMonthsByYear(
+    months.map((month) => buildMonthGroup(month, products)),
+    options.yearMode,
+  );
+}
+
+/** リストの見出しの集計を「3個（合計 44,000円見込）」の形にする。 */
 export function formatGroupSummary(summary: GroupSummary): string {
   return `${summary.count}個（合計 ${formatYen(summary.totalYen)}見込）`;
+}
+
+/** アーカイブの見出しの集計を「1個（合計 22,800円）」の形にする（実績のため「見込」を付けない）。 */
+export function formatArchiveSummary(summary: GroupSummary): string {
+  return `${summary.count}個（合計 ${formatYen(summary.totalYen)}）`;
 }

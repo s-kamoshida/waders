@@ -6,6 +6,7 @@
  *  - 追加（発売月の既定は当月、ステータスの既定は検討中）と編集（保存済みの値を表示）の入力
  *  - 送信前に共有の検証ルールで確かめ、誤りは入力欄の下に表示する。サーバーが返した入力の誤りも同様に表示する
  *  - 削除は確認のうえで行う（元に戻せない）
+ *  - アーカイブされた商品の編集では、発売月を変更できなくし、「リストに戻す」ボタンを表示する（issue #9）
  * 保存・削除に成功したら onSaved を呼ぶ。
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
@@ -30,6 +31,11 @@ export type ProductEditorDialogProps = {
   readonly mode: ProductEditorMode;
   readonly onClose: () => void;
   readonly onSaved: () => void;
+  /**
+   * アーカイブされた商品を編集する場合に渡す。「リストに戻す」を押したときに呼ぶ。
+   * 渡した場合、発売月は変更できない（発売月は「リストに戻す」で変える）。
+   */
+  readonly onRestoreRequested?: () => void;
 };
 
 /** 入力欄の値（入力中は文字列で持つ）。 */
@@ -74,7 +80,7 @@ function convertToTextOrNull(value: string): string | null {
 }
 
 /** 商品の追加・編集のモーダルを描画する。 */
-export function ProductEditorDialog({ mode, onClose, onSaved }: ProductEditorDialogProps) {
+export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested }: ProductEditorDialogProps) {
   const [values, setValues] = useState<FormValues>(() => createInitialValues(mode));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
@@ -83,6 +89,7 @@ export function ProductEditorDialog({ mode, onClose, onSaved }: ProductEditorDia
   const nameInputRef = useRef<HTMLInputElement>(null);
   const idPrefix = useId();
   const title = mode.kind === 'create' ? '商品を追加' : '商品を編集';
+  const isArchived = mode.kind === 'edit' && onRestoreRequested !== undefined;
 
   useEffect(() => {
     nameInputRef.current?.focus();
@@ -187,11 +194,13 @@ export function ProductEditorDialog({ mode, onClose, onSaved }: ProductEditorDia
                   id={fieldId('releaseMonth')}
                   type="month"
                   value={values.releaseMonth}
+                  disabled={isArchived}
                   aria-invalid={fieldErrors.releaseMonth !== undefined}
                   aria-describedby={describedBy('releaseMonth')}
                   onChange={(event) => updateValue('releaseMonth', event.target.value)}
                 />
                 {renderFieldError('releaseMonth')}
+                {isArchived && <span className="hint">{SCREEN_MESSAGES.archivedReleaseMonthHint}</span>}
               </div>
               <div className="field">
                 <label htmlFor={fieldId('status')}>ステータス</label>
@@ -280,6 +289,11 @@ export function ProductEditorDialog({ mode, onClose, onSaved }: ProductEditorDia
             {mode.kind === 'edit' && (
               <button type="button" className="button button--danger" disabled={isSubmitting} onClick={() => setIsConfirmingDelete(true)}>
                 削除
+              </button>
+            )}
+            {isArchived && (
+              <button type="button" className="button" disabled={isSubmitting} onClick={onRestoreRequested}>
+                リストに戻す
               </button>
             )}
             <span className="dialog-footer-spacer" />

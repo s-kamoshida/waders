@@ -6,9 +6,9 @@
  */
 import type { ProductStatus } from '../shared/productContract.ts';
 
+export { formatDateInJapan, formatMonthInJapan } from '../shared/japanCalendar.ts';
+
 const MILLISECONDS_PER_DAY = 86_400_000;
-/** 日本時間と UTC の差（日本は夏時間がないため一定）。 */
-const JAPAN_OFFSET_MILLISECONDS = 9 * 60 * 60 * 1000;
 /** 受注期限の警告（⚠️）を出す日数。受注期限まで 0〜7 日（当日と 7 日後を含む）。 */
 const ORDER_DEADLINE_WARNING_DAYS = 7;
 
@@ -76,14 +76,4 @@ export function isOrderDeadlineApproaching(
 export function formatShortDate(date: string): string {
   const [, month = '', day = ''] = date.split('-');
   return `${Number(month)}/${day}`;
-}
-
-/** 日本時間の日付（YYYY-MM-DD）を返す。 */
-export function formatDateInJapan(now: Date): string {
-  return new Date(now.getTime() + JAPAN_OFFSET_MILLISECONDS).toISOString().slice(0, 10);
-}
-
-/** 日本時間の年月（YYYY-MM）を返す。 */
-export function formatMonthInJapan(now: Date): string {
-  return formatDateInJapan(now).slice(0, 7);
 }

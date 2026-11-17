@@ -4,6 +4,7 @@
  * 責務:
  *  - 設定の読み込み（設定ファイルがなければひな形から作成）
  *  - 商品の DB を開き、スキーマを最新の版数に移行する
+ *  - ステータスの自動遷移（起動時）
  *  - 各層の組み立て（依存の注入）と、HTTP サーバーの起動
  *  - 終了シグナルを受けたときの後始末
  * 実行: `node src/server/main.ts`（Node.js 24 の型除去機能で TypeScript を直接実行する）
@@ -47,6 +48,9 @@ function startServer(): void {
     clock: { now: () => new Date() },
     generateProductId: () => randomUUID() as ProductId,
   });
+  // 停止中に発売月や受注期限を超過した商品を、起動時に自動遷移させる（issue #9）
+  const transitionedCount = productService.applyAutomaticTransitions();
+  if (transitionedCount > 0) writeStructuredLog('info', 'ステータスを自動で変更しました', { transitionedCount });
   const application = createWebApplication({ clientBuildDirectory: CLIENT_BUILD_DIRECTORY, productService });
 
   const server = application.listen(settings.port, (error?: Error) => {

@@ -5,6 +5,7 @@
  * 責務:
  *  - DB ファイルを開き（所有者のみ読み書き可）、スキーマを最新の版数に移行する
  *  - 商品の登録・取得・一覧・更新・削除と、ステータス・発売月の変更履歴の記録
+ *  - 延期の確認を待っている商品の記録（issue #9）
  * 業務ルールに対応する CHECK 制約を DB にも付け、検証をすり抜けた不正な値を最後に拒否する。
  * SQLite は Node.js 標準の node:sqlite を使う（CLAUDE.md「技術スタック」）。
  */
@@ -26,7 +27,7 @@ const statusList = PRODUCT_STATUSES.map((status) => `'${status}'`).join(', ');
  * スキーマの移行。**既存の要素は絶対に書き換えず、変更は末尾に要素を追加する**（利用者の既存の DB が壊れるため）。
  * 要素の番号 + 1 がスキーマの版数（PRAGMA user_version）になる。
  */
-const SCHEMA_MIGRATIONS: readonly string[] = [
+export const SCHEMA_MIGRATIONS: readonly string[] = [
   // 版数 1: 商品と変更履歴（issue #7）
   `
   CREATE TABLE products (
@@ -62,6 +63,12 @@ const SCHEMA_MIGRATIONS: readonly string[] = [
 
   CREATE INDEX product_history_by_product ON product_history (product_id, id);
   `,
+  // 版数 2: 延期の確認を待っている商品（issue #9）。商品を削除したら一緒に消す
+  `
+  CREATE TABLE delivery_confirmations (
+    product_id TEXT PRIMARY KEY REFERENCES products (id) ON DELETE CASCADE
+  ) STRICT;
+  `,
 ];
 
 /** 最新のスキーマの版数。 */
@@ -93,6 +100,17 @@ export type ProductRepository = {
   deleteProduct(productId: ProductId): boolean;
   /** 商品の変更履歴を古い順に返す。 */
   listProductHistory(productId: ProductId): ProductHistoryEntry[];
+  /** 商品に延期の確認待ちの印を付ける。付いていれば何もしない。 */
+  markDeliveryConfirmationPending(productId: ProductId): void;
+  /** 商品の延期の確認待ちの印を外す。付いていなければ何もしない。 */
+  clearDeliveryConfirmationPending(productId: ProductId): void;
+  /** 延期の確認待ちの商品の ID を返す。 */
+  listDeliveryConfirmationPendingProductIds(): ProductId[];
+  /**
+   * 複数の操作を 1 つのトランザクションで行う。例外が起きたらすべて元に戻す。
+   * 中で呼んだ操作が自分のトランザクションを始めることはない（入れ子にしない）。
+   */
+  runInTransaction<Result>(operation: () => Result): Result;
 };
 
 const productRowSchema = z.object({
@@ -149,8 +167,9 @@ function convertRowToHistoryEntry(row: unknown): ProductHistoryEntry {
   };
 }
 
-/** 処理をトランザクションの中で行い、例外が起きたら元に戻す。 */
+/** 処理をトランザクションの中で行い、例外が起きたら元に戻す。すでにトランザクションの中なら、そのまま行う。 */
 function runInTransaction<Result>(database: DatabaseSync, operation: () => Result): Result {
+  if (database.isTransaction) return operation();
   database.exec('BEGIN');
   try {
     const result = operation();
@@ -301,6 +320,25 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
         )
         .all(productId)
         .map(convertRowToHistoryEntry);
+    },
+
+    markDeliveryConfirmationPending(productId) {
+      database.prepare('INSERT OR IGNORE INTO delivery_confirmations (product_id) VALUES (?)').run(productId);
+    },
+
+    clearDeliveryConfirmationPending(productId) {
+      database.prepare('DELETE FROM delivery_confirmations WHERE product_id = ?').run(productId);
+    },
+
+    listDeliveryConfirmationPendingProductIds() {
+      return database
+        .prepare('SELECT product_id FROM delivery_confirmations ORDER BY rowid')
+        .all()
+        .map((row) => z.object({ product_id: z.string() }).parse(row).product_id as ProductId);
+    },
+
+    runInTransaction(operation) {
+      return runInTransaction(database, operation);
     },
   };
 }
