@@ -27,6 +27,10 @@ export type Product = {
   readonly orderDeadline: string | null;
   readonly url: string | null;
   readonly category: string | null;
+  /** メーカー。未入力は null（issue #18）。 */
+  readonly maker: string | null;
+  /** 備考（複数行）。未入力は null（issue #18）。 */
+  readonly note: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 };
