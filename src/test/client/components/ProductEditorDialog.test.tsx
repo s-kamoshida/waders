@@ -292,15 +292,18 @@ describe('メーカーと備考（issue #18）', () => {
     expect(screen.getByLabelText('備考')).toHaveValue('初回特典付き\n分割で届く');
   });
 
-  it('備考が上限の文字数を超える場合、文言を表示し、送信しない', async () => {
+  it.each([
+    ['メーカー', 'あ'.repeat(101), 'メーカーは 100 文字以内で入力してください。'],
+    ['備考', 'あ'.repeat(1001), '備考は 1,000 文字以内で入力してください。'],
+  ])('%s が上限の文字数を超える場合、文言を表示し、送信しない', async (label, value, message) => {
     const { requests } = stubFetchRoutes({});
     render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
 
     await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
-    fireEvent.change(screen.getByLabelText('備考'), { target: { value: 'あ'.repeat(1001) } });
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
     await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
-    expect(screen.getByText('備考は 1,000 文字以内で入力してください。')).toBeInTheDocument();
+    expect(screen.getByText(message)).toBeInTheDocument();
     expect(requests).toEqual([]);
   });
 

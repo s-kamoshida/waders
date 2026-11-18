@@ -116,13 +116,17 @@ describe('メーカーと備考（issue #18）', () => {
     expect(response.body).toMatchObject({ maker: 'メーカーB', note: null });
   });
 
-  it('メーカーが上限の文字数を超える場合、400 とメーカーの文言を返す', async () => {
+  it.each([
+    ['maker', 'あ'.repeat(101), 'メーカーは 100 文字以内で入力してください。'],
+    ['note', 'あ'.repeat(1001), '備考は 1,000 文字以内で入力してください。'],
+  ])('%s が上限の文字数を超える場合、400 とその項目の文言を返し、登録しない', async (fieldName, value, message) => {
     const response = await request(harness.application)
       .post('/api/products')
-      .send({ ...validInput, maker: 'あ'.repeat(101) });
+      .send({ ...validInput, [fieldName]: value });
 
     expect(response.status).toBe(400);
-    expect(response.body.error.fieldErrors).toEqual({ maker: 'メーカーは 100 文字以内で入力してください。' });
+    expect(response.body.error.fieldErrors).toEqual({ [fieldName]: message });
+    expect(harness.productService.listProducts()).toEqual([]);
   });
 });
 
