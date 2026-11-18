@@ -28,7 +28,7 @@ describe('必須項目', () => {
       shippingFee: null,
       orderDeadline: null,
       url: null,
-      category: null,
+      categoryId: null,
       maker: null,
       note: null,
     });

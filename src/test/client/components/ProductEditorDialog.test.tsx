@@ -22,7 +22,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     shippingFee: 800,
     orderDeadline: '2026-11-30',
     url: 'https://shop.example.jp/item/1',
-    category: null,
+    categoryId: null,
+    categoryName: null,
     maker: null,
     note: null,
     createdAt: '2026-11-01T00:00:00.000Z',
@@ -82,7 +83,7 @@ describe('商品の追加', () => {
           shippingFee: 800,
           orderDeadline: '2026-11-30',
           url: 'https://shop.example.jp/item/1',
-          category: null,
+          categoryId: null,
           maker: null,
           note: null,
         },
@@ -110,7 +111,7 @@ describe('商品の追加', () => {
       shippingFee: null,
       orderDeadline: null,
       url: null,
-      category: null,
+      categoryId: null,
       maker: null,
       note: null,
     });
@@ -334,6 +335,117 @@ describe('メーカーと備考（issue #18）', () => {
   });
 });
 
+describe('カテゴリー（issue #10）', () => {
+  const categories = [
+    { id: 'scale', name: 'スケールフィギュア' },
+    { id: 'action', name: '可動フィギュア' },
+  ];
+
+  /** プルダウンの選択肢の表記を返す。 */
+  function listCategoryOptions(): string[] {
+    return Array.from((screen.getByLabelText('カテゴリー') as HTMLSelectElement).options).map((option) => option.text);
+  }
+
+  it('追加の場合、カテゴリーを「未設定」と定義の並び順から選べ、既定は「未設定」', () => {
+    stubFetchRoutes({});
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} categories={categories} />);
+
+    expect(listCategoryOptions()).toEqual(['未設定', 'スケールフィギュア', '可動フィギュア']);
+    expect(screen.getByLabelText('カテゴリー')).toHaveDisplayValue('未設定');
+  });
+
+  it('カテゴリーを選んで保存した場合、その ID を送る', async () => {
+    const { requests } = stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct() }) });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} categories={categories} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), '可動フィギュア');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ categoryId: 'action' });
+  });
+
+  it('編集の場合、保存済みのカテゴリーを選んだ状態で表示する', () => {
+    stubFetchRoutes({});
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ categoryId: 'action', categoryName: '可動フィギュア' }) }}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        categories={categories}
+      />,
+    );
+
+    expect(screen.getByLabelText('カテゴリー')).toHaveDisplayValue('可動フィギュア');
+  });
+
+  it('定義にないカテゴリーの商品を編集する場合、「名前（定義にない）」を選んだ状態で表示し、変えずに保存するとそのまま送る', async () => {
+    const { requests } = stubFetchRoutes({ 'PUT /api/products/product-1': () => ({ body: createProduct() }) });
+    const onSaved = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ categoryId: 'legacy', categoryName: '旧カテゴリー' }) }}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+        categories={categories}
+      />,
+    );
+
+    expect(listCategoryOptions()).toEqual(['未設定', 'スケールフィギュア', '可動フィギュア', '旧カテゴリー（定義にない）']);
+    expect(screen.getByLabelText('カテゴリー')).toHaveDisplayValue('旧カテゴリー（定義にない）');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ categoryId: 'legacy' });
+  });
+
+  it('カテゴリーの定義が読めない場合（categories が null）、カテゴリーを変更できず、理由を表示し、保存済みのカテゴリーのまま送る', async () => {
+    const { requests } = stubFetchRoutes({ 'PUT /api/products/product-1': () => ({ body: createProduct() }) });
+    const onSaved = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ categoryId: 'action', categoryName: '可動フィギュア' }) }}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+        categories={null}
+      />,
+    );
+
+    expect(screen.getByLabelText('カテゴリー')).toBeDisabled();
+    expect(screen.getByLabelText('カテゴリー')).toHaveDisplayValue('可動フィギュア');
+    expect(screen.getByText('カテゴリーの定義に誤りがあるため、カテゴリーは変更できません。')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ categoryId: 'action' });
+  });
+
+  it('「保存して続けて追加」で保存した場合、カテゴリーは残す', async () => {
+    stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct() }) });
+    const onSavedAndContinued = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        onSavedAndContinued={onSavedAndContinued}
+        categories={categories}
+      />,
+    );
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), '可動フィギュア');
+    await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+    await userEvent.click(screen.getByRole('menuitemradio', { name: '保存して続けて追加' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
+    await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
+
+    expect(screen.getByLabelText('カテゴリー')).toHaveDisplayValue('可動フィギュア');
+  });
+});
+
 describe('連続追加（issue #16）', () => {
   /** 追加のモーダルを、商品名と全項目を入力した状態にする。 */
   async function fillAllFields(name: string) {
@@ -484,7 +596,7 @@ describe('連続追加（issue #16）', () => {
       shippingFee: null,
       orderDeadline: '2026-11-30',
       url: null,
-      category: null,
+      categoryId: null,
       maker: null,
       note: null,
     });

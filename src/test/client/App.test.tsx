@@ -21,7 +21,8 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     shippingFee: null,
     orderDeadline: null,
     url: null,
-    category: null,
+    categoryId: null,
+    categoryName: null,
     maker: null,
     note: null,
     createdAt: '2026-06-01T00:00:00.000Z',
@@ -102,13 +103,13 @@ describe('App', () => {
     });
     render(<App currentTime={currentTime} />);
     await screen.findByRole('dialog', { name: '発売月を過ぎた予約商品の確認' });
-    const getCountBeforeAnswer = requests.filter((recorded) => recorded.method === 'GET').length;
+    const getCountBeforeAnswer = requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products').length;
 
     await userEvent.click(screen.getByLabelText('延期された'));
     await userEvent.click(screen.getByRole('button', { name: '回答を保存' }));
 
     expect(await screen.findByText('延期された商品')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(requests.filter((recorded) => recorded.method === 'GET').length).toBeGreaterThan(getCountBeforeAnswer);
+    expect(requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products').length).toBeGreaterThan(getCountBeforeAnswer);
   });
 });

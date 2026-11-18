@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArchivePage } from '../../../client/pages/ArchivePage.tsx';
-import { YEAR_MODE_STORAGE_KEY } from '../../../client/pages/ProductListPage.tsx';
+import { CATEGORY_FILTER_STORAGE_KEY, YEAR_MODE_STORAGE_KEY } from '../../../client/pages/ProductListPage.tsx';
 import type { ProductListItem } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
@@ -26,7 +26,8 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     shippingFee: null,
     orderDeadline: null,
     url: null,
-    category: null,
+    categoryId: null,
+    categoryName: null,
     maker: null,
     note: null,
     createdAt,
@@ -99,6 +100,29 @@ describe('アーカイブの表示', () => {
   });
 });
 
+describe('カテゴリーの絞り込み（issue #10）', () => {
+  it('リストで選んだカテゴリーでアーカイブも絞り込み、見出しの集計も絞り込んだ商品で数える', async () => {
+    localStorage.setItem(CATEGORY_FILTER_STORAGE_KEY, JSON.stringify({ categoryIds: ['scale'], includesUncategorized: false }));
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({ name: 'スケールの商品', categoryId: 'scale', categoryName: 'スケールフィギュア', price: 20000 }),
+            createProduct({ name: '可動の商品', categoryId: 'action', categoryName: '可動フィギュア', price: 10000 }),
+          ],
+        },
+      }),
+    });
+
+    render(<ArchivePage currentTime={currentTime} />);
+
+    expect(await screen.findByText('スケールの商品')).toBeInTheDocument();
+    expect(screen.queryByText('可動の商品')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^2026\/10 / })).toHaveTextContent('1個（合計 20,000円）');
+    expect(screen.getByRole('button', { name: 'カテゴリー: スケールフィギュア' })).toBeInTheDocument();
+  });
+});
+
 describe('アーカイブされた商品の編集とリストに戻す', () => {
   it('商品を押した場合、編集のモーダルを開き、発売月は変更できず、「リストに戻す」ボタンがある', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '届いた商品' })] } }) });
@@ -134,6 +158,6 @@ describe('アーカイブされた商品の編集とリストに戻す', () => {
       path: '/api/products/archived-1/restore',
       body: { releaseMonth: '2026-11' },
     });
-    await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'GET')).toHaveLength(2));
+    await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products')).toHaveLength(2));
   });
 });
