@@ -2,7 +2,7 @@
  * 商品のカード。
  *
  * 所属: クライアント（画面の部品）
- * 責務: 1 件の商品を、画像（共通のアイコン）・ステータス・商品名・金額・送料・受注期限・購入先のリンクとして表示する。
+ * 責務: 1 件の商品を、画像（共通のアイコン）・ステータス・メーカー・商品名・金額・送料・備考の印・受注期限・購入先のリンクとして表示する。
  * カードを押すと onSelect で選択を知らせる。購入先のリンクは別のタブで開き、選択はしない。
  */
 import type { ProductResponse } from '../../shared/productContract.ts';
@@ -53,10 +53,16 @@ export function ProductCard({ product, today, onSelect }: ProductCardProps) {
           <span className="product-card-status">{getStatusLabel(product.status, product.cancelable)}</span>
         </span>
         <span className="product-card-body">
+          {product.maker !== null && <span className="product-card-maker">{product.maker}</span>}
           <span className="product-card-name">{isWarning ? `⚠️ ${product.name}` : product.name}</span>
           <span className="product-card-price">
             <span>{formatPriceLabel(product.price)}</span>
             {product.price !== null && <span className="product-card-shipping">{formatShippingLabel(product.shippingFee)}</span>}
+            {product.note !== null && (
+              <span className="product-card-note" role="img" aria-label="備考あり" title="備考あり">
+                📝
+              </span>
+            )}
           </span>
           {showsOrderDeadline && (
             <span className={isWarning ? 'product-card-deadline product-card-deadline--warning' : 'product-card-deadline'}>

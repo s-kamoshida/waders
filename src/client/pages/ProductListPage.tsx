@@ -15,7 +15,13 @@ import { ProductEditorDialog, type ProductEditorMode } from '../components/Produ
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { fetchProducts } from '../productApiClient.ts';
 import { formatDateInJapan, formatMonthInJapan } from '../productDisplay.ts';
-import { buildProductListGroups, formatGroupSummary, splitProductsByArchive, type YearMode } from '../productList.ts';
+import {
+  buildProductListGroups,
+  collectMakerSuggestions,
+  formatGroupSummary,
+  splitProductsByArchive,
+  type YearMode,
+} from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 
 /** 暦年・年度の切り替えを覚えておくための、ブラウザの保存領域のキー。 */
@@ -77,6 +83,8 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
     () => buildProductListGroups(splitProductsByArchive(products ?? [], currentMonth).active, { currentMonth, yearMode }),
     [products, currentMonth, yearMode],
   );
+
+  const makerSuggestions = useMemo(() => collectMakerSuggestions(products ?? []), [products]);
 
   const changeYearMode = (nextYearMode: YearMode) => {
     setYearMode(nextYearMode);
@@ -144,6 +152,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           onClose={() => setEditorMode(null)}
           onSaved={handleSaved}
           onSavedAndContinued={() => void loadProducts()}
+          makerSuggestions={makerSuggestions}
         />
       )}
     </div>

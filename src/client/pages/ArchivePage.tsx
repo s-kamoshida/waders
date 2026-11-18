@@ -15,7 +15,7 @@ import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { RestoreDialog } from '../components/RestoreDialog.tsx';
 import { fetchProducts } from '../productApiClient.ts';
 import { formatDateInJapan, formatMonthInJapan } from '../productDisplay.ts';
-import { buildArchiveGroups, formatArchiveSummary, splitProductsByArchive } from '../productList.ts';
+import { buildArchiveGroups, collectMakerSuggestions, formatArchiveSummary, splitProductsByArchive } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 import { readStoredYearMode } from './ProductListPage.tsx';
 
@@ -54,6 +54,8 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
   const archivedProducts = useMemo(() => splitProductsByArchive(products ?? [], currentMonth).archived, [products, currentMonth]);
   const yearGroups = useMemo(() => buildArchiveGroups(archivedProducts, { yearMode }), [archivedProducts, yearMode]);
 
+  const makerSuggestions = useMemo(() => collectMakerSuggestions(products ?? []), [products]);
+
   const closeAndReload = () => {
     setOpenDialog(null);
     void loadProducts();
@@ -85,6 +87,7 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
           onClose={() => setOpenDialog(null)}
           onSaved={closeAndReload}
           onRestoreRequested={() => setOpenDialog({ kind: 'restore', product: openDialog.product })}
+          makerSuggestions={makerSuggestions}
         />
       )}
 

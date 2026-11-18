@@ -55,6 +55,8 @@ describe('POST /api/products', () => {
       orderDeadline: null,
       url: null,
       category: null,
+      maker: null,
+      note: null,
       createdAt: TEST_CURRENT_TIME.toISOString(),
       updatedAt: TEST_CURRENT_TIME.toISOString(),
     });
@@ -90,6 +92,40 @@ describe('POST /api/products', () => {
 
     expect(response.status).toBe(415);
     expect(response.body.error.code).toBe('UNSUPPORTED_MEDIA_TYPE');
+    expect(harness.productService.listProducts()).toEqual([]);
+  });
+});
+
+describe('メーカーと備考（issue #18）', () => {
+  it('メーカーと備考を付けて登録した場合、前後の空白を取り除いて保存し、一覧でも返す', async () => {
+    const product = await createProductThroughApi({ ...validInput, maker: ' メーカーA ', note: '初回特典付き\n分割で届く' });
+
+    expect(product).toMatchObject({ maker: 'メーカーA', note: '初回特典付き\n分割で届く' });
+    const listResponse = await request(harness.application).get('/api/products').expect(200);
+    expect(listResponse.body.products[0]).toMatchObject({ maker: 'メーカーA', note: '初回特典付き\n分割で届く' });
+  });
+
+  it('メーカーと備考を更新した場合、200 と更新した商品を返す', async () => {
+    const created = await createProductThroughApi({ ...validInput, maker: 'メーカーA', note: '初回特典付き' });
+
+    const response = await request(harness.application)
+      .put(`/api/products/${created.id}`)
+      .send({ ...validInput, maker: 'メーカーB', note: null })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ maker: 'メーカーB', note: null });
+  });
+
+  it.each([
+    ['maker', 'あ'.repeat(101), 'メーカーは 100 文字以内で入力してください。'],
+    ['note', 'あ'.repeat(1001), '備考は 1,000 文字以内で入力してください。'],
+  ])('%s が上限の文字数を超える場合、400 とその項目の文言を返し、登録しない', async (fieldName, value, message) => {
+    const response = await request(harness.application)
+      .post('/api/products')
+      .send({ ...validInput, [fieldName]: value });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.fieldErrors).toEqual({ [fieldName]: message });
     expect(harness.productService.listProducts()).toEqual([]);
   });
 });

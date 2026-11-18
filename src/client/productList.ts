@@ -150,3 +150,12 @@ export function formatGroupSummary(summary: GroupSummary): string {
 export function formatArchiveSummary(summary: GroupSummary): string {
   return `${summary.count}個（合計 ${formatYen(summary.totalYen)}）`;
 }
+
+/**
+ * メーカーの入力の候補を作る（issue #18）。登録済みの商品（アーカイブを含む）のメーカーを、重複なく日本語の順に並べる。
+ * 未入力（null）の商品は含めない。
+ */
+export function collectMakerSuggestions(products: readonly ProductResponse[]): string[] {
+  const makers = new Set(products.flatMap((product) => (product.maker === null ? [] : [product.maker])));
+  return [...makers].sort((left, right) => left.localeCompare(right, 'ja'));
+}

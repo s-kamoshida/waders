@@ -35,7 +35,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -427,7 +428,8 @@ select {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border);
@@ -441,7 +443,8 @@ select {
   color: var(--muted);
 }
 
-.field input[aria-invalid="true"] {
+.field input[aria-invalid="true"],
+.field textarea[aria-invalid="true"] {
   border-color: var(--danger);
 }
 
@@ -724,4 +727,23 @@ html:has(.dialog-backdrop) body {
 .split-button-item:hover,
 .split-button-item:focus-visible {
   background: var(--background);
+}
+
+/* メーカーと備考（issue #18） */
+.field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.product-card-maker {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-card-note {
+  margin-left: auto;
+  font-size: 12px;
 }

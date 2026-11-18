@@ -23,6 +23,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     orderDeadline: '2026-11-30',
     url: 'https://shop.example.jp/item/1',
     category: null,
+    maker: null,
+    note: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,
@@ -81,6 +83,8 @@ describe('商品の追加', () => {
           orderDeadline: '2026-11-30',
           url: 'https://shop.example.jp/item/1',
           category: null,
+          maker: null,
+          note: null,
         },
       },
     ]);
@@ -107,6 +111,8 @@ describe('商品の追加', () => {
       orderDeadline: null,
       url: null,
       category: null,
+      maker: null,
+      note: null,
     });
   });
 
@@ -236,6 +242,95 @@ describe('商品の削除', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(requests).toEqual([]);
     expect(onSaved).not.toHaveBeenCalled();
+  });
+});
+
+describe('メーカーと備考（issue #18）', () => {
+  it('メーカーを入力でき、渡された候補を入力の候補として出す', () => {
+    stubFetchRoutes({});
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        makerSuggestions={['メーカーA', 'メーカーB']}
+      />,
+    );
+
+    const makerInput = screen.getByLabelText('メーカー');
+    const suggestionList = document.getElementById(makerInput.getAttribute('list') ?? '');
+    expect(Array.from(suggestionList?.querySelectorAll('option') ?? []).map((option) => option.value)).toEqual(['メーカーA', 'メーカーB']);
+  });
+
+  it('メーカーと複数行の備考を入力して保存した場合、その値を送る', async () => {
+    const { requests } = stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+    });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.type(screen.getByLabelText('メーカー'), 'メーカーA');
+    await userEvent.type(screen.getByLabelText('備考'), '初回特典付き{Enter}分割で届く');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ maker: 'メーカーA', note: '初回特典付き\n分割で届く' });
+  });
+
+  it('編集の場合、保存済みのメーカーと備考を表示する', () => {
+    stubFetchRoutes({});
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ maker: 'メーカーA', note: '初回特典付き\n分割で届く' }) }}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('メーカー')).toHaveValue('メーカーA');
+    expect(screen.getByLabelText('備考')).toHaveValue('初回特典付き\n分割で届く');
+  });
+
+  it.each([
+    ['メーカー', 'あ'.repeat(101), 'メーカーは 100 文字以内で入力してください。'],
+    ['備考', 'あ'.repeat(1001), '備考は 1,000 文字以内で入力してください。'],
+  ])('%s が上限の文字数を超える場合、文言を表示し、送信しない', async (label, value, message) => {
+    const { requests } = stubFetchRoutes({});
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(requests).toEqual([]);
+  });
+
+  it('「保存して続けて追加」で保存した場合、メーカーと備考も空に戻す', async () => {
+    stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+    });
+    const onSavedAndContinued = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        onSavedAndContinued={onSavedAndContinued}
+      />,
+    );
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.type(screen.getByLabelText('メーカー'), 'メーカーA');
+    await userEvent.type(screen.getByLabelText('備考'), '初回特典付き');
+    await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+    await userEvent.click(screen.getByRole('menuitemradio', { name: '保存して続けて追加' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
+    await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
+
+    expect(screen.getByLabelText('メーカー')).toHaveValue('');
+    expect(screen.getByLabelText('備考')).toHaveValue('');
   });
 });
 
@@ -390,6 +485,8 @@ describe('連続追加（issue #16）', () => {
       orderDeadline: '2026-11-30',
       url: null,
       category: null,
+      maker: null,
+      note: null,
     });
   });
 

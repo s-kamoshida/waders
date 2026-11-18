@@ -5,6 +5,7 @@
  * 責務:
  *  - 追加（発売月の既定は当月、ステータスの既定は検討中）と編集（保存済みの値を表示）の入力
  *  - 送信前に共有の検証ルールで確かめ、誤りは入力欄の下に表示する。サーバーが返した入力の誤りも同様に表示する
+ *  - メーカー（登録済みのメーカーを入力の候補に出す）と複数行の備考を入力できる（issue #18）
  *  - 削除は確認のうえで行う（元に戻せない）
  *  - アーカイブされた商品の編集では、発売月を変更できなくし、「リストに戻す」ボタンを表示する（issue #9）
  *  - 追加では、保存ボタンの横のプルダウンで保存の方法（「保存」「保存して続けて追加」）を選べる。選んだ方法はモーダルを
@@ -43,6 +44,8 @@ export type ProductEditorDialogProps = {
    * 次の入力では、商品名・金額・送料・URL を空に戻し、発売月・ステータス・キャンセル可・受注期限を残す。
    */
   readonly onSavedAndContinued?: () => void;
+  /** メーカーの入力の候補（登録済みの商品のメーカー。issue #18）。 */
+  readonly makerSuggestions?: readonly string[];
 };
 
 /** 保存の方法。save は保存して閉じる、saveAndContinue は保存して続けて追加する。 */
@@ -63,12 +66,14 @@ type FormValues = {
   shippingFee: string;
   orderDeadline: string;
   url: string;
+  maker: string;
+  note: string;
 };
 
 /** 用途に応じた入力欄の初期値を作る。 */
 function createInitialValues(mode: ProductEditorMode): FormValues {
   if (mode.kind === 'create') {
-    return { name: '', releaseMonth: mode.defaultReleaseMonth, status: 'considering', cancelable: false, price: '', shippingFee: '', orderDeadline: '', url: '' };
+    return { name: '', releaseMonth: mode.defaultReleaseMonth, status: 'considering', cancelable: false, price: '', shippingFee: '', orderDeadline: '', url: '', maker: '', note: '' };
   }
   const { product } = mode;
   return {
@@ -80,6 +85,8 @@ function createInitialValues(mode: ProductEditorMode): FormValues {
     shippingFee: product.shippingFee === null ? '' : String(product.shippingFee),
     orderDeadline: product.orderDeadline ?? '',
     url: product.url ?? '',
+    maker: product.maker ?? '',
+    note: product.note ?? '',
   };
 }
 
@@ -95,7 +102,14 @@ function convertToTextOrNull(value: string): string | null {
 }
 
 /** 商品の追加・編集のモーダルを描画する。 */
-export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested, onSavedAndContinued }: ProductEditorDialogProps) {
+export function ProductEditorDialog({
+  mode,
+  onClose,
+  onSaved,
+  onRestoreRequested,
+  onSavedAndContinued,
+  makerSuggestions = [],
+}: ProductEditorDialogProps) {
   const [values, setValues] = useState<FormValues>(() => createInitialValues(mode));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
@@ -122,7 +136,7 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
 
   /** 「保存して続けて追加」で保存した後、次の商品の入力に備える。 */
   const prepareNextProduct = (savedName: string) => {
-    setValues((current) => ({ ...current, name: '', price: '', shippingFee: '', url: '' }));
+    setValues((current) => ({ ...current, name: '', price: '', shippingFee: '', url: '', maker: '', note: '' }));
     setSavedNotice(SCREEN_MESSAGES.productAddedAndContinue(savedName));
     setIsSubmitting(false);
     nameInputRef.current?.focus();
@@ -145,6 +159,8 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
       shippingFee: convertToNumberOrNull(values.shippingFee),
       orderDeadline: convertToTextOrNull(values.orderDeadline),
       url: convertToTextOrNull(values.url),
+      maker: convertToTextOrNull(values.maker),
+      note: convertToTextOrNull(values.note),
       category: mode.kind === 'edit' ? mode.product.category : null,
     });
     if (!parsed.success) {
@@ -258,6 +274,24 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
               />
               {renderFieldError('name')}
             </div>
+            <div className="field">
+              <label htmlFor={fieldId('maker')}>メーカー</label>
+              <input
+                id={fieldId('maker')}
+                list={fieldId('maker-suggestions')}
+                autoComplete="off"
+                value={values.maker}
+                aria-invalid={fieldErrors.maker !== undefined}
+                aria-describedby={describedBy('maker')}
+                onChange={(event) => updateValue('maker', event.target.value)}
+              />
+              <datalist id={fieldId('maker-suggestions')}>
+                {makerSuggestions.map((maker) => (
+                  <option key={maker} value={maker} />
+                ))}
+              </datalist>
+              {renderFieldError('maker')}
+            </div>
             <div className="field-row">
               <div className="field">
                 <label htmlFor={fieldId('releaseMonth')}>発売月</label>
@@ -354,6 +388,18 @@ export function ProductEditorDialog({ mode, onClose, onSaved, onRestoreRequested
                 onChange={(event) => updateValue('url', event.target.value)}
               />
               {renderFieldError('url')}
+            </div>
+            <div className="field">
+              <label htmlFor={fieldId('note')}>備考</label>
+              <textarea
+                id={fieldId('note')}
+                rows={3}
+                value={values.note}
+                aria-invalid={fieldErrors.note !== undefined}
+                aria-describedby={describedBy('note')}
+                onChange={(event) => updateValue('note', event.target.value)}
+              />
+              {renderFieldError('note')}
             </div>
           </div>
           <div className="dialog-footer">

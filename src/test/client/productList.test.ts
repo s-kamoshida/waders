@@ -25,6 +25,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     orderDeadline: null,
     url: null,
     category: null,
+    maker: null,
+    note: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,

@@ -12,7 +12,15 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { MAXIMUM_CATEGORY_NAME_LENGTH, MAXIMUM_PRICE_YEN, MAXIMUM_PRODUCT_NAME_LENGTH, PRODUCT_STATUSES, productStatusSchema } from '../../shared/productContract.ts';
+import {
+  MAXIMUM_CATEGORY_NAME_LENGTH,
+  MAXIMUM_MAKER_LENGTH,
+  MAXIMUM_NOTE_LENGTH,
+  MAXIMUM_PRICE_YEN,
+  MAXIMUM_PRODUCT_NAME_LENGTH,
+  PRODUCT_STATUSES,
+  productStatusSchema,
+} from '../../shared/productContract.ts';
 import type {
   Product,
   ProductChange,
@@ -69,6 +77,11 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
     product_id TEXT PRIMARY KEY REFERENCES products (id) ON DELETE CASCADE
   ) STRICT;
   `,
+  // 版数 3: 商品のメーカーと備考（issue #18）。既存の商品は未入力（NULL）になる
+  `
+  ALTER TABLE products ADD COLUMN maker TEXT CHECK (maker IS NULL OR length(maker) BETWEEN 1 AND ${MAXIMUM_MAKER_LENGTH});
+  ALTER TABLE products ADD COLUMN note TEXT CHECK (note IS NULL OR length(note) BETWEEN 1 AND ${MAXIMUM_NOTE_LENGTH});
+  `,
 ];
 
 /** 最新のスキーマの版数。 */
@@ -124,6 +137,8 @@ const productRowSchema = z.object({
   order_deadline: z.string().nullable(),
   url: z.string().nullable(),
   category: z.string().nullable(),
+  maker: z.string().nullable(),
+  note: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -150,6 +165,8 @@ function convertRowToProduct(row: unknown): Product {
     orderDeadline: parsedRow.order_deadline,
     url: parsedRow.url,
     category: parsedRow.category,
+    maker: parsedRow.maker,
+    note: parsedRow.note,
     createdAt: parsedRow.created_at,
     updatedAt: parsedRow.updated_at,
   };
@@ -246,8 +263,8 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
       runInTransaction(database, () => {
         database
           .prepare(
-            `INSERT INTO products (id, name, release_month, status, cancelable, price, shipping_fee, order_deadline, url, category, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO products (id, name, release_month, status, cancelable, price, shipping_fee, order_deadline, url, category, maker, note, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             product.id,
@@ -260,6 +277,8 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
             product.orderDeadline,
             product.url,
             product.category,
+            product.maker,
+            product.note,
             product.createdAt,
             product.updatedAt,
           );
@@ -283,7 +302,7 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
           .prepare(
             `UPDATE products
              SET name = ?, release_month = ?, status = ?, cancelable = ?, price = ?, shipping_fee = ?,
-                 order_deadline = ?, url = ?, category = ?, updated_at = ?
+                 order_deadline = ?, url = ?, category = ?, maker = ?, note = ?, updated_at = ?
              WHERE id = ?`,
           )
           .run(
@@ -296,6 +315,8 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
             product.orderDeadline,
             product.url,
             product.category,
+            product.maker,
+            product.note,
             product.updatedAt,
             product.id,
           );

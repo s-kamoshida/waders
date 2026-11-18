@@ -18,6 +18,12 @@ export const MAXIMUM_URL_LENGTH = 2048;
 /** カテゴリー名の上限の文字数。 */
 export const MAXIMUM_CATEGORY_NAME_LENGTH = 50;
 
+/** メーカーの上限の文字数（issue #18）。 */
+export const MAXIMUM_MAKER_LENGTH = 100;
+
+/** 備考の上限の文字数（issue #18）。 */
+export const MAXIMUM_NOTE_LENGTH = 1000;
+
 /**
  * 商品のステータス。画面では日本語で表示する。
  * - considering: 検討中（初期値）
@@ -93,6 +99,22 @@ export const productInputSchema = z.object({
   orderDeadline: orderDeadlineSchema.nullable().default(null),
   url: productUrlSchema.nullable().default(null),
   category: z.string().trim().min(1).max(MAXIMUM_CATEGORY_NAME_LENGTH).nullable().default(null),
+  /** メーカー（前後の空白を除いて 1〜100 文字。未入力は null）。 */
+  maker: z
+    .string()
+    .trim()
+    .min(1, 'メーカーを入力しない場合は空にしてください。')
+    .max(MAXIMUM_MAKER_LENGTH, `メーカーは ${MAXIMUM_MAKER_LENGTH} 文字以内で入力してください。`)
+    .nullable()
+    .default(null),
+  /** 備考（複数行。前後の空白を除いて 1〜1,000 文字。途中の改行は残す。未入力は null）。 */
+  note: z
+    .string()
+    .trim()
+    .min(1, '備考を入力しない場合は空にしてください。')
+    .max(MAXIMUM_NOTE_LENGTH, `備考は ${MAXIMUM_NOTE_LENGTH.toLocaleString('ja-JP')} 文字以内で入力してください。`)
+    .nullable()
+    .default(null),
 });
 
 /** 検証済みの商品の入力。 */
@@ -110,6 +132,8 @@ export const productSchema = z.object({
   orderDeadline: z.string().nullable(),
   url: z.string().nullable(),
   category: z.string().nullable(),
+  maker: z.string().nullable(),
+  note: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

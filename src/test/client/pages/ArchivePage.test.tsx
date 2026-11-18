@@ -27,6 +27,8 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     orderDeadline: null,
     url: null,
     category: null,
+    maker: null,
+    note: null,
     createdAt,
     updatedAt: createdAt,
     deliveryConfirmationPending: false,
