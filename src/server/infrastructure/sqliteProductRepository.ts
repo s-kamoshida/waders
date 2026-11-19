@@ -12,6 +12,7 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { MAXIMUM_CATEGORY_ID_LENGTH } from '../../shared/categoryContract.ts';
 import {
   MAXIMUM_CATEGORY_NAME_LENGTH,
   MAXIMUM_MAKER_LENGTH,
@@ -82,6 +83,22 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
   ALTER TABLE products ADD COLUMN maker TEXT CHECK (maker IS NULL OR length(maker) BETWEEN 1 AND ${MAXIMUM_MAKER_LENGTH});
   ALTER TABLE products ADD COLUMN note TEXT CHECK (note IS NULL OR length(note) BETWEEN 1 AND ${MAXIMUM_NOTE_LENGTH});
   `,
+  // 版数 4: カテゴリーの ID（issue #10）。category は「設定したときのカテゴリー名」として使い続ける。
+  // 版数 3 までに名前だけを持つ商品は、ID を「legacy:名前」にする（定義にないカテゴリーとして確認できるようにするため）。
+  // ID と名前は両方あるか両方ないかのどちらか。ADD COLUMN の CHECK は既存の行にも適用されるため、
+  // 既存の行を整えた後に、この決まりをトリガーで付ける
+  `
+  ALTER TABLE products ADD COLUMN category_id TEXT CHECK (
+    category_id IS NULL OR length(category_id) BETWEEN 1 AND ${MAXIMUM_CATEGORY_ID_LENGTH}
+  );
+  UPDATE products SET category_id = 'legacy:' || category WHERE category IS NOT NULL;
+  CREATE TRIGGER products_category_pair_on_insert BEFORE INSERT ON products
+    WHEN (NEW.category_id IS NULL) <> (NEW.category IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'category_id と category は両方あるか両方ないかのどちらかにする'); END;
+  CREATE TRIGGER products_category_pair_on_update BEFORE UPDATE ON products
+    WHEN (NEW.category_id IS NULL) <> (NEW.category IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'category_id と category は両方あるか両方ないかのどちらかにする'); END;
+  `,
 ];
 
 /** 最新のスキーマの版数。 */
@@ -137,6 +154,7 @@ const productRowSchema = z.object({
   order_deadline: z.string().nullable(),
   url: z.string().nullable(),
   category: z.string().nullable(),
+  category_id: z.string().nullable(),
   maker: z.string().nullable(),
   note: z.string().nullable(),
   created_at: z.string(),
@@ -164,7 +182,8 @@ function convertRowToProduct(row: unknown): Product {
     shippingFee: parsedRow.shipping_fee,
     orderDeadline: parsedRow.order_deadline,
     url: parsedRow.url,
-    category: parsedRow.category,
+    categoryId: parsedRow.category_id,
+    categoryName: parsedRow.category,
     maker: parsedRow.maker,
     note: parsedRow.note,
     createdAt: parsedRow.created_at,
@@ -263,8 +282,8 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
       runInTransaction(database, () => {
         database
           .prepare(
-            `INSERT INTO products (id, name, release_month, status, cancelable, price, shipping_fee, order_deadline, url, category, maker, note, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO products (id, name, release_month, status, cancelable, price, shipping_fee, order_deadline, url, category_id, category, maker, note, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             product.id,
@@ -276,7 +295,8 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
             product.shippingFee,
             product.orderDeadline,
             product.url,
-            product.category,
+            product.categoryId,
+            product.categoryName,
             product.maker,
             product.note,
             product.createdAt,
@@ -302,7 +322,7 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
           .prepare(
             `UPDATE products
              SET name = ?, release_month = ?, status = ?, cancelable = ?, price = ?, shipping_fee = ?,
-                 order_deadline = ?, url = ?, category = ?, maker = ?, note = ?, updated_at = ?
+                 order_deadline = ?, url = ?, category_id = ?, category = ?, maker = ?, note = ?, updated_at = ?
              WHERE id = ?`,
           )
           .run(
@@ -314,7 +334,8 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
             product.shippingFee,
             product.orderDeadline,
             product.url,
-            product.category,
+            product.categoryId,
+            product.categoryName,
             product.maker,
             product.note,
             product.updatedAt,

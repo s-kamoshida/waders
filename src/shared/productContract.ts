@@ -18,6 +18,9 @@ export const MAXIMUM_URL_LENGTH = 2048;
 /** カテゴリー名の上限の文字数。 */
 export const MAXIMUM_CATEGORY_NAME_LENGTH = 50;
 
+/** カテゴリーの ID の上限の文字数（issue #10）。 */
+export const MAXIMUM_CATEGORY_ID_LENGTH = 100;
+
 /** メーカーの上限の文字数（issue #18）。 */
 export const MAXIMUM_MAKER_LENGTH = 100;
 
@@ -98,7 +101,8 @@ export const productInputSchema = z.object({
   shippingFee: yenAmountSchema.nullable().default(null),
   orderDeadline: orderDeadlineSchema.nullable().default(null),
   url: productUrlSchema.nullable().default(null),
-  category: z.string().trim().min(1).max(MAXIMUM_CATEGORY_NAME_LENGTH).nullable().default(null),
+  /** カテゴリーの ID（定義にあるもの。サーバーが確かめる）。未設定は null（issue #10）。 */
+  categoryId: z.string().min(1).max(MAXIMUM_CATEGORY_ID_LENGTH).nullable().default(null),
   /** メーカー（前後の空白を除いて 1〜100 文字。未入力は null）。 */
   maker: z
     .string()
@@ -131,7 +135,10 @@ export const productSchema = z.object({
   shippingFee: z.number().int().nullable(),
   orderDeadline: z.string().nullable(),
   url: z.string().nullable(),
-  category: z.string().nullable(),
+  /** カテゴリーの ID。未設定は null。 */
+  categoryId: z.string().nullable(),
+  /** カテゴリー名。定義にあれば今の名前、定義から消えていれば最後に保存した名前。未設定は null。 */
+  categoryName: z.string().nullable(),
   maker: z.string().nullable(),
   note: z.string().nullable(),
   createdAt: z.string(),

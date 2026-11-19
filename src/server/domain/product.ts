@@ -26,7 +26,13 @@ export type Product = {
   /** 受注期限（日本時間の日付。例: 2026-11-20）。未入力は null。 */
   readonly orderDeadline: string | null;
   readonly url: string | null;
-  readonly category: string | null;
+  /**
+   * カテゴリーの ID。未設定は null（issue #10）。
+   * 定義から消えた ID や、版数 3 までのデータから移した「legacy:名前」も持ち得るため、定義の CategoryId ではなく文字列で持つ。
+   */
+  readonly categoryId: string | null;
+  /** カテゴリーを設定したときの名前（定義から消えた場合に示すため）。categoryId と同時に null になる。 */
+  readonly categoryName: string | null;
   /** メーカー。未入力は null（issue #18）。 */
   readonly maker: string | null;
   /** 備考（複数行）。未入力は null（issue #18）。 */

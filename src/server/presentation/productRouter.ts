@@ -10,11 +10,12 @@
  *  - POST   /api/products/:productId/restore                リストに戻す（200。issue #9）
  *  - POST   /api/products/:productId/delivery-confirmation  延期の確認への回答（200。issue #9）
  * 入力の誤りは 400（VALIDATION_ERROR と項目ごとの文言）、存在しない商品は 404（PRODUCT_NOT_FOUND）。
- * 業務ルールに反する操作のエラーの対応は PRODUCT_ERROR_RESPONSES を参照。
+ * 業務ルールに反する操作のエラーの対応は PRODUCT_ERROR_RESPONSES を参照。カテゴリーの定義のファイルの誤りは 503（issue #10）。
  */
 import express, { type Response } from 'express';
 import type { z } from 'zod';
 import type { ProductService } from '../application/productService.ts';
+import { CategoryDefinitionError, CategoryNotFoundError } from '../domain/category.ts';
 import {
   ArchivedReleaseMonthChangeError,
   DeliveryConfirmationNotPendingError,
@@ -23,6 +24,7 @@ import {
   RestoreReleaseMonthInPastError,
   type ProductId,
 } from '../domain/product.ts';
+import { sendCategoryDefinitionError } from './categoryRouter.ts';
 import {
   collectFieldErrors,
   deliveryConfirmationRequestSchema,
@@ -80,6 +82,15 @@ const PRODUCT_ERROR_RESPONSES: readonly {
     error: { code: 'DELIVERY_CONFIRMATION_NOT_PENDING', message: 'この商品は回答済みです。ページを読み込み直してください。' },
   },
   {
+    errorClass: CategoryNotFoundError,
+    status: 400,
+    error: {
+      code: 'CATEGORY_NOT_FOUND',
+      message: 'カテゴリーが見つかりません。ページを読み込み直してください。',
+      fieldErrors: { categoryId: 'カテゴリーが見つかりません。ページを読み込み直してください。' },
+    },
+  },
+  {
     errorClass: ArchivedReleaseMonthChangeError,
     status: 400,
     error: {
@@ -92,6 +103,10 @@ const PRODUCT_ERROR_RESPONSES: readonly {
 
 /** 商品の操作のエラーを対応する応答にする。想定外のエラーはそのまま投げる（500 の処理へ）。 */
 function sendProductError(response: Response, error: unknown): void {
+  if (error instanceof CategoryDefinitionError) {
+    sendCategoryDefinitionError(response, error);
+    return;
+  }
   const matched = PRODUCT_ERROR_RESPONSES.find((candidate) => error instanceof candidate.errorClass);
   if (matched === undefined) throw error;
   sendError(response, matched.status, matched.error);
@@ -120,7 +135,11 @@ export function createProductRouter(productService: ProductService): express.Rou
   router.post('/', (request, response) => {
     const input = parseRequestBody(productInputSchema, request.body, response);
     if (input === undefined) return;
-    response.status(201).json(productService.createProduct(input));
+    try {
+      response.status(201).json(productService.createProduct(input));
+    } catch (error) {
+      sendProductError(response, error);
+    }
   });
 
   router.put('/:productId', (request, response) => {
