@@ -74,6 +74,8 @@ sudo systemctl enable --now waders
 
 同じ LAN の PC やスマートフォンのブラウザで `http://raspberrypi.local:8080` を開きます（開けない場合は Raspberry Pi の IP アドレスで `http://<IP アドレス>:8080`）。Raspberry Pi を再起動しても自動で起動します。
 
+初めて開くと「アカウントの作成」の画面が表示されます。**最初に画面を開いた人がアカウントを作れるため、起動したらすぐにアカウントを作ってください**（詳しくは「[認証](#認証)」）。
+
 ### 更新
 
 PC で最新のコードを取得してビルドし、初回と同じ `rsync` で転送します（`data` フォルダは転送の対象から外しているので、データは消えません）。
@@ -95,6 +97,8 @@ PATH=/opt/homebridge/bin:$PATH npm ci --omit=dev
 sudo systemctl restart waders
 ```
 
+認証のない版から更新すると、設定に認証の項目がないため認証が有効になり、次に開いたときに「アカウントの作成」の画面が表示されます。すぐにアカウントを作ってください。認証を使わない場合は「[認証](#認証)」を参照して無効にしてください。
+
 DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自動で新しい形式に移します。移した後の DB は古い版のアプリでは開けない（起動を止めます）ため、更新前の版に戻せるよう、再起動の前に DB をコピーしておくと安全です（例: `cp -p ~/waders/data/waders.sqlite ~/waders/data/waders.sqlite.bak`）。
 
 ### 運用
@@ -104,6 +108,7 @@ DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自�
 | 状態を見る | `systemctl status waders` |
 | ログを見る | `journalctl -u waders -f` |
 | 設定を変える | `~/waders/data/settings.json` を編集して `sudo systemctl restart waders` |
+| パスワードを忘れた（アカウントを消す） | `cd ~/waders && PATH=/opt/homebridge/bin:$PATH npm run reset-account` |
 | 止める・自動起動をやめる | `sudo systemctl disable --now waders` |
 
 設定に誤りがあると起動に失敗し、60秒間に3回失敗すると再起動をあきらめます。ログで理由を確かめて直してから、`sudo systemctl restart waders` で起動してください。
@@ -123,13 +128,15 @@ DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自�
 ```json
 {
   "version": 1,
-  "port": 8080
+  "port": 8080,
+  "authenticationEnabled": true
 }
 ```
 
 | 項目 | 内容 | 既定値 |
 | --- | --- | --- |
 | `port` | 待ち受けるポート番号（1〜65535） | `8080` |
+| `authenticationEnabled` | ID とパスワードによる認証を使うか（`true` か `false`）。項目がなければ `true` として扱います | `true` |
 
 次の環境変数を指定すると、設定ファイルより優先されます。
 
@@ -137,16 +144,41 @@ DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自�
 | --- | --- | --- |
 | `WADERS_PORT` | 待ち受けるポート番号 | 設定ファイルの `port` |
 | `WADERS_DATA_DIRECTORY` | データのフォルダ（設定ファイルなどを置く場所） | 起動したフォルダの `data` |
+| `WADERS_AUTHENTICATION_ENABLED` | 認証を使うか（`true` か `false`） | 設定ファイルの `authenticationEnabled` |
 
 データのフォルダには、次のファイルが作られます。バックアップする場合は、Waders を止めてからフォルダごとコピーしてください（バックアップのコマンドは今後追加します）。
 
 | ファイル | 内容 |
 | --- | --- |
 | `settings.json` | 設定 |
-| `waders.sqlite` | 商品と変更履歴の DB |
+| `waders.sqlite` | 商品と変更履歴、認証のアカウントの DB |
 | `categories.json` | カテゴリーの定義 |
 
 設定に誤りがある場合は、理由をログに出して起動を止めます。
+
+### 認証
+
+認証が有効なとき（既定）は、ログインしないと Waders を使えません。
+
+- **アカウントは1つだけ**です。家族などで使う場合も、同じ ID とパスワードを共有してください
+- アカウントがないときに画面を開くと、「アカウントの作成」の画面になります。ID（1〜50文字）とパスワード（8〜128文字）を決めて作ると、そのままログインした状態になります。**最初に画面を開いた人がアカウントを作れるため、インストールや更新の後はすぐに作ってください**
+- ログインした状態は、最後に使ってから30日間続きます。ヘッダーの「ログアウト」で終えられます
+- ログインに5回続けて失敗すると、15分間ログインできなくなります（正しいパスワードでも）。サーバーを再起動すると解除されます
+- パスワードは、ソルトを付けたハッシュ値（scrypt）にして保存します。平文では保存しません
+- **パスワードを忘れた場合**は、Raspberry Pi でアカウントを消してから、画面を開いて作り直してください。商品やカテゴリーは消えません。サーバーは止めなくてかまいません
+
+  ```sh
+  cd ~/waders
+  PATH=/opt/homebridge/bin:$PATH npm run reset-account
+  ```
+
+  データのフォルダを環境変数 `WADERS_DATA_DIRECTORY` で変えている場合は、同じ値を付けて実行してください。
+- 画面からパスワードを変えることはできません。変えたい場合も、上の手順でアカウントを作り直してください
+
+> [!WARNING]
+> Waders は HTTPS に対応していません。ログインのときのパスワードやログインした状態の情報は、**暗号化されずにネットワークを流れます**。家庭の LAN の外（インターネット）には公開しないでください。外から使いたい場合は、VPN などで家庭の LAN に入ってから使ってください。
+
+**認証を無効にする**場合は、`settings.json` の `authenticationEnabled` を `false` にして再起動します（または環境変数 `WADERS_AUTHENTICATION_ENABLED=false`）。無効にすると、Waders に接続できる人は誰でも、ログインなしで商品を見たり変えたりできます。**無効にするのは、信頼できる人だけがつながる家庭の LAN の中で使う場合に限ってください。**
 
 ### カテゴリーの定義
 
@@ -188,6 +220,7 @@ npm run dev          # 開発用に起動（画面 http://localhost:5173 、API 
 npm run check        # 型チェック・ESLint・全テスト
 npm run build        # 画面をビルド（dist/client）
 npm start            # ビルドした画面とサーバーを起動（http://localhost:8080）
+npm run reset-account  # アカウントを消す（パスワードを忘れた場合）
 ```
 
 開発の決まりは [CLAUDE.md](CLAUDE.md) にあります。

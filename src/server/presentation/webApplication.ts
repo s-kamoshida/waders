@@ -4,18 +4,22 @@
  * 所属: プレゼンテーション層
  * 責務:
  *  - すべての応答（API・画面のファイル）へのセキュリティヘッダーの付与
- *  - API のミドルウェアとルーティングの順序（Content-Type の確認 → JSON の解析 → 各 API → 404）
+ *  - API のミドルウェアとルーティングの順序（Content-Type の確認 → JSON の解析 → 動作確認・認証 → ログインの確認 → 各 API → 404）
  *  - 状態を変えるリクエストに Content-Type: application/json を必須にする（CSRF 対策）
+ *  - 認証が有効なときは、/api/health と /api/auth 以外の API にログインを求める（issue #11）。
+ *    画面のファイルは認証なしで配信する（画面がログインの画面を表示するため。データはすべて API から取る）
  *  - ビルド済みの画面の配信（画面の URL には index.html を返す）
  *  - 想定外のエラーを 500 の応答に変え、詳細はログにだけ出す
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import type { AuthenticationService } from '../application/authenticationService.ts';
 import type { CategoryService } from '../application/categoryService.ts';
 import type { ProductService } from '../application/productService.ts';
 import { writeStructuredLog } from '../structuredLogger.ts';
 import type { ApiErrorResponse } from '../../shared/productContract.ts';
+import { createAuthenticationRequirement, createAuthenticationRouter } from './authenticationRouter.ts';
 import { createCategoryRouter } from './categoryRouter.ts';
 import { createProductRouter } from './productRouter.ts';
 
@@ -59,6 +63,8 @@ export type WebApplicationOptions = {
   readonly productService: ProductService;
   /** カテゴリーの操作（issue #10）。 */
   readonly categoryService: CategoryService;
+  /** 認証の操作（issue #11）。 */
+  readonly authenticationService: AuthenticationService;
 };
 
 /** 状態を変える HTTP メソッド。 */
@@ -125,7 +131,7 @@ function handleUnexpectedError(error: unknown, request: Request, response: Respo
 
 /**
  * Web アプリケーションを組み立てる。
- * @param options ビルド済みの画面のフォルダと、商品の操作
+ * @param options ビルド済みの画面のフォルダと、商品・カテゴリー・認証の操作
  * @returns 待ち受けを開始していない Express のアプリケーション
  */
 export function createWebApplication(options: WebApplicationOptions): express.Express {
@@ -138,6 +144,8 @@ export function createWebApplication(options: WebApplicationOptions): express.Ex
   apiRouter.get('/health', (_request, response) => {
     response.json({ status: 'ok' });
   });
+  apiRouter.use('/auth', createAuthenticationRouter(options.authenticationService));
+  apiRouter.use(createAuthenticationRequirement(options.authenticationService));
   apiRouter.use('/products', createProductRouter(options.productService));
   apiRouter.use('/categories', createCategoryRouter(options.categoryService, options.productService));
   apiRouter.use(respondApiNotFound);

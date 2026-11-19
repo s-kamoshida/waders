@@ -1,8 +1,9 @@
 /**
- * 商品の API の呼び出し。
+ * API の呼び出し（商品・カテゴリー・認証）。
  *
  * 所属: クライアント
- * 責務: /api/products・/api/categories を呼び、応答を検証して返す。失敗した場合は ApiRequestError にする。
+ * 責務: /api/products・/api/categories・/api/auth を呼び、応答を検証して返す。失敗した場合は ApiRequestError にする。
+ * ログインが必要（401 AUTHENTICATION_REQUIRED）と返された場合は、登録された関数で画面に知らせる（issue #11）。
  * 状態を変える要求には、本文がなくても Content-Type: application/json を付ける（サーバーの CSRF 対策の条件）。
  */
 import {
@@ -15,6 +16,7 @@ import {
   type ProductResponse,
 } from '../shared/productContract.ts';
 import { categoryListResponseSchema, categorySchema, type CategoryResponse } from '../shared/categoryContract.ts';
+import { authenticationStatusSchema, type AuthenticationStatus } from '../shared/authenticationContract.ts';
 
 /** API の呼び出しの失敗。サーバーが入力の誤りを返した場合は fieldErrors に項目ごとの文言が入る。 */
 export class ApiRequestError extends Error {
@@ -31,6 +33,20 @@ export class ApiRequestError extends Error {
   }
 }
 
+/** ログインが必要と返されたときに呼ぶ関数（画面の最上位が登録する）。 */
+let authenticationRequiredListener: (() => void) | undefined;
+
+/**
+ * API がログインを求めた（ログインの期限切れなど）ときに呼ぶ関数を登録する（issue #11）。
+ * @returns 登録を解除する関数
+ */
+export function listenAuthenticationRequired(listener: () => void): () => void {
+  authenticationRequiredListener = listener;
+  return () => {
+    if (authenticationRequiredListener === listener) authenticationRequiredListener = undefined;
+  };
+}
+
 /** API を呼び、本文（JSON）を返す。本文がなければ undefined。 */
 async function sendApiRequest(method: string, path: string, requestBody?: unknown): Promise<unknown> {
   const isStateChanging = method !== 'GET';
@@ -43,6 +59,7 @@ async function sendApiRequest(method: string, path: string, requestBody?: unknow
     const parsedError = apiErrorResponseSchema.safeParse(await response.json().catch(() => undefined));
     if (!parsedError.success) throw new ApiRequestError(response.status, 'UNKNOWN_ERROR', `HTTP ${response.status}`);
     const { code, message, fieldErrors } = parsedError.data.error;
+    if (response.status === 401 && code === 'AUTHENTICATION_REQUIRED') authenticationRequiredListener?.();
     throw new ApiRequestError(response.status, code, message, fieldErrors);
   }
   if (response.status === 204) return undefined;
@@ -130,4 +147,24 @@ export async function addUndefinedCategoryToDefinition(categoryId: string): Prom
  */
 export async function reassignUndefinedCategoryProducts(categoryId: string, moveToCategoryId: string | null): Promise<void> {
   await sendApiRequest('POST', buildCategoryPath(categoryId, '/reassign-products'), { moveToCategoryId });
+}
+
+/** 認証の状態を取得する（issue #11）。 */
+export async function fetchAuthenticationStatus(): Promise<AuthenticationStatus> {
+  return authenticationStatusSchema.parse(await sendApiRequest('GET', '/api/auth/status'));
+}
+
+/** アカウントを作り、ログインした状態にする（issue #11）。 */
+export async function setUpAccount(loginId: string, password: string): Promise<AuthenticationStatus> {
+  return authenticationStatusSchema.parse(await sendApiRequest('POST', '/api/auth/setup', { loginId, password }));
+}
+
+/** ログインする（issue #11）。 */
+export async function logIn(loginId: string, password: string): Promise<AuthenticationStatus> {
+  return authenticationStatusSchema.parse(await sendApiRequest('POST', '/api/auth/login', { loginId, password }));
+}
+
+/** ログアウトする（issue #11）。 */
+export async function logOut(): Promise<void> {
+  await sendApiRequest('POST', '/api/auth/logout');
 }
