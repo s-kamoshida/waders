@@ -6,8 +6,16 @@
  * 利用者の操作による変更は「利用者の操作」、ステータスの自動遷移は「自動遷移」として変更履歴に記録する。
  * 自動遷移は、一覧を取得するたびと、サーバーの起動時（applyAutomaticTransitions）に行う（issue #9）。
  * カテゴリーは ID で持ち、設定したときの名前も保存する。指定した ID は定義のファイルで確かめる（issue #10）。
+ * カテゴリーの改名・削除・定義にないカテゴリーの扱い（定義に戻す・付け替える）も、商品の更新を伴うためここで行う（issue #10）。
+ * 商品の更新を先に行い、定義のファイルの書き込みをトランザクションの最後に行う（書き込みに失敗したら商品の更新を取り消す）。
  */
-import { CategoryDefinitionError, CategoryNotFoundError } from '../domain/category.ts';
+import {
+  CategoryAlreadyDefinedError,
+  CategoryDefinitionError,
+  CategoryDestinationNotFoundError,
+  CategoryNotFoundError,
+  type Category,
+} from '../domain/category.ts';
 import {
   ArchivedReleaseMonthChangeError,
   DeliveryConfirmationNotPendingError,
@@ -88,6 +96,39 @@ export type ProductService = {
    * @throws {RestoreReleaseMonthInPastError} 「延期された」の新しい発売月が当月より前の場合
    */
   answerDeliveryConfirmation(productId: ProductId, answer: DeliveryConfirmationRequest): Product;
+  /**
+   * 定義のカテゴリーを改名し、そのカテゴリーの商品に保存している名前も変える（issue #10）。
+   * @param name 新しい名前（検証済み）
+   * @throws {CategoryNotFoundError} カテゴリーが最新の定義にない場合
+   * @throws {CategoryNameDuplicateError} ほかのカテゴリーと同じ名前の場合
+   * @throws {CategoryDefinitionError} 定義のファイルに誤りがある場合
+   */
+  renameCategory(categoryId: string, name: string): Category;
+  /**
+   * 定義からカテゴリーを削除する。そのカテゴリーの商品（アーカイブを含む）は、移す先のカテゴリーかカテゴリー未設定にする（issue #10）。
+   * @param moveToCategoryId 移す先のカテゴリーの ID。null ならカテゴリー未設定
+   * @throws {CategoryNotFoundError} 削除するカテゴリーが最新の定義にない場合
+   * @throws {CategoryDestinationNotFoundError} 移す先が定義にない、または削除するカテゴリー自身の場合
+   * @throws {CategoryDefinitionError} 定義のファイルに誤りがある場合
+   */
+  deleteCategory(categoryId: string, moveToCategoryId: string | null): void;
+  /**
+   * 定義にないカテゴリーを、同じ ID と、商品に最後に保存した名前で定義の末尾に加える（issue #10）。
+   * @throws {CategoryNotFoundError} そのカテゴリーの商品がない場合
+   * @throws {CategoryAlreadyDefinedError} そのカテゴリーがすでに定義にある場合
+   * @throws {CategoryNameDuplicateError} 定義に同じ名前のカテゴリーがある場合
+   * @throws {CategoryDefinitionError} 定義のファイルに誤りがある場合
+   */
+  addUndefinedCategoryToDefinition(categoryId: string): Category;
+  /**
+   * 定義にないカテゴリーのすべての商品を、移す先のカテゴリーかカテゴリー未設定にする（issue #10）。
+   * @param moveToCategoryId 移す先のカテゴリーの ID。null ならカテゴリー未設定
+   * @throws {CategoryNotFoundError} そのカテゴリーの商品がない場合
+   * @throws {CategoryAlreadyDefinedError} そのカテゴリーが定義にある場合（削除で移す）
+   * @throws {CategoryDestinationNotFoundError} 移す先が定義にない場合
+   * @throws {CategoryDefinitionError} 定義のファイルに誤りがある場合
+   */
+  reassignUndefinedCategoryProducts(categoryId: string, moveToCategoryId: string | null): void;
 };
 
 /** createProductService の依存。 */
@@ -125,6 +166,28 @@ export function createProductService(dependencies: ProductServiceDependencies): 
       if (error instanceof CategoryDefinitionError) return new Map();
       throw error;
     }
+  };
+
+  /**
+   * 商品の移す先を、定義のカテゴリーから求める。null ならカテゴリー未設定。
+   * @param sourceCategoryId 移す元のカテゴリー（移す先にはできない）
+   */
+  const resolveMoveDestination = (
+    categories: readonly Category[],
+    sourceCategoryId: string,
+    moveToCategoryId: string | null,
+  ): { categoryId: string; categoryName: string } | null => {
+    if (moveToCategoryId === null) return null;
+    const destination = categories.find((category) => category.id === moveToCategoryId);
+    if (destination === undefined || destination.id === sourceCategoryId) throw new CategoryDestinationNotFoundError(moveToCategoryId);
+    return { categoryId: destination.id, categoryName: destination.name };
+  };
+
+  /** 定義にないカテゴリーの、商品に保存した名前を返す。商品がなければ CategoryNotFoundError。 */
+  const findUndefinedCategoryNameOrThrow = (categoryId: string): string => {
+    const categoryName = productRepository.findCategoryNameOfProducts(categoryId);
+    if (categoryName === undefined) throw new CategoryNotFoundError(categoryId);
+    return categoryName;
   };
 
   const findProductOrThrow = (productId: ProductId): Product => {
@@ -231,6 +294,37 @@ export function createProductService(dependencies: ProductServiceDependencies): 
         if (answer.answer === 'postponed') return updateByUser(current, { status: 'reserved', releaseMonth: answer.releaseMonth }, currentTime);
         return updateByUser(current, { status: 'unpurchased' }, currentTime);
       });
+    },
+
+    renameCategory(categoryId, name) {
+      return productRepository.runInTransaction(() => {
+        productRepository.renameCategoryOfProducts(categoryId, name.trim());
+        return categoryDefinition.renameCategory(categoryId, name);
+      });
+    },
+
+    deleteCategory(categoryId, moveToCategoryId) {
+      const categories = categoryDefinition.readCategories();
+      if (!categories.some((category) => category.id === categoryId)) throw new CategoryNotFoundError(categoryId);
+      const destination = resolveMoveDestination(categories, categoryId, moveToCategoryId);
+      const now = clock.now().toISOString();
+      productRepository.runInTransaction(() => {
+        productRepository.reassignCategoryOfProducts(categoryId, destination, now);
+        categoryDefinition.deleteCategory(categoryId);
+      });
+    },
+
+    addUndefinedCategoryToDefinition(categoryId) {
+      const categoryName = findUndefinedCategoryNameOrThrow(categoryId);
+      return categoryDefinition.addCategory(categoryName, categoryId);
+    },
+
+    reassignUndefinedCategoryProducts(categoryId, moveToCategoryId) {
+      findUndefinedCategoryNameOrThrow(categoryId);
+      const categories = categoryDefinition.readCategories();
+      if (categories.some((category) => category.id === categoryId)) throw new CategoryAlreadyDefinedError(categoryId);
+      const destination = resolveMoveDestination(categories, categoryId, moveToCategoryId);
+      productRepository.reassignCategoryOfProducts(categoryId, destination, clock.now().toISOString());
     },
   };
 }

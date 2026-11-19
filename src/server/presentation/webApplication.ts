@@ -139,7 +139,7 @@ export function createWebApplication(options: WebApplicationOptions): express.Ex
     response.json({ status: 'ok' });
   });
   apiRouter.use('/products', createProductRouter(options.productService));
-  apiRouter.use('/categories', createCategoryRouter(options.categoryService));
+  apiRouter.use('/categories', createCategoryRouter(options.categoryService, options.productService));
   apiRouter.use(respondApiNotFound);
   apiRouter.use(handleRequestBodyError);
   application.use('/api', apiRouter);

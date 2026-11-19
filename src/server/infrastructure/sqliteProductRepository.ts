@@ -6,6 +6,7 @@
  *  - DB ファイルを開き（所有者のみ読み書き可）、スキーマを最新の版数に移行する
  *  - 商品の登録・取得・一覧・更新・削除と、ステータス・発売月の変更履歴の記録
  *  - 延期の確認を待っている商品の記録（issue #9）
+ *  - カテゴリーの改名・削除に伴う、商品のカテゴリーの一括の変更（issue #10）
  * 業務ルールに対応する CHECK 制約を DB にも付け、検証をすり抜けた不正な値を最後に拒否する。
  * SQLite は Node.js 標準の node:sqlite を使う（CLAUDE.md「技術スタック」）。
  */
@@ -141,6 +142,25 @@ export type ProductRepository = {
    * 中で呼んだ操作が自分のトランザクションを始めることはない（入れ子にしない）。
    */
   runInTransaction<Result>(operation: () => Result): Result;
+  /**
+   * そのカテゴリーの商品に保存しているカテゴリー名を変える（改名に追従する。issue #10）。更新日時は変えない。
+   * @returns 変えた商品の数
+   */
+  renameCategoryOfProducts(categoryId: string, categoryName: string): number;
+  /**
+   * そのカテゴリーのすべての商品を、移す先のカテゴリー（null ならカテゴリー未設定）にする（issue #10）。
+   * 変更履歴（ステータス・発売月）には記録しない。
+   * @param destination 移す先の ID と名前。null ならカテゴリー未設定
+   * @param updatedAt 移した商品の更新日時
+   * @returns 移した商品の数
+   */
+  reassignCategoryOfProducts(
+    categoryId: string,
+    destination: { readonly categoryId: string; readonly categoryName: string } | null,
+    updatedAt: string,
+  ): number;
+  /** そのカテゴリーの商品に保存しているカテゴリー名（最後に更新した商品のもの）。商品がなければ undefined（issue #10）。 */
+  findCategoryNameOfProducts(categoryId: string): string | undefined;
 };
 
 const productRowSchema = z.object({
@@ -381,6 +401,25 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
 
     runInTransaction(operation) {
       return runInTransaction(database, operation);
+    },
+
+    renameCategoryOfProducts(categoryId, categoryName) {
+      const result = database.prepare('UPDATE products SET category = ? WHERE category_id = ?').run(categoryName, categoryId);
+      return Number(result.changes);
+    },
+
+    reassignCategoryOfProducts(categoryId, destination, updatedAt) {
+      const result = database
+        .prepare('UPDATE products SET category_id = ?, category = ?, updated_at = ? WHERE category_id = ?')
+        .run(destination?.categoryId ?? null, destination?.categoryName ?? null, updatedAt, categoryId);
+      return Number(result.changes);
+    },
+
+    findCategoryNameOfProducts(categoryId) {
+      const row = database
+        .prepare('SELECT category FROM products WHERE category_id = ? ORDER BY updated_at DESC, rowid DESC LIMIT 1')
+        .get(categoryId);
+      return row === undefined ? undefined : z.object({ category: z.string() }).parse(row).category;
     },
   };
 }

@@ -20,6 +20,15 @@ export const SCREEN_MESSAGES = {
   categoryUnavailable: 'カテゴリーの定義に誤りがあるため、カテゴリーは変更できません。',
   uncategorized: 'カテゴリー未設定',
   categoryFilterClear: '選択を解除（すべて表示）',
+  /** カテゴリーの管理（issue #10）。 */
+  categoryManagerTitle: 'カテゴリーの管理',
+  categoryManagerNote: '変更はすぐにカテゴリーの定義（categories.json）に保存します。名前を変えると、そのカテゴリーの商品も新しい名前になります。',
+  categorySaveFailed: 'カテゴリーを保存できませんでした。時間をおいて、もう一度お試しください。',
+  /** 商品が使っているカテゴリーを削除する場合の確認。 */
+  categoryDeleteConfirmation: (categoryName: string, productCount: number) =>
+    `「${categoryName}」は ${productCount} 件の商品が使っています。商品をどうしますか？`,
+  undefinedCategoryHeading: '定義にないカテゴリー',
+  undefinedCategoryNote: 'カテゴリーの定義にないカテゴリーを使っている商品があります。どうするかを選んでください。',
   /** ドラッグアンドドロップで発売月を移動した（issue #13）。monthLabel は「2027/02」の形。 */
   productMoved: (monthLabel: string) => `発売月を ${monthLabel} に移動しました`,
   /** 移動を元に戻した。 */
