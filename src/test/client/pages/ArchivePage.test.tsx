@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArchivePage } from '../../../client/pages/ArchivePage.tsx';
@@ -159,5 +159,27 @@ describe('アーカイブされた商品の編集とリストに戻す', () => {
       body: { releaseMonth: '2026-11' },
     });
     await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products')).toHaveLength(2));
+  });
+});
+
+describe('ドラッグアンドドロップ（issue #13）', () => {
+  it('アーカイブの商品はドラッグできず、落としても移動しない', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    const { requests } = stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: { products: [createProduct({ name: '9月の商品', releaseMonth: '2026-09' }), createProduct({ name: '10月の商品', releaseMonth: '2026-10' })] },
+      }),
+    });
+    render(<ArchivePage currentTime={currentTime} />);
+    const card = (await screen.findByRole('button', { name: /9月の商品/ })).closest('article');
+    if (card === null) throw new Error('カードが見つかりません');
+
+    expect(card).not.toHaveAttribute('draggable', 'true');
+    fireEvent.dragStart(card);
+    fireEvent.dragOver(screen.getByRole('region', { name: '2026/10' }));
+    fireEvent.drop(screen.getByRole('region', { name: '2026/10' }));
+
+    expect(requests.filter((recorded) => recorded.method === 'PATCH')).toEqual([]);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
   });
 });
