@@ -6,6 +6,7 @@
  *  - データのフォルダに定義のファイルがなければ、リポジトリのひな形から作成する（所有者のみ読み書き可。既存のファイルは上書きしない）
  *  - 読み込むたびに Zod で検証する（手で編集されるため）。誤りがあれば CategoryDefinitionError にし、ファイルは書き換えない
  *  - ID のないカテゴリーに ID を付けて書き戻す。書き込みは一時ファイルに書いてから置き換える（途中で壊れないようにする）
+ *  - カテゴリーの追加・改名・削除（issue #10）。変更する時点の最新のファイルを読み直して変更し、手で書かれたほかの項目は残す
  * ひな形は初回のコピー元にだけ使い、実行中に読み書きしない（CLAUDE.md「その他」）。
  */
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -13,7 +14,14 @@ import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { categoryIdSchema, categoryNameSchema } from '../../shared/categoryContract.ts';
-import { CategoryDefinitionError, type Category, type CategoryId } from '../domain/category.ts';
+import {
+  CategoryAlreadyDefinedError,
+  CategoryDefinitionError,
+  CategoryNameDuplicateError,
+  CategoryNotFoundError,
+  type Category,
+  type CategoryId,
+} from '../domain/category.ts';
 
 export { CategoryDefinitionError } from '../domain/category.ts';
 
@@ -38,6 +46,28 @@ export type CategoryDefinition = {
    * @throws {CategoryDefinitionError} ファイルがない・JSON として読めない・形式に誤りがある（名前・ID の重複を含む）場合
    */
   readCategories(): Category[];
+  /**
+   * 最新の定義の末尾にカテゴリーを加え、加えたカテゴリーを返す。
+   * @param name カテゴリー名（検証済み。前後の空白は除く）
+   * @param categoryId 使う ID（定義にないカテゴリーを定義に戻す場合）。省略するとアプリが付ける
+   * @throws {CategoryAlreadyDefinedError} 指定した ID がすでに定義にある場合
+   * @throws {CategoryNameDuplicateError} 同じ名前のカテゴリーがある場合
+   * @throws {CategoryDefinitionError} 定義のファイルに誤りがある場合
+   */
+  addCategory(name: string, categoryId?: string): Category;
+  /**
+   * 最新の定義のカテゴリーの名前を変え、改名したカテゴリーを返す。ID・並び順・ほかの項目は変えない。
+   * @throws {CategoryNotFoundError} カテゴリーが定義にない場合
+   * @throws {CategoryNameDuplicateError} ほかのカテゴリーと同じ名前の場合
+   * @throws {CategoryDefinitionError} 定義のファイルに誤りがある場合
+   */
+  renameCategory(categoryId: string, name: string): Category;
+  /**
+   * 最新の定義からカテゴリーを取り除く。
+   * @throws {CategoryNotFoundError} カテゴリーが定義にない場合
+   * @throws {CategoryDefinitionError} 定義のファイルに誤りがある場合
+   */
+  deleteCategory(categoryId: string): void;
 };
 
 /** createCategoryDefinitionFile の引数。 */
@@ -126,6 +156,28 @@ export function createCategoryDefinitionFile(options: CategoryDefinitionFileOpti
     return categoryId as CategoryId;
   };
 
+  /**
+   * 最新のファイルを読み、ID のないカテゴリーに ID を付ける（書き戻しは呼び出し側で行う）。
+   * raw はファイルの JSON（手で書かれたほかの項目を含む）に、付けた ID を反映したもの。
+   */
+  const loadWithIds = () => {
+    const { raw, definition } = readAndValidate();
+    const usedIds = new Set(definition.categories.flatMap((category) => (category.id === undefined ? [] : [category.id])));
+    let assignedCount = 0;
+    const categories: Category[] = definition.categories.map((category, index) => {
+      if (category.id !== undefined) return { id: category.id as CategoryId, name: category.name };
+      const categoryId = generateUniqueId(usedIds);
+      raw.categories[index] = { id: categoryId, ...raw.categories[index] };
+      assignedCount += 1;
+      return { id: categoryId, name: category.name };
+    });
+    return { raw, categories, usedIds, assignedCount };
+  };
+
+  const writeDefinition = (raw: { categories: RawCategoryEntry[] }): void => {
+    writeFileAtomically(filePath, `${JSON.stringify(raw, null, 2)}\n`);
+  };
+
   return {
     createFromTemplateIfMissing() {
       if (existsSync(filePath)) return;
@@ -133,18 +185,41 @@ export function createCategoryDefinitionFile(options: CategoryDefinitionFileOpti
     },
 
     readCategories() {
-      const { raw, definition } = readAndValidate();
-      const usedIds = new Set(definition.categories.flatMap((category) => (category.id === undefined ? [] : [category.id])));
-      let assignedCount = 0;
-      const categories: Category[] = definition.categories.map((category, index) => {
-        if (category.id !== undefined) return { id: category.id as CategoryId, name: category.name };
-        const categoryId = generateUniqueId(usedIds);
-        raw.categories[index] = { id: categoryId, ...raw.categories[index] };
-        assignedCount += 1;
-        return { id: categoryId, name: category.name };
-      });
-      if (assignedCount > 0) writeFileAtomically(filePath, `${JSON.stringify(raw, null, 2)}\n`);
+      const { raw, categories, assignedCount } = loadWithIds();
+      if (assignedCount > 0) writeDefinition(raw);
       return categories;
+    },
+
+    addCategory(name, categoryId) {
+      const { raw, categories, usedIds } = loadWithIds();
+      const trimmedName = name.trim();
+      if (categoryId !== undefined && usedIds.has(categoryId)) throw new CategoryAlreadyDefinedError(categoryId);
+      if (categories.some((category) => category.name === trimmedName)) throw new CategoryNameDuplicateError(trimmedName);
+      const added: Category = { id: categoryId === undefined ? generateUniqueId(usedIds) : (categoryId as CategoryId), name: trimmedName };
+      raw.categories.push({ id: added.id, name: added.name });
+      writeDefinition(raw);
+      return added;
+    },
+
+    renameCategory(categoryId, name) {
+      const { raw, categories } = loadWithIds();
+      const trimmedName = name.trim();
+      const index = categories.findIndex((category) => category.id === categoryId);
+      if (index === -1) throw new CategoryNotFoundError(categoryId);
+      if (categories.some((category) => category.id !== categoryId && category.name === trimmedName)) {
+        throw new CategoryNameDuplicateError(trimmedName);
+      }
+      raw.categories[index] = { ...raw.categories[index], name: trimmedName };
+      writeDefinition(raw);
+      return { id: categoryId as CategoryId, name: trimmedName };
+    },
+
+    deleteCategory(categoryId) {
+      const { raw, categories } = loadWithIds();
+      const index = categories.findIndex((category) => category.id === categoryId);
+      if (index === -1) throw new CategoryNotFoundError(categoryId);
+      raw.categories.splice(index, 1);
+      writeDefinition(raw);
     },
   };
 }

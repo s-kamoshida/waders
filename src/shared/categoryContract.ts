@@ -2,7 +2,7 @@
  * カテゴリーの形式（クライアントとサーバーで共用）。
  *
  * 所属: 共有（src/shared）
- * 責務: カテゴリーの名前・ID の形式と、カテゴリーの API の応答を Zod のスキーマとして定義する（issue #10）。
+ * 責務: カテゴリーの名前・ID の形式と、カテゴリーの API の要求・応答を Zod のスキーマとして定義する（issue #10）。
  */
 import { z } from 'zod';
 import { MAXIMUM_CATEGORY_ID_LENGTH, MAXIMUM_CATEGORY_NAME_LENGTH } from './productContract.ts';
@@ -27,3 +27,13 @@ export type CategoryResponse = z.infer<typeof categorySchema>;
 
 /** カテゴリーの一覧（GET /api/categories）の応答のスキーマ。定義のファイルの並び順。 */
 export const categoryListResponseSchema = z.object({ categories: z.array(categorySchema) });
+
+/** カテゴリーの追加・改名（POST /api/categories・PUT /api/categories/:categoryId）の本文のスキーマ。 */
+export const categoryNameRequestSchema = z.object({ name: categoryNameSchema });
+
+/**
+ * カテゴリーの削除・定義にないカテゴリーの付け替え（DELETE /api/categories/:categoryId・
+ * POST /api/categories/:categoryId/reassign-products）の本文のスキーマ。
+ * moveToCategoryId は商品の移す先のカテゴリーの ID。null ならカテゴリー未設定にする。
+ */
+export const categoryReassignRequestSchema = z.object({ moveToCategoryId: categoryIdSchema.nullable() });

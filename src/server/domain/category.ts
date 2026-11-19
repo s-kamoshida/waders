@@ -33,3 +33,30 @@ export class CategoryNotFoundError extends Error {
     this.name = 'CategoryNotFoundError';
   }
 }
+
+/** 定義にほかのカテゴリーと同じ名前を付けようとした場合のエラー（追加・改名・定義に戻す。issue #10）。 */
+export class CategoryNameDuplicateError extends Error {
+  readonly categoryName: string;
+
+  constructor(categoryName: string) {
+    super(`カテゴリー名が重複しています: ${categoryName}`);
+    this.name = 'CategoryNameDuplicateError';
+    this.categoryName = categoryName;
+  }
+}
+
+/** すでに定義にあるカテゴリーを、定義にないカテゴリーとして扱おうとした場合のエラー（issue #10）。 */
+export class CategoryAlreadyDefinedError extends Error {
+  constructor(categoryId: string) {
+    super(`カテゴリーはすでに定義にあります: ${categoryId}`);
+    this.name = 'CategoryAlreadyDefinedError';
+  }
+}
+
+/** 商品の移す先のカテゴリーが定義にない（または移す元と同じ）場合のエラー（issue #10）。 */
+export class CategoryDestinationNotFoundError extends Error {
+  constructor(categoryId: string) {
+    super(`移す先のカテゴリーが定義にありません: ${categoryId}`);
+    this.name = 'CategoryDestinationNotFoundError';
+  }
+}

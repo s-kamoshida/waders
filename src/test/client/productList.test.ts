@@ -7,6 +7,7 @@ import {
   formatArchiveSummary,
   formatGroupSummary,
   splitProductsByArchive,
+  summarizeCategoryUsage,
 } from '../../client/productList.ts';
 import type { ProductResponse } from '../../shared/productContract.ts';
 
@@ -248,5 +249,43 @@ describe('絞り込みの選択肢（issue #10）', () => {
       { id: 'action', label: '可動フィギュア' },
       { id: 'legacy', label: '旧カテゴリー（定義にない）' },
     ]);
+  });
+});
+
+describe('カテゴリーの使われ方の集計（カテゴリーの管理。issue #10）', () => {
+  const categories = [
+    { id: 'scale', name: 'スケールフィギュア' },
+    { id: 'action', name: '可動フィギュア' },
+  ];
+
+  it('定義の並び順で、各カテゴリーを使っている商品の数（アーカイブの商品を含む）を数え、使っていなければ 0 にする', () => {
+    const products = [
+      createProduct({ categoryId: 'scale', categoryName: 'スケールフィギュア' }),
+      createProduct({ categoryId: 'scale', categoryName: 'スケールフィギュア', releaseMonth: '2026-09', status: 'purchased' }),
+      createProduct(),
+    ];
+
+    expect(summarizeCategoryUsage(categories, products).definedCategories).toEqual([
+      { id: 'scale', name: 'スケールフィギュア', productCount: 2 },
+      { id: 'action', name: '可動フィギュア', productCount: 0 },
+    ]);
+  });
+
+  it('定義にないカテゴリーを、最初に現れた商品の順に、最後に保存した名前と商品の数で重複なく返す', () => {
+    const products = [
+      createProduct({ categoryId: 'removed-b', categoryName: '旧カテゴリー B' }),
+      createProduct({ categoryId: 'scale', categoryName: 'スケールフィギュア' }),
+      createProduct({ categoryId: 'removed-a', categoryName: '旧カテゴリー A' }),
+      createProduct({ categoryId: 'removed-b', categoryName: '旧カテゴリー B' }),
+    ];
+
+    expect(summarizeCategoryUsage(categories, products).undefinedCategories).toEqual([
+      { id: 'removed-b', name: '旧カテゴリー B', productCount: 2 },
+      { id: 'removed-a', name: '旧カテゴリー A', productCount: 1 },
+    ]);
+  });
+
+  it('定義にないカテゴリーの商品がない場合、定義にないカテゴリーは空にする', () => {
+    expect(summarizeCategoryUsage(categories, [createProduct(), createProduct({ categoryId: 'action', categoryName: '可動フィギュア' })]).undefinedCategories).toEqual([]);
   });
 });

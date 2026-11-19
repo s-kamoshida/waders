@@ -942,3 +942,120 @@ html:has(.dialog-backdrop) body {
     max-width: none;
   }
 }
+
+/* カテゴリーの管理（issue #10） */
+.application-header-spacer {
+  flex: 1;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--background);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.category-list,
+.category-undefined {
+  display: grid;
+  gap: 8px;
+}
+
+.category-row {
+  display: grid;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.category-row-main,
+.category-add,
+.category-confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-row-name {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.category-row-name--undefined {
+  border-color: transparent;
+  padding-left: 0;
+}
+
+.category-row-count {
+  min-width: 40px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.category-confirmation {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #f1b8c1;
+  border-radius: 8px;
+  background: #fdecee;
+}
+
+.category-confirmation p {
+  margin: 0;
+}
+
+.category-destination {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.category-destination select {
+  max-width: 200px;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.category-undefined {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.category-undefined-heading {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* スマートフォンの幅では、カテゴリー名を 1 行目の全幅に置き、件数とボタンを 2 行目に並べる（名前が途中で切れないように） */
+@media (max-width: 600px) {
+  .category-row-main .category-row-name {
+    flex-basis: 100%;
+  }
+
+  .category-row-main .category-row-count {
+    margin-right: auto;
+    text-align: left;
+  }
+}

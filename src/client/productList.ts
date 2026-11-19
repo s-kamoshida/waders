@@ -210,3 +210,31 @@ export function buildCategoryFilterOptions(
 export function formatUndefinedCategoryLabel(categoryName: string): string {
   return `${categoryName}（定義にない）`;
 }
+
+/** カテゴリーと、それを使っている商品の数（カテゴリーの管理。issue #10）。 */
+export type CategoryUsage = { readonly id: string; readonly name: string; readonly productCount: number };
+
+/**
+ * カテゴリーの使われ方を集計する（カテゴリーの管理。issue #10）。
+ * @param products アーカイブを含むすべての商品
+ * @returns definedCategories は定義の並び順の各カテゴリーと商品の数（使っていなければ 0）。
+ *   undefinedCategories は定義にないカテゴリー（最初に現れた商品の順、名前は商品に最後に保存した名前）と商品の数
+ */
+export function summarizeCategoryUsage(
+  categories: readonly CategoryResponse[],
+  products: readonly ProductResponse[],
+): { definedCategories: CategoryUsage[]; undefinedCategories: CategoryUsage[] } {
+  const productCounts = new Map<string, number>();
+  const undefinedCategoryNames = new Map<string, string>();
+  const definedIds = new Set(categories.map((category) => category.id));
+  for (const product of products) {
+    if (product.categoryId === null) continue;
+    productCounts.set(product.categoryId, (productCounts.get(product.categoryId) ?? 0) + 1);
+    if (definedIds.has(product.categoryId) || undefinedCategoryNames.has(product.categoryId)) continue;
+    undefinedCategoryNames.set(product.categoryId, product.categoryName ?? product.categoryId);
+  }
+  return {
+    definedCategories: categories.map((category) => ({ ...category, productCount: productCounts.get(category.id) ?? 0 })),
+    undefinedCategories: [...undefinedCategoryNames].map(([id, name]) => ({ id, name, productCount: productCounts.get(id) ?? 0 })),
+  };
+}

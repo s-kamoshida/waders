@@ -2,6 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CategoryAlreadyDefinedError, CategoryNameDuplicateError, CategoryNotFoundError } from '../../../server/domain/category.ts';
 import {
   CATEGORY_TEMPLATE_FILE_PATH,
   CategoryDefinitionError,
@@ -158,5 +159,158 @@ describe('誤りのある定義のファイル', () => {
   it('定義のファイルがない場合（起動後に削除された場合など）、CategoryDefinitionError にし、ファイルを作らない', () => {
     expect(() => createDefinition().readCategories()).toThrow(CategoryDefinitionError);
     expect(readdirSync(temporaryDirectory)).toEqual([]);
+  });
+});
+
+describe('定義の変更（カテゴリーの管理。issue #10）', () => {
+  it('カテゴリーを追加した場合、ID を付けて定義の末尾に加え、追加したカテゴリーを返す（0600 のまま、一時ファイルを残さない）', () => {
+    writeDefinition({ version: 1, categories: [{ id: 'scale', name: 'スケールフィギュア' }] });
+
+    const added = createDefinition().addCategory('プラモデル');
+
+    expect(added).toEqual({ id: 'generated-1', name: 'プラモデル' });
+    expect(readDefinitionJson()).toEqual({
+      version: 1,
+      categories: [
+        { id: 'scale', name: 'スケールフィギュア' },
+        { id: 'generated-1', name: 'プラモデル' },
+      ],
+    });
+    expect(statSync(definitionFilePath).mode & 0o777).toBe(0o600);
+    expect(readdirSync(temporaryDirectory)).toEqual(['categories.json']);
+  });
+
+  it('ID を指定して追加した場合（定義にないカテゴリーを定義に戻す場合）、その ID で末尾に加える', () => {
+    writeDefinition({ version: 1, categories: [{ id: 'scale', name: 'スケールフィギュア' }] });
+
+    const added = createDefinition().addCategory('プライズ', 'legacy:プライズ');
+
+    expect(added).toEqual({ id: 'legacy:プライズ', name: 'プライズ' });
+    expect(createDefinition().readCategories()).toEqual([
+      { id: 'scale', name: 'スケールフィギュア' },
+      { id: 'legacy:プライズ', name: 'プライズ' },
+    ]);
+  });
+
+  it('変更は、変更する時点の最新の定義のファイルに対して行い、手で編集した内容（ID のないカテゴリー・ほかの項目）を残す', () => {
+    writeDefinition({ version: 1, categories: [{ id: 'scale', name: 'スケールフィギュア' }] });
+    const definition = createDefinition();
+    definition.readCategories();
+    writeDefinition({
+      version: 1,
+      categories: [{ id: 'scale', name: 'スケール', memo: '手で書いたメモ' }, { name: '手で追加した' }],
+    });
+
+    definition.addCategory('プラモデル');
+
+    expect(readDefinitionJson()).toEqual({
+      version: 1,
+      categories: [
+        { id: 'scale', name: 'スケール', memo: '手で書いたメモ' },
+        { id: 'generated-1', name: '手で追加した' },
+        { id: 'generated-2', name: 'プラモデル' },
+      ],
+    });
+  });
+
+  it('追加する名前が定義のカテゴリーと重なる場合、CategoryNameDuplicateError にし、ファイルを書き換えない', () => {
+    writeDefinition({ version: 1, categories: [{ id: 'scale', name: 'スケールフィギュア' }] });
+    const before = readFileSync(definitionFilePath, 'utf8');
+
+    expect(() => createDefinition().addCategory('スケールフィギュア')).toThrow(CategoryNameDuplicateError);
+    expect(readFileSync(definitionFilePath, 'utf8')).toBe(before);
+  });
+
+  it('指定した ID がすでに定義にある場合、CategoryAlreadyDefinedError にし、ファイルを書き換えない', () => {
+    writeDefinition({ version: 1, categories: [{ id: 'scale', name: 'スケールフィギュア' }] });
+    const before = readFileSync(definitionFilePath, 'utf8');
+
+    expect(() => createDefinition().addCategory('別の名前', 'scale')).toThrow(CategoryAlreadyDefinedError);
+    expect(readFileSync(definitionFilePath, 'utf8')).toBe(before);
+  });
+
+  it('改名した場合、そのカテゴリーの名前だけを変え、ID・並び順・ほかの項目は変えない', () => {
+    writeDefinition({
+      version: 1,
+      categories: [
+        { id: 'scale', name: 'スケールフィギュア', memo: 'メモ' },
+        { id: 'action', name: '可動フィギュア' },
+      ],
+    });
+
+    const renamed = createDefinition().renameCategory('scale', 'スケール');
+
+    expect(renamed).toEqual({ id: 'scale', name: 'スケール' });
+    expect(readDefinitionJson()).toEqual({
+      version: 1,
+      categories: [
+        { id: 'scale', name: 'スケール', memo: 'メモ' },
+        { id: 'action', name: '可動フィギュア' },
+      ],
+    });
+  });
+
+  it('今と同じ名前に改名した場合は、エラーにしない', () => {
+    writeDefinition({ version: 1, categories: [{ id: 'scale', name: 'スケールフィギュア' }] });
+
+    expect(createDefinition().renameCategory('scale', 'スケールフィギュア')).toEqual({ id: 'scale', name: 'スケールフィギュア' });
+  });
+
+  it('ほかのカテゴリーと同じ名前に改名しようとした場合、CategoryNameDuplicateError にし、ファイルを書き換えない', () => {
+    writeDefinition({
+      version: 1,
+      categories: [
+        { id: 'scale', name: 'スケールフィギュア' },
+        { id: 'action', name: '可動フィギュア' },
+      ],
+    });
+    const before = readFileSync(definitionFilePath, 'utf8');
+
+    expect(() => createDefinition().renameCategory('scale', '可動フィギュア')).toThrow(CategoryNameDuplicateError);
+    expect(readFileSync(definitionFilePath, 'utf8')).toBe(before);
+  });
+
+  it('削除した場合、そのカテゴリーだけを定義から取り除き、ほかの並び順は変えない', () => {
+    writeDefinition({
+      version: 1,
+      categories: [
+        { id: 'scale', name: 'スケールフィギュア' },
+        { id: 'action', name: '可動フィギュア' },
+        { id: 'plastic', name: 'プラモデル' },
+      ],
+    });
+
+    createDefinition().deleteCategory('action');
+
+    expect(readDefinitionJson()).toEqual({
+      version: 1,
+      categories: [
+        { id: 'scale', name: 'スケールフィギュア' },
+        { id: 'plastic', name: 'プラモデル' },
+      ],
+    });
+  });
+
+  it.each([
+    ['改名', (definition: ReturnType<typeof createDefinition>) => definition.renameCategory('missing', '新しい名前')],
+    ['削除', (definition: ReturnType<typeof createDefinition>) => definition.deleteCategory('missing')],
+  ])('%sするカテゴリーが最新の定義にない場合（手で消された場合など）、CategoryNotFoundError にし、ファイルを書き換えない', (_label, operate) => {
+    writeDefinition({ version: 1, categories: [{ id: 'scale', name: 'スケールフィギュア' }] });
+    const before = readFileSync(definitionFilePath, 'utf8');
+
+    expect(() => operate(createDefinition())).toThrow(CategoryNotFoundError);
+    expect(readFileSync(definitionFilePath, 'utf8')).toBe(before);
+  });
+
+  it.each([
+    ['追加', (definition: ReturnType<typeof createDefinition>) => definition.addCategory('プラモデル')],
+    ['改名', (definition: ReturnType<typeof createDefinition>) => definition.renameCategory('scale', 'スケール')],
+    ['削除', (definition: ReturnType<typeof createDefinition>) => definition.deleteCategory('scale')],
+  ])('定義のファイルに誤りがある場合、%sは CategoryDefinitionError にし、壊れたファイルを書き換えない', (_label, operate) => {
+    writeDefinition('{"version":1,"categories":[{"id":"scale","name":"スケールフィギュア"},]}');
+    const before = readFileSync(definitionFilePath, 'utf8');
+
+    expect(() => operate(createDefinition())).toThrow(CategoryDefinitionError);
+    expect(readFileSync(definitionFilePath, 'utf8')).toBe(before);
   });
 });
