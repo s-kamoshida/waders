@@ -20,6 +20,12 @@ export const SCREEN_MESSAGES = {
   categoryUnavailable: 'カテゴリーの定義に誤りがあるため、カテゴリーは変更できません。',
   uncategorized: 'カテゴリー未設定',
   categoryFilterClear: '選択を解除（すべて表示）',
+  /** ドラッグアンドドロップで発売月を移動した（issue #13）。monthLabel は「2027/02」の形。 */
+  productMoved: (monthLabel: string) => `発売月を ${monthLabel} に移動しました`,
+  /** 移動を元に戻した。 */
+  productMoveUndone: (monthLabel: string) => `発売月を ${monthLabel} に戻しました`,
+  productMoveFailed: '発売月を移動できませんでした。時間をおいて、もう一度お試しください。',
+  undo: '元に戻す',
   archiveEmpty: 'アーカイブされた商品はありません',
   archivedReleaseMonthHint: '発売月は「リストに戻す」で変更します。',
   restoreTitle: 'リストに戻す',

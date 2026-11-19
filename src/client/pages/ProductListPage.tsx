@@ -9,13 +9,15 @@
  *  - ＋ボタン・月の見出しの＋ボタン（その月を発売月にする。issue #16）で追加、商品を押して編集・削除のモーダルを開き、保存後に読み込み直す
  *  - 「保存して続けて追加」で保存した場合は、モーダルを開いたまま読み込み直す（issue #16）
  *  - カテゴリーで絞り込む（選択は端末ごとに覚え、見出しの集計も絞り込んだ商品で数える。issue #10）
+ *  - ドラッグアンドドロップで発売月を移動し、知らせ（「元に戻す」付き）を出す。ほかの操作を始めたら知らせを閉じる（issue #13）
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ProductListItem } from '../../shared/productContract.ts';
+import type { ProductListItem, ProductResponse } from '../../shared/productContract.ts';
 import { CategoryFilterMenu, useCategoryFilter } from '../components/CategoryFilterMenu.tsx';
 import { ProductEditorDialog, type ProductEditorMode } from '../components/ProductEditorDialog.tsx';
+import { NoticeToast, type Notice } from '../components/NoticeToast.tsx';
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
-import { fetchProducts } from '../productApiClient.ts';
+import { fetchProducts, moveProductToReleaseMonth } from '../productApiClient.ts';
 import { formatDateInJapan, formatMonthInJapan } from '../productDisplay.ts';
 import {
   buildProductListGroups,
@@ -64,6 +66,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
   const [hasLoadError, setHasLoadError] = useState(false);
   const [yearMode, setYearMode] = useState<YearMode>(readStoredYearMode);
   const [editorMode, setEditorMode] = useState<ProductEditorMode | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   const today = formatDateInJapan(currentTime);
   const currentMonth = formatMonthInJapan(currentTime);
@@ -91,10 +94,47 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
 
   const makerSuggestions = useMemo(() => collectMakerSuggestions(products ?? []), [products]);
 
+  /** 追加・編集のモーダルを開く。ほかの操作を始めたので、移動の知らせは閉じる（issue #13）。 */
+  const openEditor = (mode: ProductEditorMode) => {
+    setNotice(null);
+    setEditorMode(mode);
+  };
+
   const changeYearMode = (nextYearMode: YearMode) => {
+    setNotice(null);
     setYearMode(nextYearMode);
     storeYearMode(nextYearMode);
   };
+
+  const expireNotice = useCallback((expired: Notice) => {
+    setNotice((current) => (current === expired ? null : current));
+  }, []);
+
+  /** 発売月を移動して知らせる。元に戻す場合は、知らせに「元に戻す」を付けない。 */
+  const moveProduct = useCallback(
+    async (product: ProductResponse, month: string, isUndo = false) => {
+      try {
+        await moveProductToReleaseMonth(product.id, month);
+        const monthLabel = month.replace('-', '/');
+        setNotice(
+          isUndo
+            ? { kind: 'success', message: SCREEN_MESSAGES.productMoveUndone(monthLabel) }
+            : {
+                kind: 'success',
+                message: SCREEN_MESSAGES.productMoved(monthLabel),
+                action: {
+                  label: SCREEN_MESSAGES.undo,
+                  onPress: () => void moveProduct({ ...product, releaseMonth: month }, product.releaseMonth, true),
+                },
+              },
+        );
+        void loadProducts();
+      } catch {
+        setNotice({ kind: 'error', message: SCREEN_MESSAGES.productMoveFailed });
+      }
+    },
+    [loadProducts],
+  );
 
   const handleSaved = () => {
     setEditorMode(null);
@@ -107,7 +147,10 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
         <CategoryFilterMenu
           options={categoryFilter.options}
           filter={categoryFilter.filter}
-          onChange={categoryFilter.changeFilter}
+          onChange={(nextFilter) => {
+            setNotice(null);
+            categoryFilter.changeFilter(nextFilter);
+          }}
           disabled={categoryFilter.categories === null}
         />
         <div className="segmented" role="radiogroup" aria-label="年のまとめ方">
@@ -134,7 +177,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           type="button"
           className="add-button"
           aria-label="商品を追加"
-          onClick={() => setEditorMode({ kind: 'create', defaultReleaseMonth: currentMonth })}
+          onClick={() => openEditor({ kind: 'create', defaultReleaseMonth: currentMonth })}
         >
           ＋
         </button>
@@ -156,10 +199,13 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           yearGroups={yearGroups}
           formatSummary={formatGroupSummary}
           today={today}
-          onSelect={(selected) => setEditorMode({ kind: 'edit', product: selected })}
-          onAddToMonth={(month) => setEditorMode({ kind: 'create', defaultReleaseMonth: month })}
+          onSelect={(selected) => openEditor({ kind: 'edit', product: selected })}
+          onAddToMonth={(month) => openEditor({ kind: 'create', defaultReleaseMonth: month })}
+          onMoveProduct={(product, month) => void moveProduct(product, month)}
         />
       )}
+
+      <NoticeToast notice={notice} onExpire={expireNotice} />
 
       {editorMode !== null && (
         <ProductEditorDialog

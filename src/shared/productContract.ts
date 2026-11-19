@@ -163,6 +163,9 @@ export const productListResponseSchema = z.object({ products: z.array(productLis
 /** リストに戻す（POST /api/products/:productId/restore）の本文のスキーマ。当月以降かはサーバーが現在時刻で確かめる。 */
 export const restoreRequestSchema = z.object({ releaseMonth: releaseMonthSchema });
 
+/** 発売月だけを変える（PATCH /api/products/:productId/release-month。ドラッグアンドドロップ。issue #13）の本文のスキーマ。 */
+export const releaseMonthChangeRequestSchema = z.object({ releaseMonth: releaseMonthSchema });
+
 /** リストに戻すの本文。 */
 export type RestoreRequest = z.infer<typeof restoreRequestSchema>;
 

@@ -3,13 +3,15 @@
  *
  * 所属: クライアント（画面の部品）
  * 責務: 組み立て済みの年・月のグループを、折りたためる見出し（個数と合計金額）と商品のカードで表示する。
- * 見出しの集計の表記（見込みか実績か）と、月の見出しの追加ボタンを置くか（リストだけ。issue #16）は呼び出し側が決める。
+ * 見出しの集計の表記（見込みか実績か）と、月の見出しの追加ボタンを置くか（リストだけ。issue #16）、
+ * ドラッグアンドドロップで発売月を移動できるか（リストだけ。issue #13）は呼び出し側が決める。
  */
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { ProductResponse } from '../../shared/productContract.ts';
 import type { GroupSummary, YearGroup } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 import { ProductCard } from './ProductCard.tsx';
+import { useProductDragAndDrop } from './useProductDragAndDrop.ts';
 
 /** 集合に値があれば取り除き、なければ加えた新しい集合を返す。 */
 function toggleSetValue(values: ReadonlySet<string>, value: string): Set<string> {
@@ -30,14 +32,22 @@ export type ProductGroupListProps = {
   readonly onSelect: (product: ProductResponse) => void;
   /** 渡すと、月の見出しの右端に追加ボタンを置き、押したときにその月（YYYY-MM）を渡して呼ぶ。 */
   readonly onAddToMonth?: (month: string) => void;
+  /** 渡すと、商品をドラッグアンドドロップで別の月に移動できる。別の月に落としたときに呼ぶ（issue #13）。 */
+  readonly onMoveProduct?: (product: ProductResponse, month: string) => void;
 };
 
 /** 年・月のグループを表示する。 */
-export function ProductGroupList({ yearGroups, formatSummary, today, onSelect, onAddToMonth }: ProductGroupListProps) {
+export function ProductGroupList({ yearGroups, formatSummary, today, onSelect, onAddToMonth, onMoveProduct }: ProductGroupListProps) {
   const [collapsedYearKeys, setCollapsedYearKeys] = useState<ReadonlySet<string>>(new Set());
   const [collapsedMonths, setCollapsedMonths] = useState<ReadonlySet<string>>(new Set());
+  const moveProduct = useCallback(
+    (product: ProductResponse, month: string) => onMoveProduct?.(product, month),
+    [onMoveProduct],
+  );
+  const dragAndDrop = useProductDragAndDrop(moveProduct);
+  const canMove = onMoveProduct !== undefined;
 
-  return yearGroups.map((yearGroup) => {
+  const groups = yearGroups.map((yearGroup) => {
     const isYearExpanded = !collapsedYearKeys.has(yearGroup.key);
     return (
       <section key={yearGroup.key} className="year-group">
@@ -57,7 +67,12 @@ export function ProductGroupList({ yearGroups, formatSummary, today, onSelect, o
           yearGroup.months.map((monthGroup) => {
             const isMonthExpanded = !collapsedMonths.has(monthGroup.month);
             return (
-              <section key={monthGroup.month} className="month-group" aria-label={monthGroup.label}>
+              <section
+                key={monthGroup.month}
+                className={dragAndDrop.dropTargetMonth === monthGroup.month ? 'month-group month-group--drop-target' : 'month-group'}
+                aria-label={monthGroup.label}
+                {...(canMove ? dragAndDrop.getMonthDropTargetProps(monthGroup.month) : {})}
+              >
                 <h3 className="month-heading">
                   <button
                     type="button"
@@ -84,7 +99,14 @@ export function ProductGroupList({ yearGroups, formatSummary, today, onSelect, o
                 {isMonthExpanded && monthGroup.products.length > 0 && (
                   <div className="product-grid">
                     {monthGroup.products.map((product) => (
-                      <ProductCard key={product.id} product={product} today={today} onSelect={onSelect} />
+                      <ProductCard
+                        key={product.id}
+                        product={product}
+                        today={today}
+                        onSelect={onSelect}
+                        dragHandlers={canMove ? dragAndDrop.getCardHandlers(product) : undefined}
+                        isGrabbed={dragAndDrop.grabbedProductId === product.id}
+                      />
                     ))}
                   </div>
                 )}
@@ -94,4 +116,15 @@ export function ProductGroupList({ yearGroups, formatSummary, today, onSelect, o
       </section>
     );
   });
+
+  return (
+    <>
+      {groups}
+      {dragAndDrop.grabbedProductId !== null && (
+        <div className="drag-indicator" aria-hidden="true">
+          {dragAndDrop.dropTargetMonth === null ? '移動先の月まで動かしてください' : `${dragAndDrop.dropTargetMonth.replace('-', '/')} に移動`}
+        </div>
+      )}
+    </>
+  );
 }

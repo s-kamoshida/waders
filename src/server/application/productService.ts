@@ -73,6 +73,15 @@ export type ProductService = {
    */
   restoreProduct(productId: ProductId, releaseMonth: string): Product;
   /**
+   * 発売月だけを変える（ドラッグアンドドロップ。issue #13）。今と同じ月なら何もせずに今の商品を返す。
+   * 変更は利用者の操作として変更履歴に記録する。
+   * @param releaseMonth 新しい発売月（当月以降）
+   * @throws {ProductNotFoundError} 商品が存在しない場合
+   * @throws {ArchivedReleaseMonthChangeError} アーカイブされた商品の場合
+   * @throws {RestoreReleaseMonthInPastError} 新しい発売月が当月より前の場合
+   */
+  moveProductToReleaseMonth(productId: ProductId, releaseMonth: string): Product;
+  /**
    * 延期の確認に回答し、回答を反映した商品を返す。延期の確認待ちを外す。
    * @throws {ProductNotFoundError} 商品が存在しない場合
    * @throws {DeliveryConfirmationNotPendingError} 延期の確認を待っていない場合
@@ -196,6 +205,15 @@ export function createProductService(dependencies: ProductServiceDependencies): 
         productRepository.clearDeliveryConfirmationPending(productId);
         return updateByUser(current, { status, releaseMonth }, currentTime);
       });
+    },
+
+    moveProductToReleaseMonth(productId, releaseMonth) {
+      const current = findProductOrThrow(productId);
+      const currentTime = clock.now();
+      if (isProductArchived(current, currentTime)) throw new ArchivedReleaseMonthChangeError(productId);
+      if (releaseMonth === current.releaseMonth) return current;
+      if (isProductArchived({ releaseMonth }, currentTime)) throw new RestoreReleaseMonthInPastError(releaseMonth);
+      return updateByUser(current, { releaseMonth }, currentTime);
     },
 
     answerDeliveryConfirmation(productId, answer) {
