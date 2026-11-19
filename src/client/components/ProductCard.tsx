@@ -5,6 +5,7 @@
  * 責務: 1 件の商品を、画像（共通のアイコン）・ステータス・メーカー・商品名・金額・送料・備考の印・受注期限・購入先のリンクとして表示する。
  * カードを押すと onSelect で選択を知らせる。購入先のリンクは別のタブで開き、選択はしない。
  */
+import type { HTMLAttributes } from 'react';
 import type { ProductResponse } from '../../shared/productContract.ts';
 import {
   extractShopDomain,
@@ -21,6 +22,10 @@ export type ProductCardProps = {
   /** 日本時間の今日の日付（YYYY-MM-DD）。受注期限の警告に使う。 */
   readonly today: string;
   readonly onSelect: (product: ProductResponse) => void;
+  /** ドラッグアンドドロップの操作（リストだけ。issue #13）。カードの要素に付ける。 */
+  readonly dragHandlers?: Pick<HTMLAttributes<HTMLElement>, 'draggable' | 'onDragStart' | 'onDragEnd' | 'onPointerDown' | 'onClickCapture' | 'onContextMenu'>;
+  /** タッチ操作で掴んでいる間は true（浮いた見た目にする）。 */
+  readonly isGrabbed?: boolean;
 };
 
 /** ステータスの見た目を切り替えるためのクラス名。 */
@@ -40,13 +45,13 @@ function ProductPlaceholderIcon() {
 }
 
 /** 商品のカードを描画する。 */
-export function ProductCard({ product, today, onSelect }: ProductCardProps) {
+export function ProductCard({ product, today, onSelect, dragHandlers, isGrabbed = false }: ProductCardProps) {
   const isWarning = isOrderDeadlineApproaching(product, today);
   const shopDomain = extractShopDomain(product.url);
   const showsOrderDeadline = product.status === 'considering' && product.orderDeadline !== null;
 
   return (
-    <article className={`product-card ${selectStatusClassName(product)}`}>
+    <article className={`product-card ${selectStatusClassName(product)}${isGrabbed ? ' product-card--grabbed' : ''}`} {...dragHandlers}>
       <button type="button" className="product-card-main" onClick={() => onSelect(product)}>
         <span className="product-card-thumbnail">
           <ProductPlaceholderIcon />

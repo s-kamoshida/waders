@@ -9,6 +9,7 @@
  *  - DELETE /api/products/:productId  削除（204）
  *  - POST   /api/products/:productId/restore                リストに戻す（200。issue #9）
  *  - POST   /api/products/:productId/delivery-confirmation  延期の確認への回答（200。issue #9）
+ *  - PATCH  /api/products/:productId/release-month          発売月だけを変える（200。ドラッグアンドドロップ。issue #13）
  * 入力の誤りは 400（VALIDATION_ERROR と項目ごとの文言）、存在しない商品は 404（PRODUCT_NOT_FOUND）。
  * 業務ルールに反する操作のエラーの対応は PRODUCT_ERROR_RESPONSES を参照。カテゴリーの定義のファイルの誤りは 503（issue #10）。
  */
@@ -29,6 +30,7 @@ import {
   collectFieldErrors,
   deliveryConfirmationRequestSchema,
   productInputSchema,
+  releaseMonthChangeRequestSchema,
   restoreRequestSchema,
   type ApiErrorResponse,
 } from '../../shared/productContract.ts';
@@ -162,6 +164,14 @@ export function createProductRouter(productService: ProductService): express.Rou
     if (restoreRequest === undefined) return;
     respondWithProductOperation(response, () =>
       productService.restoreProduct(request.params.productId as ProductId, restoreRequest.releaseMonth),
+    );
+  });
+
+  router.patch('/:productId/release-month', (request, response) => {
+    const change = parseRequestBody(releaseMonthChangeRequestSchema, request.body, response);
+    if (change === undefined) return;
+    respondWithProductOperation(response, () =>
+      productService.moveProductToReleaseMonth(request.params.productId as ProductId, change.releaseMonth),
     );
   });
 

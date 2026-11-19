@@ -88,3 +88,10 @@ export async function answerDeliveryConfirmation(productId: string, answer: Deli
 export async function fetchCategories(): Promise<CategoryResponse[]> {
   return categoryListResponseSchema.parse(await sendApiRequest('GET', '/api/categories')).categories;
 }
+
+/** 発売月だけを変える（ドラッグアンドドロップ。issue #13）。 */
+export async function moveProductToReleaseMonth(productId: string, releaseMonth: string): Promise<ProductResponse> {
+  return productSchema.parse(
+    await sendApiRequest('PATCH', `/api/products/${encodeURIComponent(productId)}/release-month`, { releaseMonth }),
+  );
+}
