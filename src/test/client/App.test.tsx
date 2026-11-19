@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../client/App.tsx';
@@ -133,5 +133,58 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'アーカイブ' }));
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  describe('カテゴリーの管理（issue #10）', () => {
+    it('ヘッダーの「カテゴリーの管理」を押した場合、カテゴリーの管理のモーダルを開く', async () => {
+      stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [] } }) });
+      render(<App currentTime={currentTime} />);
+
+      await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'カテゴリーの管理' }));
+
+      expect(await screen.findByRole('dialog', { name: 'カテゴリーの管理' })).toBeInTheDocument();
+    });
+
+    it('カテゴリーを変更してから閉じた場合、表示中の一覧とカテゴリーを読み込み直し、新しいカテゴリーで絞り込める', async () => {
+      let categories = [{ id: 'scale', name: 'スケールフィギュア' }];
+      const { requests } = stubFetchRoutes({
+        'GET /api/products': () => ({ body: { products: [] } }),
+        'GET /api/categories': () => ({ body: { categories } }),
+        'POST /api/categories': () => {
+          categories = [...categories, { id: 'plastic', name: 'プラモデル' }];
+          return { status: 201, body: { id: 'plastic', name: 'プラモデル' } };
+        },
+      });
+      render(<App currentTime={currentTime} />);
+      await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'カテゴリーの管理' }));
+      const dialog = await screen.findByRole('dialog', { name: 'カテゴリーの管理' });
+      await userEvent.type(await within(dialog).findByRole('textbox', { name: '新しいカテゴリー' }), 'プラモデル{Enter}');
+      await within(dialog).findByRole('group', { name: 'プラモデル' });
+      const productLoadCount = requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products').length;
+
+      await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products').length).toBeGreaterThan(productLoadCount),
+      );
+      await userEvent.click(await screen.findByRole('button', { name: /^カテゴリー:/ }));
+      expect(within(screen.getByRole('group', { name: 'カテゴリーで絞り込む' })).getByLabelText('プラモデル')).toBeInTheDocument();
+    });
+
+    it('何も変えずに閉じた場合、一覧を読み込み直さない', async () => {
+      const { requests } = stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [] } }) });
+      render(<App currentTime={currentTime} />);
+      await screen.findByRole('region', { name: '2026/11' });
+      await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'カテゴリーの管理' }));
+      const dialog = await screen.findByRole('dialog', { name: 'カテゴリーの管理' });
+      await within(dialog).findByRole('group', { name: 'スケールフィギュア' });
+      const requestCount = requests.length;
+
+      await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(requests.length).toBe(requestCount);
+    });
   });
 });
