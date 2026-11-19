@@ -57,7 +57,7 @@ describe('App', () => {
     });
     render(<App currentTime={currentTime} />);
 
-    expect(screen.getByRole('tab', { name: 'リスト' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('tab', { name: 'リスト' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('リストの商品')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('tab', { name: 'アーカイブ' }));
@@ -140,7 +140,7 @@ describe('App', () => {
       stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [] } }) });
       render(<App currentTime={currentTime} />);
 
-      await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'カテゴリーの管理' }));
+      await userEvent.click(await within(screen.getByRole('banner')).findByRole('button', { name: 'カテゴリーの管理' }));
 
       expect(await screen.findByRole('dialog', { name: 'カテゴリーの管理' })).toBeInTheDocument();
     });
@@ -156,7 +156,7 @@ describe('App', () => {
         },
       });
       render(<App currentTime={currentTime} />);
-      await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'カテゴリーの管理' }));
+      await userEvent.click(await within(screen.getByRole('banner')).findByRole('button', { name: 'カテゴリーの管理' }));
       const dialog = await screen.findByRole('dialog', { name: 'カテゴリーの管理' });
       await userEvent.type(await within(dialog).findByRole('textbox', { name: '新しいカテゴリー' }), 'プラモデル{Enter}');
       await within(dialog).findByRole('group', { name: 'プラモデル' });
@@ -186,5 +186,184 @@ describe('App', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(requests.length).toBe(requestCount);
     });
+  });
+});
+
+describe('認証（issue #11）', () => {
+  /** 認証が有効なときの状態。 */
+  const authenticationStatus = (accountExists: boolean, loggedIn: boolean) => ({ authenticationEnabled: true, accountExists, loggedIn });
+
+  /** 商品の一覧を読み込んだかを返す。 */
+  const hasLoadedProducts = (requests: readonly { method: string; path: string }[]) =>
+    requests.some((recorded) => recorded.method === 'GET' && recorded.path === '/api/products');
+
+  it('認証が無効な場合、ログインの画面を出さずに一覧を表示し、「ログアウト」を表示しない', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '一覧の商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+
+    expect(await screen.findByText('一覧の商品')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'ログイン' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'ログアウト' })).not.toBeInTheDocument();
+  });
+
+  describe('アカウントがない場合', () => {
+    it('アカウントの作成の画面を表示し、一覧・タブ・カテゴリーの管理は表示せず、商品を読み込まない', async () => {
+      const { requests } = stubFetchRoutes({ 'GET /api/auth/status': () => ({ body: authenticationStatus(false, false) }) });
+      render(<App currentTime={currentTime} />);
+
+      expect(await screen.findByRole('heading', { name: 'アカウントの作成' })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'ID' })).toBeInTheDocument();
+      expect(screen.getByLabelText('パスワード')).toBeInTheDocument();
+      expect(screen.getByLabelText('パスワード（確認）')).toBeInTheDocument();
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'カテゴリーの管理' })).not.toBeInTheDocument();
+      expect(hasLoadedProducts(requests)).toBe(false);
+    });
+
+    it('ID とパスワードを入力して作成した場合、ID とパスワードを送り、一覧を表示する', async () => {
+      let status = authenticationStatus(false, false);
+      const { requests } = stubFetchRoutes({
+        'GET /api/auth/status': () => ({ body: status }),
+        'POST /api/auth/setup': () => {
+          status = authenticationStatus(true, true);
+          return { status: 201, body: status };
+        },
+        'GET /api/products': () => ({ body: { products: [createProduct({ name: '一覧の商品' })] } }),
+      });
+      render(<App currentTime={currentTime} />);
+      await userEvent.type(await screen.findByRole('textbox', { name: 'ID' }), 'owner');
+      await userEvent.type(screen.getByLabelText('パスワード'), 'correct-horse');
+      await userEvent.type(screen.getByLabelText('パスワード（確認）'), 'correct-horse');
+
+      await userEvent.click(screen.getByRole('button', { name: 'アカウントを作成' }));
+
+      expect(await screen.findByText('一覧の商品')).toBeInTheDocument();
+      const setupRequest = requests.find((recorded) => recorded.method === 'POST' && recorded.path === '/api/auth/setup');
+      expect(setupRequest?.body).toEqual({ loginId: 'owner', password: 'correct-horse' });
+      expect(setupRequest?.contentType).toBe('application/json');
+    });
+
+    it('確認のパスワードが一致しない場合、理由を表示し、送らない', async () => {
+      const { requests } = stubFetchRoutes({ 'GET /api/auth/status': () => ({ body: authenticationStatus(false, false) }) });
+      render(<App currentTime={currentTime} />);
+      await userEvent.type(await screen.findByRole('textbox', { name: 'ID' }), 'owner');
+      await userEvent.type(screen.getByLabelText('パスワード'), 'correct-horse');
+      await userEvent.type(screen.getByLabelText('パスワード（確認）'), 'different-horse');
+
+      await userEvent.click(screen.getByRole('button', { name: 'アカウントを作成' }));
+
+      expect(await screen.findByText('パスワードが一致しません。')).toBeInTheDocument();
+      expect(requests.some((recorded) => recorded.path === '/api/auth/setup')).toBe(false);
+    });
+
+    it('パスワードが 8 文字未満の場合、理由を表示し、送らない', async () => {
+      const { requests } = stubFetchRoutes({ 'GET /api/auth/status': () => ({ body: authenticationStatus(false, false) }) });
+      render(<App currentTime={currentTime} />);
+      await userEvent.type(await screen.findByRole('textbox', { name: 'ID' }), 'owner');
+      await userEvent.type(screen.getByLabelText('パスワード'), 'short');
+      await userEvent.type(screen.getByLabelText('パスワード（確認）'), 'short');
+
+      await userEvent.click(screen.getByRole('button', { name: 'アカウントを作成' }));
+
+      expect(await screen.findByText('パスワードは8文字以上にしてください。')).toBeInTheDocument();
+      expect(requests.some((recorded) => recorded.path === '/api/auth/setup')).toBe(false);
+    });
+  });
+
+  describe('アカウントがあり、ログインしていない場合', () => {
+    it('ログインの画面を表示し、一覧・タブ・カテゴリーの管理は表示せず、商品を読み込まない', async () => {
+      const { requests } = stubFetchRoutes({ 'GET /api/auth/status': () => ({ body: authenticationStatus(true, false) }) });
+      render(<App currentTime={currentTime} />);
+
+      expect(await screen.findByRole('heading', { name: 'ログイン' })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'ID' })).toBeInTheDocument();
+      expect(screen.getByLabelText('パスワード')).toBeInTheDocument();
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'カテゴリーの管理' })).not.toBeInTheDocument();
+      expect(hasLoadedProducts(requests)).toBe(false);
+    });
+
+    it('ログインに成功した場合、一覧と「ログアウト」を表示する', async () => {
+      let status = authenticationStatus(true, false);
+      const { requests } = stubFetchRoutes({
+        'GET /api/auth/status': () => ({ body: status }),
+        'POST /api/auth/login': () => {
+          status = authenticationStatus(true, true);
+          return { body: status };
+        },
+        'GET /api/products': () => ({ body: { products: [createProduct({ name: '一覧の商品' })] } }),
+      });
+      render(<App currentTime={currentTime} />);
+      await userEvent.type(await screen.findByRole('textbox', { name: 'ID' }), 'owner');
+      await userEvent.type(screen.getByLabelText('パスワード'), 'correct-horse');
+
+      await userEvent.click(screen.getByRole('button', { name: 'ログイン' }));
+
+      expect(await screen.findByText('一覧の商品')).toBeInTheDocument();
+      expect(within(screen.getByRole('banner')).getByRole('button', { name: 'ログアウト' })).toBeInTheDocument();
+      expect(requests.find((recorded) => recorded.path === '/api/auth/login')?.body).toEqual({ loginId: 'owner', password: 'correct-horse' });
+    });
+
+    it.each([
+      ['ID かパスワードが誤り', 401, 'LOGIN_FAILED', 'ID またはパスワードが違います。'],
+      ['失敗が続いて制限中', 429, 'LOGIN_LOCKED', 'ログインの失敗が続いたため、15分間ログインできません。時間をおいてやり直してください。'],
+    ])('ログインに失敗した（%s）場合、サーバーの理由を表示し、ログインの画面のままにする', async (_label, status, code, message) => {
+      stubFetchRoutes({
+        'GET /api/auth/status': () => ({ body: authenticationStatus(true, false) }),
+        'POST /api/auth/login': () => ({ status, body: { error: { code, message } } }),
+      });
+      render(<App currentTime={currentTime} />);
+      await userEvent.type(await screen.findByRole('textbox', { name: 'ID' }), 'owner');
+      await userEvent.type(screen.getByLabelText('パスワード'), 'wrong-password');
+
+      await userEvent.click(screen.getByRole('button', { name: 'ログイン' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(message);
+      expect(screen.getByRole('heading', { name: 'ログイン' })).toBeInTheDocument();
+    });
+  });
+
+  describe('ログインしている場合', () => {
+    it('「ログアウト」を押した場合、ログアウトを送り、ログインの画面を表示する', async () => {
+      let status = authenticationStatus(true, true);
+      const { requests } = stubFetchRoutes({
+        'GET /api/auth/status': () => ({ body: status }),
+        'POST /api/auth/logout': () => {
+          status = authenticationStatus(true, false);
+          return { status: 204 };
+        },
+        'GET /api/products': () => ({ body: { products: [createProduct({ name: '一覧の商品' })] } }),
+      });
+      render(<App currentTime={currentTime} />);
+      await screen.findByText('一覧の商品');
+
+      await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'ログアウト' }));
+
+      expect(await screen.findByRole('heading', { name: 'ログイン' })).toBeInTheDocument();
+      expect(screen.queryByText('一覧の商品')).not.toBeInTheDocument();
+      expect(requests.find((recorded) => recorded.path === '/api/auth/logout')?.contentType).toBe('application/json');
+    });
+
+    it('使っている間に API が 401（ログインの期限切れなど）を返した場合、ログインの画面を表示する', async () => {
+      stubFetchRoutes({
+        'GET /api/auth/status': () => ({ body: authenticationStatus(true, true) }),
+        'GET /api/products': () => ({ status: 401, body: { error: { code: 'AUTHENTICATION_REQUIRED', message: 'ログインしてください。' } } }),
+      });
+      render(<App currentTime={currentTime} />);
+
+      expect(await screen.findByRole('heading', { name: 'ログイン' })).toBeInTheDocument();
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    });
+  });
+
+  it('認証の状態を取得できない場合、理由を表示し、一覧を表示しない', async () => {
+    const { requests } = stubFetchRoutes({
+      'GET /api/auth/status': () => ({ status: 500, body: { error: { code: 'INTERNAL_ERROR', message: 'サーバーでエラーが発生しました。' } } }),
+    });
+    render(<App currentTime={currentTime} />);
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(hasLoadedProducts(requests)).toBe(false);
   });
 });

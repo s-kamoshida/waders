@@ -120,3 +120,44 @@ describe('環境変数 WADERS_DATA_DIRECTORY がない場合', () => {
     expect(existsSync(join(expectedDataDirectory, SETTINGS_FILE_NAME))).toBe(true);
   });
 });
+
+describe('認証の有効・無効（issue #11）', () => {
+  it('ひな形から設定ファイルを作成した場合、認証を有効にする', () => {
+    expect(loadWithEnvironment().authenticationEnabled).toBe(true);
+  });
+
+  it('設定ファイルで authenticationEnabled を false にした場合、認証を無効にする', () => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, authenticationEnabled: false }));
+
+    expect(loadWithEnvironment().authenticationEnabled).toBe(false);
+  });
+
+  it('既存の設定ファイルに authenticationEnabled がない場合、認証を有効として扱う（安全側に倒す）', () => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090 }));
+
+    expect(loadWithEnvironment().authenticationEnabled).toBe(true);
+  });
+
+  it.each([
+    ['文字列', 'false'],
+    ['数値', 0],
+    ['null', null],
+  ])('authenticationEnabled が真偽値でない（%s）場合、エラーにする', (_label, authenticationEnabled) => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, authenticationEnabled }));
+
+    expect(() => loadWithEnvironment()).toThrow(ServerSettingsError);
+  });
+
+  it.each([
+    ['false', true, false],
+    ['true', false, true],
+  ])('環境変数 WADERS_AUTHENTICATION_ENABLED が "%s" の場合、設定ファイルより優先する', (environmentValue, fileValue, expected) => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, authenticationEnabled: fileValue }));
+
+    expect(loadWithEnvironment({ WADERS_AUTHENTICATION_ENABLED: environmentValue }).authenticationEnabled).toBe(expected);
+  });
+
+  it.each(['', '0', 'no', 'TRUE', 'off'])('環境変数 WADERS_AUTHENTICATION_ENABLED が不正（"%s"）の場合、エラーにする', (environmentValue) => {
+    expect(() => loadWithEnvironment({ WADERS_AUTHENTICATION_ENABLED: environmentValue })).toThrow(ServerSettingsError);
+  });
+});
