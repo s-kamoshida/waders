@@ -4,6 +4,7 @@
  * 所属: クライアント
  * 責務: 商品の一覧を、画面に表示する年・月のグループに組み立てる純粋な関数（要件「リストの構成」「アーカイブ」）。
  */
+import type { CategoryResponse } from '../shared/categoryContract.ts';
 import type { ProductResponse } from '../shared/productContract.ts';
 import { formatYen } from './productDisplay.ts';
 
@@ -158,4 +159,54 @@ export function formatArchiveSummary(summary: GroupSummary): string {
 export function collectMakerSuggestions(products: readonly ProductResponse[]): string[] {
   const makers = new Set(products.flatMap((product) => (product.maker === null ? [] : [product.maker])));
   return [...makers].sort((left, right) => left.localeCompare(right, 'ja'));
+}
+
+/** カテゴリーの絞り込みの選択（issue #10）。何も選んでいなければ、すべての商品を表示する。 */
+export type CategoryFilter = {
+  /** 選んだカテゴリーの ID。 */
+  readonly categoryIds: ReadonlySet<string>;
+  /** 「カテゴリー未設定」を選んだか。 */
+  readonly includesUncategorized: boolean;
+};
+
+/** 絞り込みの選択肢（「カテゴリー未設定」を除く）。 */
+export type CategoryFilterOption = { readonly id: string; readonly label: string };
+
+/** 何も選んでいないか。 */
+export function isCategoryFilterEmpty(filter: CategoryFilter): boolean {
+  return filter.categoryIds.size === 0 && !filter.includesUncategorized;
+}
+
+/**
+ * 商品をカテゴリーで絞り込む（issue #10）。何も選んでいなければ、すべての商品を返す。
+ * 選んだカテゴリーの商品と、「カテゴリー未設定」を選んだ場合はカテゴリーのない商品を返す。
+ */
+export function filterProductsByCategory<Item extends ProductResponse>(products: readonly Item[], filter: CategoryFilter): Item[] {
+  if (isCategoryFilterEmpty(filter)) return [...products];
+  return products.filter((product) =>
+    product.categoryId === null ? filter.includesUncategorized : filter.categoryIds.has(product.categoryId),
+  );
+}
+
+/**
+ * 絞り込みの選択肢を作る（issue #10）。定義の並び順のカテゴリーの後に、
+ * 定義にないカテゴリーの商品があれば「名前（定義にない）」を重複なく加える。
+ */
+export function buildCategoryFilterOptions(
+  categories: readonly CategoryResponse[],
+  products: readonly ProductResponse[],
+): CategoryFilterOption[] {
+  const options: CategoryFilterOption[] = categories.map((category) => ({ id: category.id, label: category.name }));
+  const knownIds = new Set(options.map((option) => option.id));
+  for (const product of products) {
+    if (product.categoryId === null || knownIds.has(product.categoryId)) continue;
+    knownIds.add(product.categoryId);
+    options.push({ id: product.categoryId, label: formatUndefinedCategoryLabel(product.categoryName ?? product.categoryId) });
+  }
+  return options;
+}
+
+/** 定義にないカテゴリーの表記（例: 旧カテゴリー（定義にない））。 */
+export function formatUndefinedCategoryLabel(categoryName: string): string {
+  return `${categoryName}（定義にない）`;
 }

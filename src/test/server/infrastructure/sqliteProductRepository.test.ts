@@ -36,7 +36,8 @@ function createProduct(overrides: Partial<Product> = {}): Product {
     shippingFee: 800,
     orderDeadline: '2026-11-20',
     url: 'https://shop.example.jp/item/1',
-    category: 'スケールフィギュア',
+    categoryId: 'scale',
+    categoryName: 'スケールフィギュア',
     maker: 'メーカーA',
     note: '初回特典付き\n分割で届く',
     createdAt: '2026-11-17T01:00:00.000Z',
@@ -66,7 +67,8 @@ describe('登録と取得', () => {
       shippingFee: null,
       orderDeadline: null,
       url: null,
-      category: null,
+      categoryId: null,
+      categoryName: null,
       maker: null,
       note: null,
     });
@@ -224,6 +226,9 @@ describe('DB の制約（業務ルールの最後の防御）', () => {
     ['空のメーカー（issue #18）', { maker: '' }],
     ['上限の文字数を超えるメーカー（issue #18）', { maker: 'あ'.repeat(101) }],
     ['上限の文字数を超える備考（issue #18）', { note: 'あ'.repeat(1001) }],
+    ['名前のないカテゴリーの ID（issue #10）', { categoryId: 'scale', categoryName: null }],
+    ['ID のないカテゴリー名（issue #10）', { categoryId: null, categoryName: 'スケールフィギュア' }],
+    ['空のカテゴリーの ID（issue #10）', { categoryId: '' }],
   ])('%s を保存しようとした場合、DB が拒否する', (_label, overrides) => {
     const invalidProduct = { ...createProduct(), ...overrides } as Product;
 
@@ -314,8 +319,8 @@ describe('スキーマの移行（版数 1 から）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('最新のスキーマの版数は 3 である（issue #18）', () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(3);
+  it('最新のスキーマの版数は 4 である（issue #10）', () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(4);
   });
 
   it('版数 1 の DB を開いた場合、最新の版数に移行し、既存の商品と履歴を保ち、確認待ちは空、メーカーと備考は未入力になる', () => {
@@ -324,7 +329,7 @@ describe('スキーマの移行（版数 1 から）', () => {
     versionOneDatabase.exec(SCHEMA_MIGRATIONS[0] ?? '');
     versionOneDatabase.exec('PRAGMA user_version = 1');
     versionOneDatabase.exec('PRAGMA foreign_keys = ON');
-    const product = createProduct({ maker: null, note: null });
+    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null });
     createSqliteProductRepositoryForVersionOne(versionOneDatabase, product);
     versionOneDatabase.close();
 
@@ -340,7 +345,7 @@ describe('スキーマの移行（版数 1 から）', () => {
   });
 });
 
-describe('スキーマの移行（版数 2 → 3。issue #18）', () => {
+describe('スキーマの移行（版数 2 から。issue #18）', () => {
   let temporaryDirectory: string;
 
   beforeEach(() => {
@@ -351,14 +356,14 @@ describe('スキーマの移行（版数 2 → 3。issue #18）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('版数 2 の DB を開いた場合、版数 3 に移行し、既存の商品・履歴・確認待ちを保ち、メーカーと備考は未入力になる', () => {
+  it('版数 2 の DB を開いた場合、最新の版数に移行し、既存の商品・履歴・確認待ちを保ち、メーカーと備考は未入力になる', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
     const versionTwoDatabase = new DatabaseSync(databaseFilePath);
     versionTwoDatabase.exec('PRAGMA foreign_keys = ON');
     versionTwoDatabase.exec(SCHEMA_MIGRATIONS[0] ?? '');
     versionTwoDatabase.exec(SCHEMA_MIGRATIONS[1] ?? '');
     versionTwoDatabase.exec('PRAGMA user_version = 2');
-    const product = createProduct({ maker: null, note: null });
+    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null });
     createSqliteProductRepositoryForVersionOne(versionTwoDatabase, product);
     versionTwoDatabase.prepare('INSERT INTO delivery_confirmations (product_id) VALUES (?)').run(product.id);
     versionTwoDatabase.close();
@@ -367,10 +372,58 @@ describe('スキーマの移行（版数 2 → 3。issue #18）', () => {
     const migratedRepository = createSqliteProductRepository(migratedDatabase);
 
     const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
-    expect(version.user_version).toBe(3);
+    expect(version.user_version).toBe(LATEST_SCHEMA_VERSION);
     expect(migratedRepository.findProductById(product.id)).toEqual(product);
     expect(migratedRepository.listProductHistory(product.id)).toHaveLength(2);
     expect(migratedRepository.listDeliveryConfirmationPendingProductIds()).toEqual([product.id]);
+    migratedDatabase.close();
+  });
+});
+
+describe('スキーマの移行（版数 3 → 4。issue #10）', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), 'waders-migration-'));
+  });
+
+  afterEach(() => {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  /** 版数 3 の DB を作り、カテゴリー名だけを持つ商品を書き込む。 */
+  function createVersionThreeDatabase(databaseFilePath: string, products: readonly Product[]): void {
+    const versionThreeDatabase = new DatabaseSync(databaseFilePath);
+    versionThreeDatabase.exec('PRAGMA foreign_keys = ON');
+    for (const migration of SCHEMA_MIGRATIONS.slice(0, 3)) versionThreeDatabase.exec(migration);
+    versionThreeDatabase.exec('PRAGMA user_version = 3');
+    for (const product of products) createSqliteProductRepositoryForVersionOne(versionThreeDatabase, product);
+    versionThreeDatabase.close();
+  }
+
+  it('版数 3 の DB を開いた場合、版数 4 に移行し、カテゴリーのない商品はカテゴリー未設定のまま', () => {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null });
+    createVersionThreeDatabase(databaseFilePath, [product]);
+
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
+    expect(version.user_version).toBe(4);
+    expect(migratedRepository.findProductById(product.id)).toEqual(product);
+    migratedDatabase.close();
+  });
+
+  it('版数 3 でカテゴリー名だけを持つ商品は、名前を残し、ID を「legacy:名前」にする（定義にないカテゴリーとして確認できるようにする）', () => {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: '可動フィギュア' });
+    createVersionThreeDatabase(databaseFilePath, [product]);
+
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    expect(migratedRepository.findProductById(product.id)).toEqual({ ...product, categoryId: 'legacy:可動フィギュア' });
     migratedDatabase.close();
   });
 });
@@ -392,7 +445,7 @@ function createSqliteProductRepositoryForVersionOne(versionOneDatabase: Database
       product.shippingFee,
       product.orderDeadline,
       product.url,
-      product.category,
+      product.categoryName,
       product.createdAt,
       product.updatedAt,
     );

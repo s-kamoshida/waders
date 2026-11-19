@@ -6,6 +6,8 @@
  *  - 追加（発売月の既定は当月、ステータスの既定は検討中）と編集（保存済みの値を表示）の入力
  *  - 送信前に共有の検証ルールで確かめ、誤りは入力欄の下に表示する。サーバーが返した入力の誤りも同様に表示する
  *  - メーカー（登録済みのメーカーを入力の候補に出す）と複数行の備考を入力できる（issue #18）
+ *  - カテゴリーを定義の並び順から選ぶ。定義にないカテゴリーは「名前（定義にない）」で示し、
+ *    定義を読めない場合は変更できなくする（issue #10）
  *  - 削除は確認のうえで行う（元に戻せない）
  *  - アーカイブされた商品の編集では、発売月を変更できなくし、「リストに戻す」ボタンを表示する（issue #9）
  *  - 追加では、保存ボタンの横のプルダウンで保存の方法（「保存」「保存して続けて追加」）を選べる。選んだ方法はモーダルを
@@ -21,7 +23,9 @@ import {
   type ProductStatus,
 } from '../../shared/productContract.ts';
 import { ApiRequestError, createProduct, deleteProduct, updateProduct } from '../productApiClient.ts';
+import type { CategoryResponse } from '../../shared/categoryContract.ts';
 import { getStatusLabel } from '../productDisplay.ts';
+import { formatUndefinedCategoryLabel } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 
 /** モーダルの用途。追加の場合は発売月の既定値を、編集の場合は対象の商品を持つ。 */
@@ -46,6 +50,11 @@ export type ProductEditorDialogProps = {
   readonly onSavedAndContinued?: () => void;
   /** メーカーの入力の候補（登録済みの商品のメーカー。issue #18）。 */
   readonly makerSuggestions?: readonly string[];
+  /**
+   * 選べるカテゴリー（定義の並び順。issue #10）。定義を読めない場合は null（カテゴリーを変更できなくする）。
+   * 省略した場合は、定義のカテゴリーがないものとして扱う。
+   */
+  readonly categories?: readonly CategoryResponse[] | null;
 };
 
 /** 保存の方法。save は保存して閉じる、saveAndContinue は保存して続けて追加する。 */
@@ -68,12 +77,14 @@ type FormValues = {
   url: string;
   maker: string;
   note: string;
+  /** カテゴリーの ID。未設定は空文字。 */
+  categoryId: string;
 };
 
 /** 用途に応じた入力欄の初期値を作る。 */
 function createInitialValues(mode: ProductEditorMode): FormValues {
   if (mode.kind === 'create') {
-    return { name: '', releaseMonth: mode.defaultReleaseMonth, status: 'considering', cancelable: false, price: '', shippingFee: '', orderDeadline: '', url: '', maker: '', note: '' };
+    return { name: '', releaseMonth: mode.defaultReleaseMonth, status: 'considering', cancelable: false, price: '', shippingFee: '', orderDeadline: '', url: '', maker: '', note: '', categoryId: '' };
   }
   const { product } = mode;
   return {
@@ -86,8 +97,25 @@ function createInitialValues(mode: ProductEditorMode): FormValues {
     orderDeadline: product.orderDeadline ?? '',
     url: product.url ?? '',
     maker: product.maker ?? '',
+    categoryId: product.categoryId ?? '',
     note: product.note ?? '',
   };
+}
+
+/**
+ * カテゴリーのプルダウンの選択肢を作る。「未設定」と定義の並び順のカテゴリーに加え、
+ * 編集する商品のカテゴリーが定義にない（または定義を読めない）場合は、そのカテゴリーも加える。
+ */
+function buildCategoryOptions(
+  categories: readonly CategoryResponse[] | null,
+  mode: ProductEditorMode,
+): { value: string; label: string }[] {
+  const options = [{ value: '', label: '未設定' }, ...(categories ?? []).map((category) => ({ value: category.id, label: category.name }))];
+  if (mode.kind !== 'edit' || mode.product.categoryId === null) return options;
+  if (options.some((option) => option.value === mode.product.categoryId)) return options;
+  const categoryName = mode.product.categoryName ?? mode.product.categoryId;
+  options.push({ value: mode.product.categoryId, label: categories === null ? categoryName : formatUndefinedCategoryLabel(categoryName) });
+  return options;
 }
 
 /** 数値の入力欄の値を、未入力なら null、それ以外は数値にする。 */
@@ -109,6 +137,7 @@ export function ProductEditorDialog({
   onRestoreRequested,
   onSavedAndContinued,
   makerSuggestions = [],
+  categories = [],
 }: ProductEditorDialogProps) {
   const [values, setValues] = useState<FormValues>(() => createInitialValues(mode));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -161,7 +190,7 @@ export function ProductEditorDialog({
       url: convertToTextOrNull(values.url),
       maker: convertToTextOrNull(values.maker),
       note: convertToTextOrNull(values.note),
-      category: mode.kind === 'edit' ? mode.product.category : null,
+      categoryId: values.categoryId === '' ? null : values.categoryId,
     });
     if (!parsed.success) {
       setFieldErrors(collectFieldErrors(parsed.error));
@@ -291,6 +320,29 @@ export function ProductEditorDialog({
                 ))}
               </datalist>
               {renderFieldError('maker')}
+            </div>
+            <div className="field">
+              <label htmlFor={fieldId('categoryId')}>カテゴリー</label>
+              <select
+                id={fieldId('categoryId')}
+                value={values.categoryId}
+                disabled={categories === null}
+                aria-invalid={fieldErrors.categoryId !== undefined}
+                aria-describedby={describedBy('categoryId') ?? (categories === null ? `${fieldId('categoryId')}-hint` : undefined)}
+                onChange={(event) => updateValue('categoryId', event.target.value)}
+              >
+                {buildCategoryOptions(categories, mode).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {renderFieldError('categoryId')}
+              {categories === null && (
+                <span id={`${fieldId('categoryId')}-hint`} className="hint">
+                  {SCREEN_MESSAGES.categoryUnavailable}
+                </span>
+              )}
             </div>
             <div className="field-row">
               <div className="field">

@@ -12,9 +12,11 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import type { CategoryService } from '../application/categoryService.ts';
 import type { ProductService } from '../application/productService.ts';
 import { writeStructuredLog } from '../structuredLogger.ts';
 import type { ApiErrorResponse } from '../../shared/productContract.ts';
+import { createCategoryRouter } from './categoryRouter.ts';
 import { createProductRouter } from './productRouter.ts';
 
 /**
@@ -55,6 +57,8 @@ export type WebApplicationOptions = {
   readonly clientBuildDirectory: string;
   /** 商品の操作。 */
   readonly productService: ProductService;
+  /** カテゴリーの操作（issue #10）。 */
+  readonly categoryService: CategoryService;
 };
 
 /** 状態を変える HTTP メソッド。 */
@@ -135,6 +139,7 @@ export function createWebApplication(options: WebApplicationOptions): express.Ex
     response.json({ status: 'ok' });
   });
   apiRouter.use('/products', createProductRouter(options.productService));
+  apiRouter.use('/categories', createCategoryRouter(options.categoryService));
   apiRouter.use(respondApiNotFound);
   apiRouter.use(handleRequestBodyError);
   application.use('/api', apiRouter);

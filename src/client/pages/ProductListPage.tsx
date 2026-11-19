@@ -8,9 +8,11 @@
  *  - 年・月の折りたたみと、暦年・年度の切り替え（端末ごとに記憶）
  *  - ＋ボタン・月の見出しの＋ボタン（その月を発売月にする。issue #16）で追加、商品を押して編集・削除のモーダルを開き、保存後に読み込み直す
  *  - 「保存して続けて追加」で保存した場合は、モーダルを開いたまま読み込み直す（issue #16）
+ *  - カテゴリーで絞り込む（選択は端末ごとに覚え、見出しの集計も絞り込んだ商品で数える。issue #10）
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ProductListItem } from '../../shared/productContract.ts';
+import { CategoryFilterMenu, useCategoryFilter } from '../components/CategoryFilterMenu.tsx';
 import { ProductEditorDialog, type ProductEditorMode } from '../components/ProductEditorDialog.tsx';
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { fetchProducts } from '../productApiClient.ts';
@@ -26,6 +28,8 @@ import { SCREEN_MESSAGES } from '../screenMessages.ts';
 
 /** 暦年・年度の切り替えを覚えておくための、ブラウザの保存領域のキー。 */
 export const YEAR_MODE_STORAGE_KEY = 'waders.yearMode';
+
+export { CATEGORY_FILTER_STORAGE_KEY } from '../components/CategoryFilterMenu.tsx';
 
 /** 保存されている年のまとめ方を読む。読めない・不正な値なら暦年。アーカイブの画面でも使う。 */
 export function readStoredYearMode(): YearMode {
@@ -79,9 +83,10 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
     void loadProducts();
   }, [loadProducts]);
 
+  const categoryFilter = useCategoryFilter(products ?? []);
   const yearGroups = useMemo(
-    () => buildProductListGroups(splitProductsByArchive(products ?? [], currentMonth).active, { currentMonth, yearMode }),
-    [products, currentMonth, yearMode],
+    () => buildProductListGroups(splitProductsByArchive(categoryFilter.filteredProducts, currentMonth).active, { currentMonth, yearMode }),
+    [categoryFilter.filteredProducts, currentMonth, yearMode],
   );
 
   const makerSuggestions = useMemo(() => collectMakerSuggestions(products ?? []), [products]);
@@ -99,6 +104,12 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
   return (
     <div className="product-list-page">
       <div className="toolbar">
+        <CategoryFilterMenu
+          options={categoryFilter.options}
+          filter={categoryFilter.filter}
+          onChange={categoryFilter.changeFilter}
+          disabled={categoryFilter.categories === null}
+        />
         <div className="segmented" role="radiogroup" aria-label="年のまとめ方">
           {(
             [
@@ -134,6 +145,11 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           {SCREEN_MESSAGES.productListLoadFailed}
         </p>
       )}
+      {categoryFilter.categoryErrorMessage !== null && (
+        <p role="alert" className="page-error">
+          {categoryFilter.categoryErrorMessage}
+        </p>
+      )}
 
       {products !== null && (
         <ProductGroupList
@@ -153,6 +169,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           onSaved={handleSaved}
           onSavedAndContinued={() => void loadProducts()}
           makerSuggestions={makerSuggestions}
+          categories={categoryFilter.categories === undefined ? [] : categoryFilter.categories}
         />
       )}
     </div>

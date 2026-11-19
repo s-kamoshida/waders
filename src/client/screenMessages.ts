@@ -13,6 +13,13 @@ export const SCREEN_MESSAGES = {
   deleteConfirmationNote: '削除した商品は元に戻せません。',
   /** 「保存して続けて追加」で保存した場合の文言（issue #16）。 */
   productAddedAndContinue: (productName: string) => `「${productName}」を追加しました。`,
+  /** カテゴリーの定義を読み込めなかった場合（サーバーの理由がない場合）（issue #10）。 */
+  categoryDefinitionLoadFailed: 'カテゴリーの定義を読み込めませんでした。時間をおいて、ページを読み込み直してください。',
+  /** カテゴリーの定義に誤りがある場合の補足。 */
+  categoryDefinitionFixHint: 'データのフォルダの categories.json を直してから、ページを読み込み直してください。',
+  categoryUnavailable: 'カテゴリーの定義に誤りがあるため、カテゴリーは変更できません。',
+  uncategorized: 'カテゴリー未設定',
+  categoryFilterClear: '選択を解除（すべて表示）',
   archiveEmpty: 'アーカイブされた商品はありません',
   archivedReleaseMonthHint: '発売月は「リストに戻す」で変更します。',
   restoreTitle: 'リストに戻す',

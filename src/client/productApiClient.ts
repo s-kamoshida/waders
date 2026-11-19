@@ -14,6 +14,7 @@ import {
   type ProductListItem,
   type ProductResponse,
 } from '../shared/productContract.ts';
+import { categoryListResponseSchema, type CategoryResponse } from '../shared/categoryContract.ts';
 
 /** API の呼び出しの失敗。サーバーが入力の誤りを返した場合は fieldErrors に項目ごとの文言が入る。 */
 export class ApiRequestError extends Error {
@@ -78,4 +79,12 @@ export async function answerDeliveryConfirmation(productId: string, answer: Deli
   return productSchema.parse(
     await sendApiRequest('POST', `/api/products/${encodeURIComponent(productId)}/delivery-confirmation`, answer),
   );
+}
+
+/**
+ * カテゴリーの一覧を、定義の並び順で取得する（issue #10）。
+ * @throws {ApiRequestError} 定義のファイルに誤りがある場合（code が CATEGORY_DEFINITION_INVALID、message に理由）など
+ */
+export async function fetchCategories(): Promise<CategoryResponse[]> {
+  return categoryListResponseSchema.parse(await sendApiRequest('GET', '/api/categories')).categories;
 }

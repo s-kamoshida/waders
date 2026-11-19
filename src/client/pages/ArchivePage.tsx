@@ -7,9 +7,11 @@
  *    商品のない月は表示しない。年のまとめ方（暦年・年度）はリストで選んだものを使う
  *  - 商品を押して編集のモーダルを開く（発売月は変更できない）。「リストに戻す」で新しい発売月を指定してリストに戻す
  *  - 保存・リストに戻した後に読み込み直す
+ *  - リストと同じカテゴリーの選択で絞り込み、見出しの集計も絞り込んだ商品で数える（issue #10）
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ProductListItem, ProductResponse } from '../../shared/productContract.ts';
+import { CategoryFilterMenu, useCategoryFilter } from '../components/CategoryFilterMenu.tsx';
 import { ProductEditorDialog } from '../components/ProductEditorDialog.tsx';
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { RestoreDialog } from '../components/RestoreDialog.tsx';
@@ -51,7 +53,11 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
     void loadProducts();
   }, [loadProducts]);
 
-  const archivedProducts = useMemo(() => splitProductsByArchive(products ?? [], currentMonth).archived, [products, currentMonth]);
+  const categoryFilter = useCategoryFilter(products ?? []);
+  const archivedProducts = useMemo(
+    () => splitProductsByArchive(categoryFilter.filteredProducts, currentMonth).archived,
+    [categoryFilter.filteredProducts, currentMonth],
+  );
   const yearGroups = useMemo(() => buildArchiveGroups(archivedProducts, { yearMode }), [archivedProducts, yearMode]);
 
   const makerSuggestions = useMemo(() => collectMakerSuggestions(products ?? []), [products]);
@@ -63,9 +69,22 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
 
   return (
     <div className="archive-page">
+      <div className="toolbar">
+        <CategoryFilterMenu
+          options={categoryFilter.options}
+          filter={categoryFilter.filter}
+          onChange={categoryFilter.changeFilter}
+          disabled={categoryFilter.categories === null}
+        />
+      </div>
       {hasLoadError && (
         <p role="alert" className="page-error">
           {SCREEN_MESSAGES.productListLoadFailed}
+        </p>
+      )}
+      {categoryFilter.categoryErrorMessage !== null && (
+        <p role="alert" className="page-error">
+          {categoryFilter.categoryErrorMessage}
         </p>
       )}
 
@@ -88,6 +107,7 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
           onSaved={closeAndReload}
           onRestoreRequested={() => setOpenDialog({ kind: 'restore', product: openDialog.product })}
           makerSuggestions={makerSuggestions}
+          categories={categoryFilter.categories === undefined ? [] : categoryFilter.categories}
         />
       )}
 

@@ -18,8 +18,20 @@ export type RecordedRequest = {
   readonly contentType: string | null;
 };
 
+/** スタブが既定で返すカテゴリーの定義（GET /api/categories。issue #10）。 */
+export const STUB_CATEGORIES = [
+  { id: 'scale', name: 'スケールフィギュア' },
+  { id: 'action', name: '可動フィギュア' },
+] as const;
+
+/** どのテストでも登録されているルート。テストで同じルートを登録した場合は、テストのものを使う。 */
+const DEFAULT_ROUTE_HANDLERS: StubRouteHandlers = {
+  'GET /api/categories': () => ({ body: { categories: STUB_CATEGORIES } }),
+};
+
 /**
  * fetch をスタブに置き換える。登録されていないルートには 404 を返す。
+ * GET /api/categories は、登録しなくても STUB_CATEGORIES を返す。
  * @returns 記録されたリクエストの一覧（呼び出し順）と、fetch のモック
  */
 export function stubFetchRoutes(routeHandlers: StubRouteHandlers): { requests: RecordedRequest[]; fetchMock: Mock } {
@@ -30,7 +42,7 @@ export function stubFetchRoutes(routeHandlers: StubRouteHandlers): { requests: R
     const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
     const contentType = new Headers(init?.headers).get('Content-Type');
     requests.push({ method, path, body, contentType });
-    const handler = routeHandlers[`${method} ${path}`];
+    const handler = routeHandlers[`${method} ${path}`] ?? DEFAULT_ROUTE_HANDLERS[`${method} ${path}`];
     const stubResponse: StubResponse =
       handler === undefined ? { status: 404, body: { error: { code: 'ROUTE_NOT_FOUND', message: 'not found' } } } : handler(body);
     const status = stubResponse.status ?? 200;

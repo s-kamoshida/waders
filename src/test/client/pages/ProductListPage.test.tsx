@@ -2,7 +2,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProductListPage, YEAR_MODE_STORAGE_KEY } from '../../../client/pages/ProductListPage.tsx';
+import { CATEGORY_FILTER_STORAGE_KEY, ProductListPage, YEAR_MODE_STORAGE_KEY } from '../../../client/pages/ProductListPage.tsx';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
@@ -25,7 +25,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     shippingFee: null,
     orderDeadline: null,
     url: null,
-    category: null,
+    categoryId: null,
+    categoryName: null,
     maker: null,
     note: null,
     createdAt,
@@ -193,7 +194,7 @@ describe('追加・編集のモーダル', () => {
 
     expect(await screen.findByText('追加した商品')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'GET')).toHaveLength(2));
+    await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products')).toHaveLength(2));
   });
 });
 
@@ -245,7 +246,7 @@ describe('連続追加（issue #16）', () => {
 
     expect(await screen.findByRole('button', { name: /続けて追加した商品/ })).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: '商品を追加' })).toBeInTheDocument();
-    expect(requests.filter((recorded) => recorded.method === 'GET')).toHaveLength(2);
+    expect(requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products')).toHaveLength(2);
   });
 });
 
@@ -276,5 +277,146 @@ describe('メーカーの候補（issue #18）', () => {
       'メーカーB',
       'メーカーC',
     ]);
+  });
+});
+
+describe('カテゴリーの絞り込み（issue #10）', () => {
+  /** スケールフィギュア・可動フィギュア・未設定の 11 月の商品を返す。 */
+  function createCategorizedProducts() {
+    return [
+      createProduct({ name: 'スケールの商品', categoryId: 'scale', categoryName: 'スケールフィギュア', price: 20000 }),
+      createProduct({ name: '可動の商品', categoryId: 'action', categoryName: '可動フィギュア', price: 10000 }),
+      createProduct({ name: '未設定の商品', price: 5000 }),
+    ];
+  }
+
+  /** 絞り込みのプルダウンを開く。 */
+  async function openCategoryFilter() {
+    await userEvent.click(await screen.findByRole('button', { name: /^カテゴリー:/ }));
+    return screen.getByRole('group', { name: 'カテゴリーで絞り込む' });
+  }
+
+  it('最初は「カテゴリー: すべて」で、定義の並び順のカテゴリーと「カテゴリー未設定」を選択肢に出す', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createCategorizedProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const group = await openCategoryFilter();
+
+    expect(screen.getByRole('button', { name: 'カテゴリー: すべて' })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(group).getAllByRole('checkbox').map((checkbox) => checkbox.closest('label')?.textContent)).toEqual([
+      'スケールフィギュア',
+      '可動フィギュア',
+      'カテゴリー未設定',
+    ]);
+  });
+
+  it('カテゴリーを選んだ場合、そのカテゴリーの商品だけを表示し、見出しの個数と合計金額も絞り込んだ商品で数える', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createCategorizedProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('スケールの商品');
+
+    const group = await openCategoryFilter();
+    await userEvent.click(within(group).getByLabelText('スケールフィギュア'));
+
+    expect(screen.getByRole('button', { name: 'カテゴリー: スケールフィギュア' })).toBeInTheDocument();
+    expect(screen.getByText('スケールの商品')).toBeInTheDocument();
+    expect(screen.queryByText('可動の商品')).not.toBeInTheDocument();
+    expect(screen.queryByText('未設定の商品')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^2026\/11 / })).toHaveTextContent('1個（合計 20,000円見込）');
+  });
+
+  it('「カテゴリー未設定」も選んだ場合、両方の商品を表示し、ボタンに選んだものを並べる', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createCategorizedProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('スケールの商品');
+
+    const group = await openCategoryFilter();
+    await userEvent.click(within(group).getByLabelText('スケールフィギュア'));
+    await userEvent.click(within(group).getByLabelText('カテゴリー未設定'));
+
+    expect(screen.getByRole('button', { name: 'カテゴリー: スケールフィギュア、カテゴリー未設定' })).toBeInTheDocument();
+    expect(screen.getByText('未設定の商品')).toBeInTheDocument();
+    expect(screen.queryByText('可動の商品')).not.toBeInTheDocument();
+  });
+
+  it('「選択を解除（すべて表示）」を押した場合、すべての商品を表示する', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createCategorizedProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('スケールの商品');
+    const group = await openCategoryFilter();
+    await userEvent.click(within(group).getByLabelText('スケールフィギュア'));
+
+    await userEvent.click(screen.getByRole('button', { name: '選択を解除（すべて表示）' }));
+
+    expect(screen.getByRole('button', { name: 'カテゴリー: すべて' })).toBeInTheDocument();
+    expect(screen.getByText('可動の商品')).toBeInTheDocument();
+  });
+
+  it('選んだカテゴリーを覚え、次に開いたときも絞り込んで表示する', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createCategorizedProducts() } }) });
+    const { unmount } = render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('スケールの商品');
+    const group = await openCategoryFilter();
+    await userEvent.click(within(group).getByLabelText('可動フィギュア'));
+    unmount();
+
+    render(<ProductListPage currentTime={currentTime} />);
+
+    expect(await screen.findByText('可動の商品')).toBeInTheDocument();
+    expect(screen.queryByText('スケールの商品')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'カテゴリー: 可動フィギュア' })).toBeInTheDocument();
+  });
+
+  it('覚えているカテゴリーが選択肢にない場合（定義から消えたなど）、そのカテゴリーは選んでいないものとして扱う', async () => {
+    localStorage.setItem(CATEGORY_FILTER_STORAGE_KEY, JSON.stringify({ categoryIds: ['removed'], includesUncategorized: false }));
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createCategorizedProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    expect(await screen.findByText('スケールの商品')).toBeInTheDocument();
+    expect(screen.getByText('可動の商品')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'カテゴリー: すべて' })).toBeInTheDocument();
+  });
+
+  it('定義にないカテゴリーの商品がある場合、「名前（定義にない）」を選択肢に加え、選ぶとその商品を表示する', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: { products: [...createCategorizedProducts(), createProduct({ name: '旧カテゴリーの商品', categoryId: 'legacy', categoryName: '旧カテゴリー' })] },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('旧カテゴリーの商品');
+
+    const group = await openCategoryFilter();
+    await userEvent.click(within(group).getByLabelText('旧カテゴリー（定義にない）'));
+
+    expect(screen.getByText('旧カテゴリーの商品')).toBeInTheDocument();
+    expect(screen.queryByText('スケールの商品')).not.toBeInTheDocument();
+  });
+
+  it('カテゴリーの定義に誤りがある場合、理由を表示し、絞り込みを使えなくし、商品はすべて表示する', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products: createCategorizedProducts() } }),
+      'GET /api/categories': () => ({
+        status: 503,
+        body: { error: { code: 'CATEGORY_DEFINITION_INVALID', message: 'カテゴリーの定義（categories.json）に誤りがあります: 2 行目' } },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('カテゴリーの定義（categories.json）に誤りがあります: 2 行目');
+    expect(screen.getByRole('button', { name: /^カテゴリー:/ })).toBeDisabled();
+    expect(screen.getByText('スケールの商品')).toBeInTheDocument();
+    expect(screen.getByText('未設定の商品')).toBeInTheDocument();
+  });
+
+  it('追加のモーダルで、定義のカテゴリーを選べる', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByRole('region', { name: '2026/11' });
+
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+
+    const options = Array.from((within(screen.getByRole('dialog')).getByLabelText('カテゴリー') as HTMLSelectElement).options);
+    expect(options.map((option) => option.text)).toEqual(['未設定', 'スケールフィギュア', '可動フィギュア']);
   });
 });

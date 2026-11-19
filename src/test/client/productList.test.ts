@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildArchiveGroups,
+  buildCategoryFilterOptions,
   buildProductListGroups,
+  filterProductsByCategory,
   formatArchiveSummary,
   formatGroupSummary,
   splitProductsByArchive,
@@ -24,7 +26,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     shippingFee: null,
     orderDeadline: null,
     url: null,
-    category: null,
+    categoryId: null,
+    categoryName: null,
     maker: null,
     note: null,
     createdAt,
@@ -192,5 +195,58 @@ describe('アーカイブのグループ（issue #9）', () => {
 
   it('アーカイブの見出しの集計は、見込みではないため「1個（合計 22,800円）」と表記する', () => {
     expect(formatArchiveSummary({ count: 1, totalYen: 22800 })).toBe('1個（合計 22,800円）');
+  });
+});
+
+describe('カテゴリーの絞り込み（issue #10）', () => {
+  const scale = createProduct({ categoryId: 'scale', categoryName: 'スケールフィギュア' });
+  const action = createProduct({ categoryId: 'action', categoryName: '可動フィギュア' });
+  const uncategorized = createProduct({ categoryId: null, categoryName: null });
+  const products = [scale, action, uncategorized];
+
+  it('何も選んでいない場合、すべての商品を返す', () => {
+    expect(filterProductsByCategory(products, { categoryIds: new Set(), includesUncategorized: false })).toEqual(products);
+  });
+
+  it('選んだカテゴリーの商品だけを返す（複数選べる）', () => {
+    expect(filterProductsByCategory(products, { categoryIds: new Set(['scale', 'action']), includesUncategorized: false })).toEqual([
+      scale,
+      action,
+    ]);
+  });
+
+  it('「カテゴリー未設定」を選んだ場合、カテゴリーのない商品を返す', () => {
+    expect(filterProductsByCategory(products, { categoryIds: new Set(['scale']), includesUncategorized: true })).toEqual([
+      scale,
+      uncategorized,
+    ]);
+  });
+});
+
+describe('絞り込みの選択肢（issue #10）', () => {
+  const categories = [
+    { id: 'scale', name: 'スケールフィギュア' },
+    { id: 'action', name: '可動フィギュア' },
+  ];
+
+  it('定義の並び順で選択肢を作る', () => {
+    expect(buildCategoryFilterOptions(categories, [])).toEqual([
+      { id: 'scale', label: 'スケールフィギュア' },
+      { id: 'action', label: '可動フィギュア' },
+    ]);
+  });
+
+  it('定義にないカテゴリーの商品がある場合、「名前（定義にない）」として定義の後に重複なく加える', () => {
+    const products = [
+      createProduct({ categoryId: 'legacy', categoryName: '旧カテゴリー' }),
+      createProduct({ categoryId: 'scale', categoryName: 'スケールフィギュア' }),
+      createProduct({ categoryId: 'legacy', categoryName: '旧カテゴリー' }),
+    ];
+
+    expect(buildCategoryFilterOptions(categories, products)).toEqual([
+      { id: 'scale', label: 'スケールフィギュア' },
+      { id: 'action', label: '可動フィギュア' },
+      { id: 'legacy', label: '旧カテゴリー（定義にない）' },
+    ]);
   });
 });
