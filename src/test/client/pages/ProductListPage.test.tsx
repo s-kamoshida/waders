@@ -636,6 +636,30 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
     expect(findCard('動かす商品')).not.toHaveAttribute('draggable', 'true');
   });
 
+  it.each([
+    ['商品を押して編集のモーダルを開いた', async () => userEvent.click(screen.getByRole('button', { name: /1月の商品/ }))],
+    ['＋ボタンで追加のモーダルを開いた', async () => userEvent.click(screen.getByRole('button', { name: '商品を追加' }))],
+    ['月の見出しの＋で追加のモーダルを開いた', async () => userEvent.click(screen.getByRole('button', { name: '2026/12に商品を追加' }))],
+    ['年のまとめ方を切り替えた', async () => userEvent.click(screen.getByLabelText('年度'))],
+    [
+      'カテゴリーの絞り込みを変えた',
+      async () => {
+        await userEvent.click(screen.getByRole('button', { name: /^カテゴリー:/ }));
+        await userEvent.click(within(screen.getByRole('group', { name: 'カテゴリーで絞り込む' })).getByLabelText('スケールフィギュア'));
+      },
+    ],
+  ])('知らせを表示している間に%s場合、すぐに知らせを閉じる', async (_label, startOtherOperation) => {
+    stubMovableRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('動かす商品');
+    dragWithMouse(findCard('動かす商品'), screen.getByRole('region', { name: '2027/01' }));
+    await screen.findByRole('status');
+
+    await startOtherOperation();
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
   describe('タッチ操作', () => {
     /** 指の下にある要素として、落とす先を返すようにする（jsdom には elementFromPoint がないため）。 */
     function stubElementUnderFinger(element: Element | null): void {

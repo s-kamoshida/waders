@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../client/App.tsx';
@@ -111,5 +111,27 @@ describe('App', () => {
     expect(await screen.findByText('延期された商品')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products').length).toBeGreaterThan(getCountBeforeAnswer);
+  });
+
+  it('移動の知らせを表示している間にタブを切り替えた場合、知らせを閉じる（issue #13）', async () => {
+    let products = [createProduct({ name: '動かす商品', releaseMonth: '2026-11' }), createProduct({ id: 'product-2', name: '12月の商品', releaseMonth: '2026-12' })];
+    stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'PATCH /api/products/product-1/release-month': () => {
+        products = products.map((product) => (product.id === 'product-1' ? { ...product, releaseMonth: '2026-12' } : product));
+        return { body: products[0] };
+      },
+    });
+    render(<App currentTime={currentTime} />);
+    const card = (await screen.findByRole('button', { name: /動かす商品/ })).closest('article');
+    if (card === null) throw new Error('カードが見つかりません');
+    fireEvent.dragStart(card);
+    fireEvent.dragOver(screen.getByRole('region', { name: '2026/12' }));
+    fireEvent.drop(screen.getByRole('region', { name: '2026/12' }));
+    await screen.findByRole('status');
+
+    await userEvent.click(screen.getByRole('tab', { name: 'アーカイブ' }));
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });
