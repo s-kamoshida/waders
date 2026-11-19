@@ -570,6 +570,58 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  it('続けて別の月に移動した場合、前の知らせを新しい知らせに置き換え、知らせは 1 つだけ表示する', async () => {
+    stubMovableRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('動かす商品');
+    dragWithMouse(findCard('動かす商品'), screen.getByRole('region', { name: '2027/01' }));
+    await screen.findByText('発売月を 2027/01 に移動しました');
+    await waitFor(() => expect(within(screen.getByRole('region', { name: '2027/01' })).getByText('動かす商品')).toBeInTheDocument());
+
+    dragWithMouse(findCard('動かす商品'), screen.getByRole('region', { name: '2026/12' }));
+
+    await screen.findByText('発売月を 2026/12 に移動しました');
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.queryByText('発売月を 2027/01 に移動しました')).not.toBeInTheDocument();
+  });
+
+  it('「元に戻す」を押した後の知らせは、押したときから 8 秒で消える', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubMovableRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('動かす商品');
+    dragWithMouse(findCard('動かす商品'), screen.getByRole('region', { name: '2027/01' }));
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    fireEvent.click(within(await screen.findByRole('status')).getByRole('button', { name: '元に戻す' }));
+    await screen.findByText('発売月を 2026/11 に戻しました');
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('発売月を 2026/11 に戻しました');
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('失敗の知らせも 8 秒で消え、「元に戻す」は付けない', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubMovableRoutes({ failsMove: true });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('動かす商品');
+    dragWithMouse(findCard('動かす商品'), screen.getByRole('region', { name: '2027/01' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).queryByRole('button', { name: '元に戻す' })).not.toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(8000);
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('マウスなどの細かく指せる端末では、カードをドラッグできる（draggable）。タッチだけの端末では、ブラウザ標準のドラッグを使わない', async () => {
     stubMovableRoutes();
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(pointer: fine)', media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
