@@ -33,6 +33,24 @@ body {
   font-size: 14px;
 }
 
+/*
+ * ページ自体はスクロールさせず、ヘッダーより下（.application-main）を中の領域としてスクロールさせる（issue #21）。
+ * iOS Safari は入力欄にフォーカスしたときにページを自動でスクロールし、overflow: hidden では止まらないため、
+ * ページの高さを画面の高さに収めて、動かせる量そのものをなくす。
+ */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+.application {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
 button,
 input,
 select,
@@ -40,10 +58,10 @@ textarea {
   font: inherit;
 }
 
-/* ヘッダー */
+/* ヘッダー（一覧の領域の外にあるため、スクロールしても動かない。issue #21） */
 .application-header {
-  position: sticky;
-  top: 0;
+  position: relative;
+  flex: none;
   z-index: 5;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -56,7 +74,15 @@ textarea {
 }
 
 .application-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 0 16px 80px;
+}
+
+/* キーボードでスクロールするためにフォーカスを置く（Tab キーでは止まらない）ため、枠線は出さない（issue #21） */
+.application-main:focus {
+  outline: none;
 }
 
 /* ツールバー */
@@ -645,10 +671,13 @@ textarea {
   }
 }
 
-/* モーダルを開いている間は、背景の一覧をスクロールさせない（issue #16） */
-html:has(.dialog-backdrop),
-html:has(.dialog-backdrop) body {
-  overflow: hidden;
+/*
+ * モーダルを開いている間は、背景の一覧をスクロールさせない（issue #16）。
+ * 編集のモーダルは DOM 上では一覧の領域の中にあり、背景を指で動かすと一覧の領域にスクロールが伝わるため、
+ * 一覧の領域のスクロールも止める（スクロールの位置は保たれる）（issue #21）
+ */
+.application:has(.dialog-backdrop) .application-main {
+  overflow-y: hidden;
 }
 
 .dialog-backdrop,
