@@ -29,6 +29,10 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     categoryName: null,
     maker: null,
     note: null,
+    location: null,
+    handlingFee: null,
+    travelExpense: null,
+    otherExpense: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     deliveryConfirmationPending: false,
@@ -451,5 +455,170 @@ describe('閉じる', () => {
     await userEvent.keyboard('{Escape}');
 
     expect(onClose).toHaveBeenCalledWith(false);
+  });
+});
+
+describe('入力する項目の設定（issue #27）', () => {
+  /** 選べる項目のチェックボックスの表記（並び順）。 */
+  const FIELD_CHECKBOX_LABELS = ['送料', 'メーカー', '受注期限', 'キャンセル可', '場所', '手数料', '交通費（見込）', 'その他費用'];
+
+  /** 電子チケットのカテゴリーを含む定義を返すスタブで管理のモーダルを開き、電子チケットの「入力する項目」を開く。 */
+  async function openTicketFieldSettings(extraRoutes: StubRouteHandlers = {}) {
+    let categories = [
+      { id: 'scale', name: 'スケールフィギュア', fields: ['shippingFee', 'maker', 'orderDeadline', 'cancelable'], otherExpenseLabel: 'その他費用' },
+      { id: 'ticket', name: '電子チケット', fields: ['location', 'handlingFee'], otherExpenseLabel: 'ドリンク代' },
+    ];
+    const opened = await openDialog([], {
+      'GET /api/categories': () => ({ body: { categories } }),
+      'PATCH /api/categories/ticket/field-settings': (requestBody) => {
+        const body = requestBody as { fields?: Record<string, boolean>; otherExpenseLabel?: string | null };
+        const ticket = categories[1];
+        if (ticket === undefined) return { status: 500 };
+        const enabled = new Set(ticket.fields);
+        for (const [field, isEnabled] of Object.entries(body.fields ?? {})) {
+          if (isEnabled) enabled.add(field);
+          else enabled.delete(field);
+        }
+        const updated = {
+          ...ticket,
+          fields: ['shippingFee', 'maker', 'orderDeadline', 'cancelable', 'location', 'handlingFee', 'travelExpense', 'otherExpense'].filter((field) => enabled.has(field)),
+          otherExpenseLabel: body.otherExpenseLabel === undefined ? ticket.otherExpenseLabel : (body.otherExpenseLabel ?? 'その他費用'),
+        };
+        categories = [categories[0] ?? ticket, updated];
+        return { body: updated };
+      },
+      ...extraRoutes,
+    });
+    const ticket = within(opened.dialog).getByRole('group', { name: '電子チケット' });
+    await userEvent.click(within(ticket).getByRole('button', { name: '入力する項目' }));
+    return { ...opened, ticket };
+  }
+
+  it('カテゴリーの「入力する項目」は閉じた状態で表示し、押すと、選べる項目のチェックボックスと「その他費用」の名前を、今の設定で表示する', async () => {
+    const { dialog, ticket } = await openTicketFieldSettings();
+
+    expect(within(within(dialog).getByRole('group', { name: 'スケールフィギュア' })).getByRole('button', { name: '入力する項目' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(within(ticket).getByRole('button', { name: '入力する項目' })).toHaveAttribute('aria-expanded', 'true');
+    const checkboxes = within(ticket).getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(FIELD_CHECKBOX_LABELS.length);
+    FIELD_CHECKBOX_LABELS.forEach((label, index) => {
+      const checkbox = within(ticket).getByRole('checkbox', { name: label });
+      expect(checkboxes[index]).toBe(checkbox);
+      expect(checkbox).toHaveProperty('checked', label === '場所' || label === '手数料');
+    });
+    expect(within(ticket).getByRole('textbox', { name: 'その他費用の名前' })).toHaveValue('ドリンク代');
+  });
+
+  it('選んだ項目だけを入力できること、値が保存されている項目は外しても表示することを説明する', async () => {
+    const { ticket } = await openTicketFieldSettings();
+
+    expect(ticket).toHaveTextContent(
+      'チェックした項目を、このカテゴリーの商品の追加・編集で入力できます。チェックを外しても、値が保存されている商品では表示します。',
+    );
+  });
+
+  it('項目のチェックを入れた場合、すぐにその項目だけを有効にする変更を送り、読み込み直した設定を表示する', async () => {
+    const { ticket, requests } = await openTicketFieldSettings();
+
+    await userEvent.click(within(ticket).getByRole('checkbox', { name: '交通費（見込）' }));
+
+    await waitFor(() => expect(within(ticket).getByRole('checkbox', { name: '交通費（見込）' })).toBeChecked());
+    expect(findChangingRequests(requests)).toEqual([
+      expect.objectContaining({
+        method: 'PATCH',
+        path: '/api/categories/ticket/field-settings',
+        contentType: 'application/json',
+        body: { fields: { travelExpense: true } },
+      }),
+    ]);
+  });
+
+  it('項目のチェックを外した場合、すぐにその項目だけを無効にする変更を送る', async () => {
+    const { ticket, requests } = await openTicketFieldSettings();
+
+    await userEvent.click(within(ticket).getByRole('checkbox', { name: '場所' }));
+
+    await waitFor(() => expect(within(ticket).getByRole('checkbox', { name: '場所' })).not.toBeChecked());
+    expect(findChangingRequests(requests)).toEqual([expect.objectContaining({ body: { fields: { location: false } } })]);
+  });
+
+  it('「費用の名前を変更」は名前を変えるまで押せず、変えて押した場合、その名前を送る', async () => {
+    const { ticket, requests } = await openTicketFieldSettings();
+    expect(within(ticket).getByRole('button', { name: '費用の名前を変更' })).toBeDisabled();
+
+    const labelField = within(ticket).getByRole('textbox', { name: 'その他費用の名前' });
+    await userEvent.clear(labelField);
+    await userEvent.type(labelField, 'ドリンク代・グッズ代');
+    await userEvent.click(within(ticket).getByRole('button', { name: '費用の名前を変更' }));
+
+    await waitFor(() => expect(findChangingRequests(requests)).toHaveLength(1));
+    expect(findChangingRequests(requests)[0]).toMatchObject({
+      method: 'PATCH',
+      path: '/api/categories/ticket/field-settings',
+      body: { otherExpenseLabel: 'ドリンク代・グッズ代' },
+    });
+  });
+
+  it('「その他費用」の名前の入力欄で Enter キーを押した場合も、名前を送る', async () => {
+    const { ticket, requests } = await openTicketFieldSettings();
+
+    await userEvent.type(within(ticket).getByRole('textbox', { name: 'その他費用の名前' }), '等{Enter}');
+
+    await waitFor(() => expect(findChangingRequests(requests)).toHaveLength(1));
+    expect(findChangingRequests(requests)[0]).toMatchObject({ body: { otherExpenseLabel: 'ドリンク代等' } });
+  });
+
+  it('「その他費用」の名前を空にして変更した場合、名前を戻す（null）変更を送り、「その他費用」と表示する', async () => {
+    const { ticket, requests } = await openTicketFieldSettings();
+
+    await userEvent.clear(within(ticket).getByRole('textbox', { name: 'その他費用の名前' }));
+    await userEvent.click(within(ticket).getByRole('button', { name: '費用の名前を変更' }));
+
+    await waitFor(() => expect(within(ticket).getByRole('textbox', { name: 'その他費用の名前' })).toHaveValue('その他費用'));
+    expect(findChangingRequests(requests)).toEqual([expect.objectContaining({ body: { otherExpenseLabel: null } })]);
+  });
+
+  it('「その他費用」の名前が 20 文字を超える場合、文言を表示し、送らない', async () => {
+    const { dialog, ticket, requests } = await openTicketFieldSettings();
+
+    const labelField = within(ticket).getByRole('textbox', { name: 'その他費用の名前' });
+    await userEvent.clear(labelField);
+    await userEvent.type(labelField, 'あ'.repeat(21));
+    await userEvent.click(within(ticket).getByRole('button', { name: '費用の名前を変更' }));
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('その他費用の名前は 20 文字以内で入力してください。');
+    expect(findChangingRequests(requests)).toEqual([]);
+  });
+
+  it('保存に失敗した場合（サーバーのエラー）、MSG-E-008 を表示し、読み込み直した設定を表示する', async () => {
+    const { dialog, ticket } = await openTicketFieldSettings({
+      'PATCH /api/categories/ticket/field-settings': () => ({ status: 500, body: { error: { code: 'INTERNAL_ERROR', message: '内部の詳細' } } }),
+    });
+
+    await userEvent.click(within(ticket).getByRole('checkbox', { name: '交通費（見込）' }));
+
+    const alert = await within(dialog).findByRole('alert');
+    expect(alert).toHaveTextContent('カテゴリーを保存できませんでした。時間をおいて、もう一度お試しください。');
+    await waitFor(() => expect(within(ticket).getByRole('checkbox', { name: '交通費（見込）' })).not.toBeChecked());
+  });
+
+  it('設定を変えた後に「閉じる」を押した場合、変更あり（true）で onClose を呼ぶ', async () => {
+    const { dialog, ticket, onClose } = await openTicketFieldSettings();
+    await userEvent.click(within(ticket).getByRole('checkbox', { name: '交通費（見込）' }));
+    await waitFor(() => expect(within(ticket).getByRole('checkbox', { name: '交通費（見込）' })).toBeChecked());
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+
+    expect(onClose).toHaveBeenCalledWith(true);
+  });
+
+  it('定義にないカテゴリーには、「入力する項目」を表示しない', async () => {
+    const { dialog } = await openDialog([removedProduct()]);
+
+    const removed = await within(dialog).findByRole('group', { name: 'プライズ（定義にない）' });
+    expect(within(removed).queryByRole('button', { name: '入力する項目' })).not.toBeInTheDocument();
   });
 });

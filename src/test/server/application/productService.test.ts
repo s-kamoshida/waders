@@ -43,6 +43,10 @@ describe('商品の登録', () => {
       categoryName: null,
       maker: null,
       note: null,
+      location: null,
+      handlingFee: null,
+      travelExpense: null,
+      otherExpense: null,
       createdAt: TEST_CURRENT_TIME.toISOString(),
       updatedAt: TEST_CURRENT_TIME.toISOString(),
     });

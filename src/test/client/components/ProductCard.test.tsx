@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ProductCard } from '../../../client/components/ProductCard.tsx';
 import type { ProductResponse } from '../../../shared/productContract.ts';
+import type { CategoryResponse } from '../../../shared/categoryContract.ts';
 
 const today = '2026-11-17';
 
@@ -23,6 +24,10 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     categoryName: null,
     maker: null,
     note: null,
+    location: null,
+    handlingFee: null,
+    travelExpense: null,
+    otherExpense: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,
@@ -120,5 +125,113 @@ describe('ProductCard', () => {
     await userEvent.click(screen.getByRole('link', { name: 'shop.example.jp' }));
 
     expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe('場所と費用・カテゴリーごとの入力項目（issue #26・#27）', () => {
+  /** 物品のカテゴリー（既定の項目の設定）。 */
+  const figureCategory: CategoryResponse = {
+    id: 'scale',
+    name: 'スケールフィギュア',
+    fields: ['shippingFee', 'maker', 'orderDeadline', 'cancelable'],
+    otherExpenseLabel: 'その他費用',
+  };
+  /** 電子チケットのカテゴリー（送料を使わず、場所と費用を使う。その他費用の名前は「ドリンク代」）。 */
+  const ticketCategory: CategoryResponse = {
+    id: 'ticket',
+    name: '電子チケット',
+    fields: ['location', 'handlingFee', 'travelExpense', 'otherExpense'],
+    otherExpenseLabel: 'ドリンク代',
+  };
+  const categories = [figureCategory, ticketCategory];
+  const ticketProduct = (overrides: Partial<ProductResponse> = {}) =>
+    createProduct({ categoryId: 'ticket', categoryName: '電子チケット', price: 8800, shippingFee: null, ...overrides });
+
+  it('場所がある場合、商品名の下に表示する', () => {
+    render(<ProductCard product={ticketProduct({ location: '東京ドーム' })} today={today} onSelect={vi.fn()} categories={categories} />);
+
+    const name = screen.getByText('オリジナルキャラクター シュガー ver.');
+    const location = screen.getByText('東京ドーム');
+    expect(name.compareDocumentPosition(location) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('手数料・交通費（見込）・その他費用がある場合、項目ごとに表示し、その他費用はカテゴリーの名前で示す', () => {
+    render(
+      <ProductCard
+        product={ticketProduct({ handlingFee: 330, travelExpense: 2000, otherExpense: 600 })}
+        today={today}
+        onSelect={vi.fn()}
+        categories={categories}
+      />,
+    );
+
+    expect(screen.getByText('手数料 330円')).toBeInTheDocument();
+    expect(screen.getByText('交通費（見込） 2,000円')).toBeInTheDocument();
+    expect(screen.getByText('ドリンク代 600円')).toBeInTheDocument();
+  });
+
+  it('場所と費用が未入力の場合、どれも表示しない', () => {
+    render(<ProductCard product={ticketProduct()} today={today} onSelect={vi.fn()} categories={categories} />);
+
+    expect(screen.queryByText(/手数料|交通費|ドリンク代|その他費用/)).not.toBeInTheDocument();
+  });
+
+  it('カテゴリー未設定の商品のその他費用は「その他費用」と示す', () => {
+    render(<ProductCard product={createProduct({ otherExpense: 600 })} today={today} onSelect={vi.fn()} categories={categories} />);
+
+    expect(screen.getByText('その他費用 600円')).toBeInTheDocument();
+  });
+
+  it('送料を使わないカテゴリーの商品で、送料が未入力の場合、「送料無料」と表示しない', () => {
+    render(<ProductCard product={ticketProduct()} today={today} onSelect={vi.fn()} categories={categories} />);
+
+    expect(screen.getByText('8,800円')).toBeInTheDocument();
+    expect(screen.queryByText('送料無料')).not.toBeInTheDocument();
+  });
+
+  it('送料を使わないカテゴリーの商品でも、送料が保存されている場合は表示する', () => {
+    render(<ProductCard product={ticketProduct({ shippingFee: 800 })} today={today} onSelect={vi.fn()} categories={categories} />);
+
+    expect(screen.getByText('送料 800円')).toBeInTheDocument();
+  });
+
+  it('送料を使うカテゴリーの商品で、送料が未入力の場合、「送料無料」と表示する', () => {
+    render(
+      <ProductCard
+        product={createProduct({ categoryId: 'scale', categoryName: 'スケールフィギュア', shippingFee: null })}
+        today={today}
+        onSelect={vi.fn()}
+        categories={categories}
+      />,
+    );
+
+    expect(screen.getByText('送料無料')).toBeInTheDocument();
+  });
+
+  it('カテゴリー未設定・定義にないカテゴリーの商品で、送料が未入力の場合、「送料無料」と表示しない', () => {
+    const { unmount } = render(
+      <ProductCard product={createProduct({ shippingFee: null })} today={today} onSelect={vi.fn()} categories={categories} />,
+    );
+    expect(screen.queryByText('送料無料')).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <ProductCard
+        product={createProduct({ categoryId: 'removed', categoryName: 'プライズ', shippingFee: null })}
+        today={today}
+        onSelect={vi.fn()}
+        categories={categories}
+      />,
+    );
+    expect(screen.queryByText('送料無料')).not.toBeInTheDocument();
+  });
+
+  it('カテゴリーの定義を読めない場合（categories が null）、送料が未入力なら「送料無料」と表示し、その他費用は「その他費用」と示す', () => {
+    render(
+      <ProductCard product={ticketProduct({ otherExpense: 600 })} today={today} onSelect={vi.fn()} categories={null} />,
+    );
+
+    expect(screen.getByText('送料無料')).toBeInTheDocument();
+    expect(screen.getByText('その他費用 600円')).toBeInTheDocument();
   });
 });

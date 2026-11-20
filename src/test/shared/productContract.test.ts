@@ -31,6 +31,10 @@ describe('必須項目', () => {
       categoryId: null,
       maker: null,
       note: null,
+      location: null,
+      handlingFee: null,
+      travelExpense: null,
+      otherExpense: null,
     });
   });
 
@@ -161,5 +165,50 @@ describe('メーカーと備考（issue #18）', () => {
     ['note', ' \n '],
   ])('%s が空白だけの場合、拒否する（未入力は null で送る）', (fieldName, value) => {
     expect(isValid({ ...minimumInput, [fieldName]: value })).toBe(false);
+  });
+});
+
+describe('場所と費用（issue #26）', () => {
+  it.each(['handlingFee', 'travelExpense', 'otherExpense'])('%s は、金額と同じく 0 円と上限の金額（9,999,999 円）を受け付ける', (fieldName) => {
+    expect(isValid({ ...minimumInput, [fieldName]: 0 })).toBe(true);
+    expect(isValid({ ...minimumInput, [fieldName]: 9_999_999 })).toBe(true);
+  });
+
+  it.each([
+    ['handlingFee', -1],
+    ['handlingFee', 10_000_000],
+    ['handlingFee', 100.5],
+    ['travelExpense', -1],
+    ['travelExpense', 10_000_000],
+    ['travelExpense', 100.5],
+    ['otherExpense', -1],
+    ['otherExpense', 10_000_000],
+    ['otherExpense', 100.5],
+  ])('%s が範囲外または整数でない（%s）場合、拒否する', (fieldName, value) => {
+    expect(isValid({ ...minimumInput, [fieldName]: value })).toBe(false);
+  });
+
+  it('費用が上限を超える場合、金額と同じ文言で拒否する', () => {
+    const result = productInputSchema.safeParse({ ...minimumInput, handlingFee: 10_000_000 });
+
+    expect(result.error?.issues[0]).toMatchObject({ path: ['handlingFee'], message: '金額は 9,999,999 円以下で入力してください。' });
+  });
+
+  it('場所の前後の空白を取り除く', () => {
+    expect(productInputSchema.parse({ ...minimumInput, location: '  東京ドーム ' }).location).toBe('東京ドーム');
+  });
+
+  it('場所は 100 文字までは受け付け、超える場合は文言とともに拒否する', () => {
+    expect(isValid({ ...minimumInput, location: 'あ'.repeat(100) })).toBe(true);
+
+    const result = productInputSchema.safeParse({ ...minimumInput, location: 'あ'.repeat(101) });
+
+    expect(result.error?.issues[0]).toMatchObject({ path: ['location'], message: '場所は 100 文字以内で入力してください。' });
+  });
+
+  it('場所が空白だけの場合、文言とともに拒否する（未入力は null で送る）', () => {
+    const result = productInputSchema.safeParse({ ...minimumInput, location: '   ' });
+
+    expect(result.error?.issues[0]).toMatchObject({ path: ['location'], message: '場所を入力しない場合は空にしてください。' });
   });
 });

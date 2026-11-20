@@ -31,6 +31,10 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     categoryName: null,
     maker: null,
     note: null,
+    location: null,
+    handlingFee: null,
+    travelExpense: null,
+    otherExpense: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
@@ -140,6 +144,45 @@ describe('見出しの個数と合計金額', () => {
       { count: 3, totalYen: 44000 },
       { count: 0, totalYen: 0 },
     ]);
+  });
+
+  it('合計金額には、金額・送料・手数料・交通費（見込）・その他費用を含める（issue #26）', () => {
+    const products = [
+      createProduct({ price: 8800, shippingFee: null, handlingFee: 330, travelExpense: 2000, otherExpense: 600 }),
+      createProduct({ price: 13200, shippingFee: 800, handlingFee: null, travelExpense: null, otherExpense: null }),
+    ];
+
+    const [yearGroup] = buildProductListGroups(products, { currentMonth: '2026-11', yearMode: 'calendar' });
+
+    expect(yearGroup?.summary).toEqual({ count: 2, totalYen: 8800 + 330 + 2000 + 600 + 13200 + 800 });
+    expect(yearGroup?.months[0]?.summary).toEqual({ count: 2, totalYen: 25730 });
+  });
+
+  it('金額が未入力の商品は、手数料・交通費・その他費用が入力されていても合計金額に含めず、個数だけに含める（issue #26）', () => {
+    const products = [
+      createProduct({ price: null, handlingFee: 330, travelExpense: 2000, otherExpense: 600 }),
+      createProduct({ price: 1000 }),
+    ];
+
+    const [yearGroup] = buildProductListGroups(products, { currentMonth: '2026-11', yearMode: 'calendar' });
+
+    expect(yearGroup?.summary).toEqual({ count: 2, totalYen: 1000 });
+  });
+
+  it('未購入の商品の手数料・交通費・その他費用は合計金額に含めない（issue #26）', () => {
+    const products = [createProduct({ status: 'unpurchased', price: 8800, handlingFee: 330, travelExpense: 2000, otherExpense: 600 })];
+
+    const [yearGroup] = buildProductListGroups(products, { currentMonth: '2026-11', yearMode: 'calendar' });
+
+    expect(yearGroup?.summary).toEqual({ count: 0, totalYen: 0 });
+  });
+
+  it('アーカイブの見出しの合計金額にも、手数料・交通費・その他費用を含める（issue #26）', () => {
+    const product = createProduct({ releaseMonth: '2026-10', status: 'purchased', price: 8800, handlingFee: 330, travelExpense: 2000, otherExpense: 600 });
+
+    const [yearGroup] = buildArchiveGroups([product], { yearMode: 'calendar' });
+
+    expect(yearGroup?.summary).toEqual({ count: 1, totalYen: 11730 });
   });
 
   it('見出しの集計を「3個（合計 44,000円見込）」と表記する', () => {

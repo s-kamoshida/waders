@@ -29,6 +29,10 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     categoryName: null,
     maker: null,
     note: null,
+    location: null,
+    handlingFee: null,
+    travelExpense: null,
+    otherExpense: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
@@ -269,8 +273,11 @@ describe('メーカーの候補（issue #18）', () => {
     await screen.findByRole('region', { name: '2026/11' });
 
     await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+    const dialog = screen.getByRole('dialog', { name: '商品を追加' });
+    await within(dialog).findByRole('option', { name: 'スケールフィギュア' });
+    await userEvent.selectOptions(within(dialog).getByLabelText('カテゴリー'), 'スケールフィギュア');
 
-    const makerInput = within(screen.getByRole('dialog', { name: '商品を追加' })).getByLabelText('メーカー');
+    const makerInput = within(dialog).getByLabelText('メーカー');
     const suggestionList = document.getElementById(makerInput.getAttribute('list') ?? '');
     expect(Array.from(suggestionList?.querySelectorAll('option') ?? []).map((option) => option.value)).toEqual([
       'メーカーA',
@@ -747,5 +754,80 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
 
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('場所と費用・カテゴリーごとの入力項目（issue #26・#27）', () => {
+  /** 物品と電子チケットのカテゴリーの定義（電子チケットは送料を使わず、場所と費用を使う。その他費用の名前は「ドリンク代」）。 */
+  const categoryRoutes = {
+    'GET /api/categories': () => ({
+      body: {
+        categories: [
+          { id: 'scale', name: 'スケールフィギュア', fields: ['shippingFee', 'maker', 'orderDeadline', 'cancelable'], otherExpenseLabel: 'その他費用' },
+          { id: 'ticket', name: '電子チケット', fields: ['location', 'handlingFee', 'travelExpense', 'otherExpense'], otherExpenseLabel: 'ドリンク代' },
+        ],
+      },
+    }),
+  };
+
+  it('電子チケットの商品のカードに、場所と、カテゴリーの名前で示した費用を表示し、「送料無料」は表示しない', async () => {
+    stubFetchRoutes({
+      ...categoryRoutes,
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({
+              name: 'ライブ 東京公演',
+              categoryId: 'ticket',
+              categoryName: '電子チケット',
+              price: 8800,
+              location: '東京ドーム',
+              handlingFee: 330,
+              otherExpense: 600,
+            }),
+          ],
+        },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const card = (await screen.findByText('ライブ 東京公演')).closest('article');
+    expect(card).not.toBeNull();
+    await waitFor(() => expect(within(card as HTMLElement).getByText('ドリンク代 600円')).toBeInTheDocument());
+    expect(within(card as HTMLElement).getByText('東京ドーム')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('手数料 330円')).toBeInTheDocument();
+    expect(within(card as HTMLElement).queryByText('送料無料')).not.toBeInTheDocument();
+  });
+
+  it('見出しの合計金額に、手数料・交通費（見込）・その他費用を含める', async () => {
+    stubFetchRoutes({
+      ...categoryRoutes,
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({ categoryId: 'ticket', categoryName: '電子チケット', price: 8800, handlingFee: 330, travelExpense: 2000, otherExpense: 600 }),
+          ],
+        },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    expect(await screen.findByRole('region', { name: '2026/11' })).toBeInTheDocument();
+    expect(screen.getAllByText(/1個（合計 11,730円見込）/).length).toBeGreaterThan(0);
+  });
+
+  it('追加のモーダルで電子チケットのカテゴリーを選んだ場合、カテゴリーの定義に従って場所と費用の入力欄を表示する', async () => {
+    stubFetchRoutes({ ...categoryRoutes, 'GET /api/products': () => ({ body: { products: [] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByRole('region', { name: '2026/11' });
+
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+    const dialog = screen.getByRole('dialog', { name: '商品を追加' });
+    await within(dialog).findByRole('option', { name: '電子チケット' });
+    await userEvent.selectOptions(within(dialog).getByLabelText('カテゴリー'), '電子チケット');
+
+    expect(within(dialog).getByLabelText('場所')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('ドリンク代')).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('送料（税込）')).not.toBeInTheDocument();
   });
 });

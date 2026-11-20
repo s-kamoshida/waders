@@ -3,7 +3,12 @@ import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProductId } from '../../../server/domain/product.ts';
 import { productListResponseSchema, productSchema } from '../../../shared/productContract.ts';
-import { TEST_CATEGORIES, createWebApplicationTestHarness, type WebApplicationTestHarness } from './webApplicationTestHarness.ts';
+import {
+  TEST_CATEGORIES,
+  createWebApplicationTestHarness,
+  withDefaultFieldSettings,
+  type WebApplicationTestHarness,
+} from './webApplicationTestHarness.ts';
 
 let harness: WebApplicationTestHarness;
 
@@ -30,11 +35,11 @@ async function findListedProduct(productId: string) {
 }
 
 describe('GET /api/categories', () => {
-  it('定義のファイルの並び順で、カテゴリーの ID と名前を返す', async () => {
+  it('定義のファイルの並び順で、カテゴリーの ID と名前を返す（項目の指定がなければ既定の項目の設定を付ける。issue #27）', async () => {
     const response = await request(harness.application).get('/api/categories');
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ categories: TEST_CATEGORIES });
+    expect(response.body).toEqual({ categories: TEST_CATEGORIES.map(withDefaultFieldSettings) });
   });
 
   it('定義のファイルに誤りがある場合、503 と CATEGORY_DEFINITION_INVALID・ファイル名を含む理由を返す', async () => {
@@ -174,7 +179,7 @@ describe('POST /api/categories（カテゴリーの追加。issue #10）', () =>
     const response = await request(harness.application).post('/api/categories').send({ name: ' プラモデル ' });
 
     expect(response.status).toBe(201);
-    expect(response.body).toEqual({ id: 'category-1', name: 'プラモデル' });
+    expect(response.body).toEqual(withDefaultFieldSettings({ id: 'category-1', name: 'プラモデル' }));
     expect(readCategoryDefinitionJson()).toEqual({ version: 1, categories: [...TEST_CATEGORIES, { id: 'category-1', name: 'プラモデル' }] });
   });
 
@@ -241,7 +246,7 @@ describe('PUT /api/categories/:categoryId（カテゴリーの改名。issue #10
     const response = await request(harness.application).put('/api/categories/action').send({ name: 'アクションフィギュア' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ id: 'action', name: 'アクションフィギュア' });
+    expect(response.body).toEqual(withDefaultFieldSettings({ id: 'action', name: 'アクションフィギュア' }));
     expect(readCategoryDefinitionJson()).toEqual({
       version: 1,
       categories: [TEST_CATEGORIES[0], { id: 'action', name: 'アクションフィギュア' }],
@@ -412,10 +417,10 @@ describe('定義にないカテゴリーの確認（issue #10）', () => {
       const response = await request(harness.application).post('/api/categories/action/add-to-definition').send({});
 
       expect(response.status).toBe(201);
-      expect(response.body).toEqual({ id: 'action', name: '可動フィギュア' });
+      expect(response.body).toEqual(withDefaultFieldSettings({ id: 'action', name: '可動フィギュア' }));
       expect(readCategoryDefinitionJson()).toEqual({ version: 1, categories: [TEST_CATEGORIES[0], { id: 'action', name: '可動フィギュア' }] });
       const categories = await request(harness.application).get('/api/categories').expect(200);
-      expect(categories.body.categories).toContainEqual({ id: 'action', name: '可動フィギュア' });
+      expect(categories.body.categories).toContainEqual(withDefaultFieldSettings({ id: 'action', name: '可動フィギュア' }));
       expect(await findListedProduct(product?.id ?? '')).toMatchObject({ categoryId: 'action', categoryName: '可動フィギュア' });
     });
 
@@ -528,11 +533,184 @@ describe('カテゴリーの変更の要求の形式（CSRF 対策。issue #10�
     ['delete', '/api/categories/action'],
     ['post', '/api/categories/action/add-to-definition'],
     ['post', '/api/categories/action/reassign-products'],
+    ['patch', '/api/categories/action/field-settings'],
   ] as const)('%s %s を Content-Type: application/json 以外で送った場合、415 を返し、定義を変えない', async (method, path) => {
     const agent = request(harness.application);
     const response = await agent[method](path).set('Content-Type', 'text/plain').send('name=x');
 
     expect(response.status).toBe(415);
     expect(readCategoryDefinitionJson()).toEqual({ version: 1, categories: TEST_CATEGORIES });
+  });
+});
+
+describe('カテゴリーごとの入力項目（issue #27）', () => {
+  const ticketCategory = {
+    id: 'ticket',
+    name: '電子チケット',
+    fields: ['location', 'handlingFee', 'travelExpense', 'otherExpense'],
+    otherExpenseLabel: 'ドリンク代',
+  };
+
+  describe('GET /api/categories', () => {
+    it('定義のファイルの項目の指定と「その他費用」の名前を返す', async () => {
+      harness.writeCategoryDefinition({ version: 1, categories: [TEST_CATEGORIES[0], ticketCategory] });
+
+      const response = await request(harness.application).get('/api/categories').expect(200);
+
+      expect(response.body).toEqual({ categories: [withDefaultFieldSettings(TEST_CATEGORIES[0]), ticketCategory] });
+    });
+
+    it('項目の指定が空の場合、選べる項目をすべて無効にし、「その他費用」の名前がなければ「その他費用」とする', async () => {
+      harness.writeCategoryDefinition({ version: 1, categories: [{ id: 'simple', name: '簡易', fields: [] }] });
+
+      const response = await request(harness.application).get('/api/categories').expect(200);
+
+      expect(response.body).toEqual({ categories: [{ id: 'simple', name: '簡易', fields: [], otherExpenseLabel: 'その他費用' }] });
+    });
+
+    it('項目の指定に知らない項目の名前がある場合、503 と CATEGORY_DEFINITION_INVALID を返す', async () => {
+      harness.writeCategoryDefinition({ version: 1, categories: [{ id: 'ticket', name: '電子チケット', fields: ['seat'] }] });
+
+      const response = await request(harness.application).get('/api/categories');
+
+      expect(response.status).toBe(503);
+      expect(response.body.error.code).toBe('CATEGORY_DEFINITION_INVALID');
+    });
+  });
+
+  describe('PATCH /api/categories/:categoryId/field-settings', () => {
+    it('項目を有効にした場合、200 と変更したカテゴリーを返し、定義のファイルに項目の指定を書く（ほかのカテゴリーは変えない）', async () => {
+      const response = await request(harness.application)
+        .patch('/api/categories/action/field-settings')
+        .send({ fields: { location: true } });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        id: 'action',
+        name: '可動フィギュア',
+        fields: ['shippingFee', 'maker', 'orderDeadline', 'cancelable', 'location'],
+        otherExpenseLabel: 'その他費用',
+      });
+      expect(readCategoryDefinitionJson()).toEqual({
+        version: 1,
+        categories: [
+          TEST_CATEGORIES[0],
+          { id: 'action', name: '可動フィギュア', fields: ['shippingFee', 'maker', 'orderDeadline', 'cancelable', 'location'] },
+        ],
+      });
+    });
+
+    it('項目を無効にした場合、その項目だけを外す', async () => {
+      const response = await request(harness.application)
+        .patch('/api/categories/action/field-settings')
+        .send({ fields: { shippingFee: false, cancelable: false } })
+        .expect(200);
+
+      expect(response.body.fields).toEqual(['maker', 'orderDeadline']);
+    });
+
+    it('「その他費用」の名前を、前後の空白を除いて保存し、null を送ると「その他費用」に戻す', async () => {
+      const renamed = await request(harness.application)
+        .patch('/api/categories/action/field-settings')
+        .send({ otherExpenseLabel: ' ドリンク代 ' })
+        .expect(200);
+
+      expect(renamed.body.otherExpenseLabel).toBe('ドリンク代');
+      expect(readCategoryDefinitionJson()).toMatchObject({ categories: [TEST_CATEGORIES[0], { id: 'action', otherExpenseLabel: 'ドリンク代' }] });
+
+      const reset = await request(harness.application)
+        .patch('/api/categories/action/field-settings')
+        .send({ otherExpenseLabel: null })
+        .expect(200);
+
+      expect(reset.body.otherExpenseLabel).toBe('その他費用');
+      expect(JSON.stringify(readCategoryDefinitionJson())).not.toContain('otherExpenseLabel');
+    });
+
+    it('保存する時点の最新の定義に対して変えた項目だけを反映し、手で編集した内容（ほかの項目の指定・ID のないカテゴリー・ほかの項目）を残す', async () => {
+      harness.writeCategoryDefinition({
+        version: 1,
+        categories: [
+          { id: 'ticket', name: '電子チケット', fields: ['location', 'handlingFee'], otherExpenseLabel: 'ドリンク代', memo: '手で書いたメモ' },
+          { name: '手で追加した' },
+        ],
+      });
+
+      await request(harness.application).patch('/api/categories/ticket/field-settings').send({ fields: { travelExpense: true } }).expect(200);
+
+      expect(readCategoryDefinitionJson()).toEqual({
+        version: 1,
+        categories: [
+          {
+            id: 'ticket',
+            name: '電子チケット',
+            fields: ['location', 'handlingFee', 'travelExpense'],
+            otherExpenseLabel: 'ドリンク代',
+            memo: '手で書いたメモ',
+          },
+          { id: 'category-1', name: '手で追加した' },
+        ],
+      });
+    });
+
+    it.each([
+      ['知らない項目の名前', { fields: { seat: true } }, 'fields'],
+      ['真偽値でない項目の値', { fields: { location: 'yes' } }, 'fields'],
+      ['20 文字を超える「その他費用」の名前', { otherExpenseLabel: 'あ'.repeat(21) }, 'otherExpenseLabel'],
+      ['空白だけの「その他費用」の名前', { otherExpenseLabel: '   ' }, 'otherExpenseLabel'],
+    ])('%sを送った場合、400 と VALIDATION_ERROR を返し、定義を変えない', async (_label, body, fieldName) => {
+      const response = await request(harness.application).patch('/api/categories/action/field-settings').send(body);
+
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe('VALIDATION_ERROR');
+      expect(Object.keys(response.body.error.fieldErrors)).toEqual([fieldName]);
+      expect(readCategoryDefinitionJson()).toEqual({ version: 1, categories: TEST_CATEGORIES });
+    });
+
+    it('「その他費用」の名前が 20 文字を超える場合、文言を返す', async () => {
+      const response = await request(harness.application)
+        .patch('/api/categories/action/field-settings')
+        .send({ otherExpenseLabel: 'あ'.repeat(21) });
+
+      expect(response.body.error.fieldErrors).toEqual({ otherExpenseLabel: 'その他費用の名前は 20 文字以内で入力してください。' });
+    });
+
+    it('カテゴリーが最新の定義にない場合、404 と CATEGORY_NOT_FOUND を返し、定義を変えない', async () => {
+      const response = await request(harness.application).patch('/api/categories/missing/field-settings').send({ fields: { location: true } });
+
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe('CATEGORY_NOT_FOUND');
+      expect(readCategoryDefinitionJson()).toEqual({ version: 1, categories: TEST_CATEGORIES });
+    });
+
+    it('定義のファイルに誤りがある場合、503 と CATEGORY_DEFINITION_INVALID を返し、ファイルを書き換えない', async () => {
+      harness.writeCategoryDefinition('not json');
+
+      const response = await request(harness.application).patch('/api/categories/action/field-settings').send({ fields: { location: true } });
+
+      expect(response.status).toBe(503);
+      expect(response.body.error.code).toBe('CATEGORY_DEFINITION_INVALID');
+      expect(readFileSync(harness.categoryDefinitionFilePath, 'utf8')).toBe('not json');
+    });
+
+    it('項目を無効にしても、商品に保存されている値は消さない', async () => {
+      const product = await createProductThroughApi({ ...validInput, categoryId: 'action', shippingFee: 800, maker: 'メーカーA' });
+
+      await request(harness.application)
+        .patch('/api/categories/action/field-settings')
+        .send({ fields: { shippingFee: false, maker: false } })
+        .expect(200);
+
+      expect(await findListedProduct(product.id)).toMatchObject({ shippingFee: 800, maker: 'メーカーA' });
+    });
+
+    it('改名した場合、項目の指定と「その他費用」の名前は変えない', async () => {
+      harness.writeCategoryDefinition({ version: 1, categories: [ticketCategory] });
+
+      const response = await request(harness.application).put('/api/categories/ticket').send({ name: 'ライブ' }).expect(200);
+
+      expect(response.body).toEqual({ ...ticketCategory, name: 'ライブ' });
+      expect(readCategoryDefinitionJson()).toEqual({ version: 1, categories: [{ ...ticketCategory, name: 'ライブ' }] });
+    });
   });
 });

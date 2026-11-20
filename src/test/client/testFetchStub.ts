@@ -18,10 +18,13 @@ export type RecordedRequest = {
   readonly contentType: string | null;
 };
 
-/** スタブが既定で返すカテゴリーの定義（GET /api/categories。issue #10）。 */
+/** 項目の指定がないカテゴリーで有効な、選べる項目（既定。issue #27）。 */
+export const STUB_DEFAULT_ENABLED_FIELDS = ['shippingFee', 'maker', 'orderDeadline', 'cancelable'] as const;
+
+/** スタブが既定で返すカテゴリーの定義（GET /api/categories。issue #10）。項目の設定は既定（issue #27）。 */
 export const STUB_CATEGORIES = [
-  { id: 'scale', name: 'スケールフィギュア' },
-  { id: 'action', name: '可動フィギュア' },
+  { id: 'scale', name: 'スケールフィギュア', fields: STUB_DEFAULT_ENABLED_FIELDS, otherExpenseLabel: 'その他費用' },
+  { id: 'action', name: '可動フィギュア', fields: STUB_DEFAULT_ENABLED_FIELDS, otherExpenseLabel: 'その他費用' },
 ] as const;
 
 /** スタブが既定で返す認証の状態（GET /api/auth/status。認証は無効。issue #11）。 */

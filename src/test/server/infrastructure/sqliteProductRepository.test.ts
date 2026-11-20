@@ -40,11 +40,18 @@ function createProduct(overrides: Partial<Product> = {}): Product {
     categoryName: 'スケールフィギュア',
     maker: 'メーカーA',
     note: '初回特典付き\n分割で届く',
+    location: '東京ドーム',
+    handlingFee: 330,
+    travelExpense: 2000,
+    otherExpense: 600,
     createdAt: '2026-11-17T01:00:00.000Z',
     updatedAt: '2026-11-17T01:00:00.000Z',
     ...overrides,
   };
 }
+
+/** 版数 6 より前の DB にはない項目（場所と費用。issue #26）を未入力にしたもの。移行のテストで使う。 */
+const FIELDS_ADDED_IN_VERSION_SIX = { location: null, handlingFee: null, travelExpense: null, otherExpense: null } as const;
 
 /** 登録時に記録される履歴を除いた、変更の履歴を返す。 */
 function listChangesAfterRegistration(productId: ProductId) {
@@ -71,6 +78,7 @@ describe('登録と取得', () => {
       categoryName: null,
       maker: null,
       note: null,
+      ...FIELDS_ADDED_IN_VERSION_SIX,
     });
 
     repository.insertProduct(product);
@@ -178,6 +186,17 @@ describe('更新と変更履歴', () => {
     expect(listChangesAfterRegistration(product.id)).toEqual([]);
   });
 
+  it('場所と費用を変更した場合、変更が保存され、履歴は記録しない（issue #26）', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+    const updated: Product = { ...product, location: '日本武道館', handlingFee: null, travelExpense: 0, otherExpense: 1200, updatedAt: change.changedAt };
+
+    repository.updateProduct(updated, change);
+
+    expect(repository.findProductById(product.id)).toEqual(updated);
+    expect(listChangesAfterRegistration(product.id)).toEqual([]);
+  });
+
   it('履歴は古い順に返す', () => {
     const product = createProduct({ status: 'considering' });
     repository.insertProduct(product);
@@ -229,6 +248,14 @@ describe('DB の制約（業務ルールの最後の防御）', () => {
     ['名前のないカテゴリーの ID（issue #10）', { categoryId: 'scale', categoryName: null }],
     ['ID のないカテゴリー名（issue #10）', { categoryId: null, categoryName: 'スケールフィギュア' }],
     ['空のカテゴリーの ID（issue #10）', { categoryId: '' }],
+    ['空の場所（issue #26）', { location: '' }],
+    ['上限の文字数を超える場所（issue #26）', { location: 'あ'.repeat(101) }],
+    ['負の手数料（issue #26）', { handlingFee: -1 }],
+    ['上限を超える手数料（issue #26）', { handlingFee: 10_000_000 }],
+    ['負の交通費（issue #26）', { travelExpense: -1 }],
+    ['上限を超える交通費（issue #26）', { travelExpense: 10_000_000 }],
+    ['負のその他費用（issue #26）', { otherExpense: -1 }],
+    ['上限を超えるその他費用（issue #26）', { otherExpense: 10_000_000 }],
   ])('%s を保存しようとした場合、DB が拒否する', (_label, overrides) => {
     const invalidProduct = { ...createProduct(), ...overrides } as Product;
 
@@ -319,8 +346,8 @@ describe('スキーマの移行（版数 1 から）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('最新のスキーマの版数は 5 である（issue #11）', () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(5);
+  it('最新のスキーマの版数は 6 である（issue #26）', () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(6);
   });
 
   it('版数 1 の DB を開いた場合、最新の版数に移行し、既存の商品と履歴を保ち、確認待ちは空、メーカーと備考は未入力になる', () => {
@@ -329,7 +356,7 @@ describe('スキーマの移行（版数 1 から）', () => {
     versionOneDatabase.exec(SCHEMA_MIGRATIONS[0] ?? '');
     versionOneDatabase.exec('PRAGMA user_version = 1');
     versionOneDatabase.exec('PRAGMA foreign_keys = ON');
-    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null });
+    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null, ...FIELDS_ADDED_IN_VERSION_SIX });
     createSqliteProductRepositoryForVersionOne(versionOneDatabase, product);
     versionOneDatabase.close();
 
@@ -363,7 +390,7 @@ describe('スキーマの移行（版数 2 から。issue #18）', () => {
     versionTwoDatabase.exec(SCHEMA_MIGRATIONS[0] ?? '');
     versionTwoDatabase.exec(SCHEMA_MIGRATIONS[1] ?? '');
     versionTwoDatabase.exec('PRAGMA user_version = 2');
-    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null });
+    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null, ...FIELDS_ADDED_IN_VERSION_SIX });
     createSqliteProductRepositoryForVersionOne(versionTwoDatabase, product);
     versionTwoDatabase.prepare('INSERT INTO delivery_confirmations (product_id) VALUES (?)').run(product.id);
     versionTwoDatabase.close();
@@ -403,7 +430,7 @@ describe('スキーマの移行（版数 3 → 4。issue #10）', () => {
 
   it('版数 3 の DB を開いた場合、最新の版数に移行し、カテゴリーのない商品はカテゴリー未設定のまま', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
-    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null });
+    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null, ...FIELDS_ADDED_IN_VERSION_SIX });
     createVersionThreeDatabase(databaseFilePath, [product]);
 
     const migratedDatabase = openProductDatabase(databaseFilePath);
@@ -417,7 +444,7 @@ describe('スキーマの移行（版数 3 → 4。issue #10）', () => {
 
   it('版数 3 でカテゴリー名だけを持つ商品は、名前を残し、ID を「legacy:名前」にする（定義にないカテゴリーとして確認できるようにする）', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
-    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: '可動フィギュア' });
+    const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: '可動フィギュア', ...FIELDS_ADDED_IN_VERSION_SIX });
     createVersionThreeDatabase(databaseFilePath, [product]);
 
     const migratedDatabase = openProductDatabase(databaseFilePath);
@@ -439,25 +466,124 @@ describe('スキーマの移行（版数 4 → 5。issue #11）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('版数 4 の DB を開いた場合、版数 5 に移行し、既存の商品を保つ', () => {
+  it('版数 4 の DB を開いた場合、最新の版数に移行し、既存の商品を保つ', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
     const versionFourDatabase = new DatabaseSync(databaseFilePath);
     versionFourDatabase.exec('PRAGMA foreign_keys = ON');
     for (const migration of SCHEMA_MIGRATIONS.slice(0, 4)) versionFourDatabase.exec(migration);
     versionFourDatabase.exec('PRAGMA user_version = 4');
-    const product = createProduct();
-    createSqliteProductRepository(versionFourDatabase).insertProduct(product);
+    const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
+    insertProductForVersionFour(versionFourDatabase, product);
     versionFourDatabase.close();
 
     const migratedDatabase = openProductDatabase(databaseFilePath);
     const migratedRepository = createSqliteProductRepository(migratedDatabase);
 
     const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
-    expect(version.user_version).toBe(5);
+    expect(version.user_version).toBe(LATEST_SCHEMA_VERSION);
     expect(migratedRepository.findProductById(product.id)).toEqual(product);
     migratedDatabase.close();
   });
 });
+
+describe('スキーマの移行（版数 5 → 6。issue #26）', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), 'waders-migration-'));
+  });
+
+  afterEach(() => {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  /** 版数 5 の DB を作り、商品と、認証のアカウントを書き込む。 */
+  function createVersionFiveDatabase(databaseFilePath: string, product: Product): void {
+    const versionFiveDatabase = new DatabaseSync(databaseFilePath);
+    versionFiveDatabase.exec('PRAGMA foreign_keys = ON');
+    for (const migration of SCHEMA_MIGRATIONS.slice(0, 5)) versionFiveDatabase.exec(migration);
+    versionFiveDatabase.exec('PRAGMA user_version = 5');
+    insertProductForVersionFour(versionFiveDatabase, product);
+    versionFiveDatabase
+      .prepare(`INSERT INTO account (id, login_id, password_hash, created_at) VALUES (1, 'owner', 'scrypt$hash', '2026-11-01T00:00:00.000Z')`)
+      .run();
+    versionFiveDatabase.close();
+  }
+
+  it('版数 5 の DB を開いた場合、版数 6 に移行し、既存の商品のすべての項目を保ち、場所と費用は未入力になる', () => {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
+    createVersionFiveDatabase(databaseFilePath, product);
+
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
+    expect(version.user_version).toBe(6);
+    expect(migratedRepository.findProductById(product.id)).toEqual(product);
+    expect(migratedRepository.listProductHistory(product.id)).toHaveLength(2);
+    expect(migratedDatabase.prepare('SELECT login_id FROM account').get()).toEqual({ login_id: 'owner' });
+    migratedDatabase.close();
+  });
+
+  it('版数 6 に移行した後は、既存の商品に場所と費用を保存できる', () => {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
+    createVersionFiveDatabase(databaseFilePath, product);
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const updated: Product = { ...product, location: '日本武道館', handlingFee: 440, travelExpense: 3000, otherExpense: 0 };
+    migratedRepository.updateProduct(updated, { changedAt: '2026-11-18T00:00:00.000Z', changeKind: 'user' });
+
+    expect(migratedRepository.findProductById(product.id)).toEqual(updated);
+    migratedDatabase.close();
+  });
+
+  it('版数 6 に移行した後も、場所と費用の範囲は DB が確かめる', () => {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
+    createVersionFiveDatabase(databaseFilePath, product);
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const change = { changedAt: '2026-11-18T00:00:00.000Z', changeKind: 'user' } as const;
+    expect(() => migratedRepository.updateProduct({ ...product, handlingFee: -1 }, change)).toThrow();
+    expect(() => migratedRepository.updateProduct({ ...product, location: '' }, change)).toThrow();
+    migratedDatabase.close();
+  });
+});
+
+/** 版数 4・5 の DB に、その時点の形（場所と費用の列がない）で商品と登録時の履歴を書き込む。 */
+function insertProductForVersionFour(olderDatabase: DatabaseSync, product: Product): void {
+  olderDatabase
+    .prepare(
+      `INSERT INTO products (id, name, release_month, status, cancelable, price, shipping_fee, order_deadline, url, category_id, category, maker, note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      product.id,
+      product.name,
+      product.releaseMonth,
+      product.status,
+      product.cancelable ? 1 : 0,
+      product.price,
+      product.shippingFee,
+      product.orderDeadline,
+      product.url,
+      product.categoryId,
+      product.categoryName,
+      product.maker,
+      product.note,
+      product.createdAt,
+      product.updatedAt,
+    );
+  const insertHistory = olderDatabase.prepare(
+    `INSERT INTO product_history (product_id, changed_at, change_kind, field, value_before, value_after) VALUES (?, ?, 'user', ?, NULL, ?)`,
+  );
+  insertHistory.run(product.id, product.createdAt, 'status', product.status);
+  insertHistory.run(product.id, product.createdAt, 'release_month', product.releaseMonth);
+}
 
 /** 版数 1 の DB に、版数 1 の時点の形で商品と登録時の履歴を書き込む。 */
 function createSqliteProductRepositoryForVersionOne(versionOneDatabase: DatabaseSync, product: Product): void {
