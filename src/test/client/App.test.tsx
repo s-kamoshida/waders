@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../client/App.tsx';
@@ -365,5 +367,287 @@ describe('認証（issue #11）', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(hasLoadedProducts(requests)).toBe(false);
+  });
+});
+
+describe('ページの中の領域でのスクロール（issue #21）', () => {
+  /** 画面のスタイル（本番と同じ CSS）。jsdom は CSS を読み込まないため、テストで文書に加える（テストはリポジトリの最上位で実行する）。 */
+  const STYLESHEET_TEXT = readFileSync(join(process.cwd(), 'src/client/styles.css'), 'utf8');
+
+  let removeStylesheet: () => void = () => {};
+
+  beforeEach(() => {
+    const styleElement = document.createElement('style');
+    styleElement.textContent = STYLESHEET_TEXT;
+    document.head.append(styleElement);
+    removeStylesheet = () => styleElement.remove();
+  });
+
+  afterEach(() => {
+    removeStylesheet();
+    vi.useRealTimers();
+  });
+
+  /** 要素の縦方向のスクロールの指定（overflow-y の計算値）を返す。 */
+  const readOverflowY = (element: Element) => getComputedStyle(element).overflowY;
+
+  /**
+   * 要素を囲む、縦にスクロールできる領域（overflow-y が auto か scroll の祖先。html・body は除く）を返す。
+   * 見つからなければ null。
+   */
+  function findScrollRegion(element: Element): HTMLElement | null {
+    for (let ancestor = element.parentElement; ancestor !== null && ancestor !== document.body; ancestor = ancestor.parentElement) {
+      if (['auto', 'scroll'].includes(readOverflowY(ancestor))) return ancestor;
+    }
+    return null;
+  }
+
+  /** 一覧の領域を返す。見つからなければテストを失敗させる。 */
+  function getScrollRegion(element: Element): HTMLElement {
+    const region = findScrollRegion(element);
+    if (region === null) throw new Error('一覧をスクロールさせる領域が見つかりません');
+    return region;
+  }
+
+  it('リストを表示している場合、ページ自体はスクロールさせず、一覧をヘッダーの外にあるページの中の領域でスクロールさせる', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+
+    const region = getScrollRegion(await screen.findByText('リストの商品'));
+
+    expect(readOverflowY(document.documentElement)).toBe('hidden');
+    expect(region).toContainElement(screen.getByRole('button', { name: '商品を追加' }));
+    expect(region).not.toContainElement(screen.getByRole('banner'));
+  });
+
+  it('アーカイブを表示している場合も、ページ自体はスクロールさせず、アーカイブをページの中の領域でスクロールさせる', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: { products: [createProduct({ id: 'product-2', name: 'アーカイブの商品', releaseMonth: '2026-10', status: 'purchased' })] },
+      }),
+    });
+    render(<App currentTime={currentTime} />);
+    await userEvent.click(await screen.findByRole('tab', { name: 'アーカイブ' }));
+
+    const region = getScrollRegion(await screen.findByText('アーカイブの商品'));
+
+    expect(readOverflowY(document.documentElement)).toBe('hidden');
+    expect(region).not.toContainElement(screen.getByRole('banner'));
+  });
+
+  it('ログインの画面を表示している場合も、ページ自体はスクロールさせず、ページの中の領域でスクロールさせる', async () => {
+    stubFetchRoutes({ 'GET /api/auth/status': () => ({ body: { authenticationEnabled: true, accountExists: true, loggedIn: false } }) });
+    render(<App currentTime={currentTime} />);
+
+    const region = getScrollRegion(await screen.findByRole('heading', { name: 'ログイン' }));
+
+    expect(readOverflowY(document.documentElement)).toBe('hidden');
+    expect(region).not.toContainElement(screen.getByRole('banner'));
+  });
+
+  it('追加のモーダルを開いている間は一覧の領域をスクロールさせず、閉じたらスクロールできるように戻す', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+    const region = getScrollRegion(await screen.findByText('リストの商品'));
+
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+
+    expect(screen.getByRole('dialog', { name: '商品を追加' })).toBeInTheDocument();
+    expect(readOverflowY(region)).toBe('hidden');
+
+    await userEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(['auto', 'scroll']).toContain(readOverflowY(region));
+  });
+
+  it('カテゴリーの管理のモーダルを開いている間も一覧の領域をスクロールさせず、閉じたらスクロールできるように戻す', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+    const region = getScrollRegion(await screen.findByText('リストの商品'));
+
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'カテゴリーの管理' }));
+    const dialog = await screen.findByRole('dialog', { name: 'カテゴリーの管理' });
+
+    expect(readOverflowY(region)).toBe('hidden');
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(['auto', 'scroll']).toContain(readOverflowY(region));
+  });
+
+  it('一覧をスクロールした後にモーダルを開いて備考の入力欄にフォーカスし、閉じた場合、一覧の領域は開く前の位置のまま', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+    const region = getScrollRegion(await screen.findByText('リストの商品'));
+    region.scrollTop = 500;
+
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: '商品を追加' })).getByLabelText('備考'));
+    await userEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(region.scrollTop).toBe(500);
+  });
+
+  describe('タッチ操作のドラッグでの自動スクロール（issue #13）', () => {
+    /** 2026/11 の「動かす商品」と、表示する月を 2027/01 まで広げる商品を表示する。 */
+    async function renderMovableProducts() {
+      stubFetchRoutes({
+        'GET /api/products': () => ({
+          body: {
+            products: [
+              createProduct({ id: 'moving', name: '動かす商品', releaseMonth: '2026-11' }),
+              createProduct({ id: 'january', name: '1月の商品', releaseMonth: '2027-01' }),
+            ],
+          },
+        }),
+      });
+      render(<App currentTime={currentTime} />);
+      const card = (await screen.findByRole('button', { name: /動かす商品/ })).closest('article');
+      if (card === null) throw new Error('カードが見つかりません');
+      // jsdom には elementFromPoint がないため、指の下には動かす商品の月があるものとする
+      document.elementFromPoint = vi.fn(() => screen.getByRole('region', { name: '2026/11' }));
+      return { card, region: getScrollRegion(card) };
+    }
+
+    /** カードを 0.4 秒長押しして掴み、指を画面の縦の位置 clientY まで動かして、しばらく待つ。 */
+    function grabAndMoveTo(card: HTMLElement, clientY: number): void {
+      fireEvent.pointerDown(card, { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 50, clientY: 300 });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 50, clientY });
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+    }
+
+    it('掴んだ商品を画面の下端まで動かした場合、ページではなく一覧の領域を下にスクロールする', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { card, region } = await renderMovableProducts();
+      const pageScrollTop = document.documentElement.scrollTop;
+
+      grabAndMoveTo(card, window.innerHeight - 10);
+
+      expect(region.scrollTop).toBeGreaterThan(0);
+      expect(document.documentElement.scrollTop).toBe(pageScrollTop);
+      fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 50, clientY: window.innerHeight - 10 });
+    });
+
+    it('掴んだ商品を画面の上端まで動かした場合、一覧の領域を上にスクロールする', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { card, region } = await renderMovableProducts();
+      region.scrollTop = 300;
+
+      grabAndMoveTo(card, 10);
+
+      expect(region.scrollTop).toBeLessThan(300);
+      fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 50, clientY: 10 });
+    });
+  });
+});
+
+describe('キーボードで一覧をスクロールするためのフォーカス（issue #21・PR #29 のレビュー）', () => {
+  /** 一覧の領域（リスト・アーカイブを表示するタブの中身）を返す。 */
+  const getListRegion = () => screen.getByRole('tabpanel');
+
+  /** 画面の更新が落ち着くまで少し待つ（後からフォーカスを動かす処理があっても反映させるため）。 */
+  const waitForSettled = () => act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+
+  it('開いてリストを表示した場合、一覧の領域にフォーカスを置く', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+
+    await screen.findByText('リストの商品');
+
+    await waitFor(() => expect(getListRegion()).toHaveFocus());
+  });
+
+  it('ログインした後に一覧を表示した場合も、一覧の領域にフォーカスを置く', async () => {
+    let status = { authenticationEnabled: true, accountExists: true, loggedIn: false };
+    stubFetchRoutes({
+      'GET /api/auth/status': () => ({ body: status }),
+      'POST /api/auth/login': () => {
+        status = { authenticationEnabled: true, accountExists: true, loggedIn: true };
+        return { body: status };
+      },
+      'GET /api/products': () => ({ body: { products: [createProduct({ name: '一覧の商品' })] } }),
+    });
+    render(<App currentTime={currentTime} />);
+    await userEvent.type(await screen.findByRole('textbox', { name: 'ID' }), 'owner');
+    await userEvent.type(screen.getByLabelText('パスワード'), 'correct-horse');
+
+    await userEvent.click(screen.getByRole('button', { name: 'ログイン' }));
+
+    await screen.findByText('一覧の商品');
+    await waitFor(() => expect(getListRegion()).toHaveFocus());
+  });
+
+  it('タブを押してアーカイブに切り替えた場合、押したタブにあるフォーカスを奪わない', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: { products: [createProduct({ id: 'product-2', name: 'アーカイブの商品', releaseMonth: '2026-10', status: 'purchased' })] },
+      }),
+    });
+    render(<App currentTime={currentTime} />);
+    const archiveTab = await screen.findByRole('tab', { name: 'アーカイブ' });
+
+    await userEvent.click(archiveTab);
+    await screen.findByText('アーカイブの商品');
+    await waitForSettled();
+
+    expect(archiveTab).toHaveFocus();
+  });
+
+  it('追加のモーダルを開いた場合、商品名の入力欄にあるフォーカスを奪わない', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+    await screen.findByText('リストの商品');
+
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+    await waitForSettled();
+
+    expect(within(screen.getByRole('dialog', { name: '商品を追加' })).getByLabelText('商品名')).toHaveFocus();
+  });
+
+  it('開いたときに延期の確認のモーダルを表示する場合、フォーカスをモーダルの後ろの一覧の領域に置かない', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: { products: [createProduct({ name: '確認待ちの商品', releaseMonth: '2026-10', status: 'purchased', deliveryConfirmationPending: true })] },
+      }),
+    });
+    render(<App currentTime={currentTime} />);
+
+    await screen.findByRole('dialog', { name: '発売月を過ぎた予約商品の確認' });
+    await waitForSettled();
+
+    expect(getListRegion()).not.toHaveFocus();
+  });
+
+  it('追加のモーダルを閉じた場合、一覧の領域にフォーカスを置く', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+    await screen.findByText('リストの商品');
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(getListRegion()).toHaveFocus());
+  });
+
+  it('カテゴリーの管理のモーダルを閉じた場合も、一覧の領域にフォーカスを置く', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+    await screen.findByText('リストの商品');
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'カテゴリーの管理' }));
+    const dialog = await screen.findByRole('dialog', { name: 'カテゴリーの管理' });
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(getListRegion()).toHaveFocus());
   });
 });

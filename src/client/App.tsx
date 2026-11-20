@@ -9,6 +9,9 @@
  *  - ヘッダーの「カテゴリーの管理」でカテゴリーの管理のモーダルを開く。変更して閉じたら、表示中の一覧とカテゴリーを読み込み直す（issue #10）
  *  - 開いたときに認証の状態を確かめ、ログインが必要ならログインの画面（アカウントがなければ作成の画面）を表示する。
  *    確かめるまでは一覧を表示せず、商品を読み込まない。使っている間に API がログインを求めたら、ログインの画面に戻す（issue #11）
+ *  - リスト・アーカイブは、ヘッダーより下の「一覧の領域」（main）の中でスクロールさせる（ページ自体はスクロールしない。issue #21）。
+ *    キーボード（PageDown・Space・矢印）で一覧をスクロールできるよう、どこにもフォーカスがなければ一覧の領域にフォーカスを置く
+ *    （表示したとき・モーダルを閉じたとき）。ほかの要素にあるフォーカスは奪わず、モーダルの後ろにはフォーカスを置かない
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProductListItem } from '../shared/productContract.ts';
@@ -43,6 +46,21 @@ export type AppProps = {
   readonly currentTime?: Date;
 };
 
+/**
+ * どこにもフォーカスがなければ、一覧の領域にフォーカスを置く（issue #21）。
+ * モーダルを開いている間は置かず、一覧の領域にフォーカスがあればモーダルの後ろに残さないよう外す。
+ */
+function focusListRegionIfUnfocused(applicationElement: HTMLElement, listRegion: HTMLElement): void {
+  const isDialogOpen = applicationElement.querySelector('.dialog-backdrop') !== null;
+  if (isDialogOpen) {
+    if (document.activeElement === listRegion) listRegion.blur();
+    return;
+  }
+  const activeElement = document.activeElement;
+  if (activeElement !== null && activeElement !== document.body) return;
+  listRegion.focus({ preventScroll: true });
+}
+
 /** 画面全体を描画する。 */
 export function App({ currentTime: givenCurrentTime }: AppProps) {
   const [currentTime] = useState(() => givenCurrentTime ?? new Date());
@@ -54,6 +72,8 @@ export function App({ currentTime: givenCurrentTime }: AppProps) {
   const [isLogoutFailed, setIsLogoutFailed] = useState(false);
   // 延期の確認は開いたときに一度だけ表示する。関数を変えると一覧を読み込み直すため、状態ではなく ref で覚える
   const hasCheckedDeliveryConfirmationRef = useRef(false);
+  const applicationRef = useRef<HTMLDivElement>(null);
+  const listRegionRef = useRef<HTMLElement>(null);
 
   const checkDeliveryConfirmation = useCallback((products: readonly ProductListItem[]) => {
     if (hasCheckedDeliveryConfirmationRef.current) return;
@@ -111,8 +131,20 @@ export function App({ currentTime: givenCurrentTime }: AppProps) {
 
   const isReady = authenticationView.kind === 'ready';
 
+  // 画面が変わるたび（表示した・モーダルを閉じたなど）に、フォーカスの行き場がなければ一覧の領域に置く（issue #21）
+  useEffect(() => {
+    const applicationElement = applicationRef.current;
+    const listRegion = listRegionRef.current;
+    if (!isReady || applicationElement === null || listRegion === null) return;
+    const updateFocus = () => focusListRegionIfUnfocused(applicationElement, listRegion);
+    updateFocus();
+    const observer = new MutationObserver(updateFocus);
+    observer.observe(applicationElement, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [isReady]);
+
   return (
-    <div className="application">
+    <div className="application" ref={applicationRef}>
       <header className="application-header">
         <h1 className="application-title">Waders</h1>
         {isReady && (
@@ -176,7 +208,14 @@ export function App({ currentTime: givenCurrentTime }: AppProps) {
         </main>
       )}
       {isReady && (
-        <main className="application-main" id="tab-panel" role="tabpanel" aria-labelledby={`tab-${selectedTab}`}>
+        <main
+          className="application-main"
+          id="tab-panel"
+          role="tabpanel"
+          aria-labelledby={`tab-${selectedTab}`}
+          tabIndex={-1}
+          ref={listRegionRef}
+        >
           {isLogoutFailed && (
             <p role="alert" className="dialog-error application-message">
               {SCREEN_MESSAGES.logoutFailed}

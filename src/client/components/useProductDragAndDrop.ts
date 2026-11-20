@@ -5,7 +5,8 @@
  * 責務（issue #13）:
  *  - マウスなどの細かく指せる端末: ブラウザ標準のドラッグアンドドロップ（draggable）で掴み、月に落とす
  *  - タッチ操作: カードを 0.4 秒長押しして掴む（その前に 10px 以上動いたらスクロールとして扱う）。
- *    掴んでいる間はページのスクロールを止め、指の下の月を落とす先にする。画面の上端・下端ではページをスクロールする
+ *    掴んでいる間はページのスクロールを止め、指の下の月を落とす先にする。画面の上端・下端では、カードを囲む一覧の領域
+ *    （ページの中でスクロールする領域。issue #21）をスクロールする。端の判定は画面の端で行う
  *  - 落とす先の月（月の並び・月の見出し。data-drop-month を持つ要素）を返し、同じ月に落とした場合は何もしない
  * 位置を style で動かす表示（指に付いて動くカード）は使わない（CSP の決まり）。
  */
@@ -16,7 +17,7 @@ import type { ProductResponse } from '../../shared/productContract.ts';
 const LONG_PRESS_MILLISECONDS = 400;
 /** 長押しの前にこれ以上動いたら、スクロールとして扱う（px）。 */
 const MOVE_TOLERANCE_PIXELS = 10;
-/** 画面の上端・下端からこの距離に入ったら、ページをスクロールする（px）。 */
+/** 画面の上端・下端からこの距離に入ったら、一覧の領域をスクロールする（px）。 */
 const AUTO_SCROLL_EDGE_PIXELS = 80;
 /** 自動スクロールの 1 フレームあたりの量（px）。 */
 const AUTO_SCROLL_STEP_PIXELS = 12;
@@ -47,6 +48,18 @@ export type ProductDragAndDrop = {
 /** マウスなどの細かく指せる端末か（ブラウザ標準のドラッグを使うか）。 */
 function canDragWithMouse(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: fine)').matches;
+}
+
+/**
+ * 要素を囲む、縦にスクロールできる領域（overflow-y が auto か scroll の祖先）を返す（issue #21）。
+ * 見つからなければページ（文書）のスクロールの要素を返す。
+ */
+function findScrollContainer(element: Element): Element {
+  for (let ancestor = element.parentElement; ancestor !== null && ancestor !== document.body; ancestor = ancestor.parentElement) {
+    const overflowY = getComputedStyle(ancestor).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll') return ancestor;
+  }
+  return document.scrollingElement ?? document.documentElement;
 }
 
 /** 指の下にある月（data-drop-month）を返す。 */
@@ -89,8 +102,9 @@ export function useProductDragAndDrop(onMoveProduct: (product: ProductResponse, 
   );
 
   /** タッチ操作の長押しを待ち、掴んだら指の動きに合わせて落とす先を変える。 */
-  const startTouchPress = (product: ProductResponse, startX: number, startY: number, pointerId: number) => {
+  const startTouchPress = (product: ProductResponse, cardElement: Element, startX: number, startY: number, pointerId: number) => {
     stopTouchDragRef.current?.();
+    const scroller = findScrollContainer(cardElement);
     let isGrabbed = false;
     let lastX = startX;
     let lastY = startY;
@@ -102,7 +116,6 @@ export function useProductDragAndDrop(onMoveProduct: (product: ProductResponse, 
         animationFrame = undefined;
         return;
       }
-      const scroller = document.scrollingElement ?? document.documentElement;
       scroller.scrollTop += scrollStep;
       updateDropTarget(findMonthAt(lastX, lastY));
       animationFrame = requestAnimationFrame(scrollNearEdge);
@@ -182,7 +195,7 @@ export function useProductDragAndDrop(onMoveProduct: (product: ProductResponse, 
     },
     onPointerDown: (event) => {
       if (event.pointerType !== 'touch' || !event.isPrimary) return;
-      startTouchPress(product, event.clientX, event.clientY, event.pointerId);
+      startTouchPress(product, event.currentTarget, event.clientX, event.clientY, event.pointerId);
     },
     onClickCapture: (event) => {
       if (!isClickSuppressedRef.current) return;
