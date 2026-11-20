@@ -816,6 +816,8 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
         handlingFee: 330,
         travelExpense: 2000,
         otherExpense: 600,
+        eventStartsAt: null,
+        eventEndsAt: null,
       });
     });
 
