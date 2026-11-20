@@ -381,6 +381,69 @@ textarea {
   text-align: right;
 }
 
+/*
+ * スマートフォンの幅のリスト形式（issue #15）。横幅 600px 以下で、ProductGroupList が .product-grid の代わりに付ける。
+ * 中身はカードと同じ部品で、ステータスの色分け・未購入の見せ方は .product-card-- のクラスをそのまま使う。
+ * 1 行の構成: 左端に小さな共通のアイコン、右にステータス → メーカー → 商品名（2 行まで）→ 金額・送料・📝 → 受注期限、下端の右に購入先。
+ */
+.product-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 8px;
+}
+
+.product-list .product-card-main {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-areas:
+    "thumbnail status"
+    "thumbnail body";
+  align-items: start;
+  column-gap: 10px;
+  padding: 8px 10px 0;
+}
+
+/* 画像の枠の中にあるステータスを、行の右側の上段に出すため、枠そのものは並びに加えない */
+.product-list .product-card-thumbnail {
+  display: contents;
+}
+
+.product-list .product-card-placeholder {
+  grid-area: thumbnail;
+  box-sizing: border-box;
+  width: 40px;
+  height: 40px;
+  padding: 7px;
+  border-radius: 6px;
+  background: #eceef1;
+  color: #a3aab2;
+}
+
+.product-list .product-card-status {
+  grid-area: status;
+  position: static;
+  justify-self: start;
+}
+
+.product-list .product-card-body {
+  grid-area: body;
+  min-width: 0;
+  gap: 2px;
+  padding: 2px 0 0;
+}
+
+/* 空白のない長い名前も 2 行に折り返して省略する（横幅いっぱいの 1 行で切れないように） */
+.product-list .product-card-name {
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+/* 購入先はアイコンの分を空けて、行の下端の右にそろえる */
+.product-list .product-card-shop {
+  padding: 2px 10px 6px 60px;
+}
+
 /* モーダル */
 .dialog-backdrop {
   position: fixed;
@@ -883,6 +946,11 @@ textarea {
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
+/* リスト形式の行は横幅いっぱいのため、拡大すると画面の横にはみ出す。影と透明度だけで掴んだことを示す（issue #15） */
+.product-list .product-card--grabbed {
+  transform: none;
+}
+
 .month-group--drop-target {
   outline: 2px dashed var(--accent);
   outline-offset: 2px;
@@ -890,18 +958,30 @@ textarea {
   background: rgba(47, 111, 222, 0.06);
 }
 
+/*
+ * 掴んでいる間の案内は、ヘッダーの行（上下の余白 10px・高さ 34px）に重ねて中央に出す。
+ * ヘッダーのすぐ下に出すと、ページの先頭ではツールバーに重なるため。掴んでいる間はヘッダーを操作しないので、隠れても困らない。
+ * left: 50% の要素は幅が画面の右半分までに縮められて折り返すため、幅を文字に合わせて 1 行にし、画面の幅を超えないようにする（issue #15）
+ */
 .drag-indicator {
   position: fixed;
-  top: calc(env(safe-area-inset-top) + 64px);
+  top: calc(env(safe-area-inset-top) + 10px);
   left: 50%;
   z-index: 15;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100vw - 32px);
   transform: translateX(-50%);
   border-radius: 999px;
   background: var(--accent);
-  padding: 6px 14px;
+  padding: 0 14px;
   color: #ffffff;
   font-size: 13px;
   font-weight: 600;
+  line-height: 34px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   pointer-events: none;
 }
