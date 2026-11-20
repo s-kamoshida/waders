@@ -600,6 +600,21 @@ describe('カテゴリーごとの入力項目（issue #27）', () => {
       });
     });
 
+    it('開催日時と終了日時（eventPeriod）を有効にした場合、1 組の項目として場所の次の順に書く（PR #30 のレビュー）', async () => {
+      harness.writeCategoryDefinition({ version: 1, categories: [{ id: 'ticket', name: '電子チケット', fields: ['location', 'handlingFee'] }] });
+
+      const response = await request(harness.application)
+        .patch('/api/categories/ticket/field-settings')
+        .send({ fields: { eventPeriod: true } })
+        .expect(200);
+
+      expect(response.body.fields).toEqual(['location', 'eventPeriod', 'handlingFee']);
+      expect(readCategoryDefinitionJson()).toEqual({
+        version: 1,
+        categories: [{ id: 'ticket', name: '電子チケット', fields: ['location', 'eventPeriod', 'handlingFee'] }],
+      });
+    });
+
     it('項目を無効にした場合、その項目だけを外す', async () => {
       const response = await request(harness.application)
         .patch('/api/categories/action/field-settings')

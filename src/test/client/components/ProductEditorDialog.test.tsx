@@ -19,7 +19,7 @@ const figureCategory: CategoryResponse = { id: 'scale', name: 'スケールフ�
 const actionCategory: CategoryResponse = { id: 'action', name: '可動フィギュア', fields: DEFAULT_ENABLED_FIELDS, otherExpenseLabel: 'その他費用' };
 
 /** 場所と費用（issue #26）が未入力の送信の本文。 */
-const EMPTY_TICKET_FIELDS = { location: null, handlingFee: null, travelExpense: null, otherExpense: null };
+const EMPTY_TICKET_FIELDS = { location: null, handlingFee: null, travelExpense: null, otherExpense: null, eventStartsAt: null, eventEndsAt: null };
 
 /** テスト用の保存済みの商品を作る。 */
 function createProduct(overrides: Partial<ProductResponse> = {}): ProductResponse {
@@ -41,6 +41,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     handlingFee: null,
     travelExpense: null,
     otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,
@@ -1015,5 +1017,157 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
       const labels = [...FIGURE_FIELD_LABELS, '場所', '手数料', '交通費（見込）', 'その他費用'];
       expect(labels.filter(hasField)).toEqual(labels);
     });
+  });
+});
+
+describe('開催日時と終了日時（PR #30 のレビュー）', () => {
+  /** 開催日時と終了日時を使うカテゴリー。 */
+  const liveCategory: CategoryResponse = { id: 'live', name: 'ライブ', fields: ['location', 'eventPeriod'], otherExpenseLabel: 'その他費用' };
+  const categories = [figureCategory, liveCategory];
+
+  /** その表記の入力欄があるか。 */
+  function hasField(label: string): boolean {
+    return screen.queryByLabelText(label) !== null;
+  }
+
+  /** 追加のモーダルを表示する。 */
+  function renderCreateDialog(props: { onSaved?: () => void; onSavedAndContinued?: () => void; categories?: readonly CategoryResponse[] | null } = {}) {
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
+        onClose={vi.fn()}
+        onSaved={props.onSaved ?? vi.fn()}
+        onSavedAndContinued={props.onSavedAndContinued}
+        categories={props.categories === undefined ? categories : props.categories}
+      />,
+    );
+  }
+
+  /** 編集のモーダルを表示する。 */
+  function renderEditDialog(product: ProductResponse, onSaved: () => void = vi.fn()) {
+    render(<ProductEditorDialog mode={{ kind: 'edit', product }} onClose={vi.fn()} onSaved={onSaved} categories={categories} />);
+  }
+
+  it('開催日時と終了日時を使うカテゴリーを選んだ場合、日時（分まで）の入力欄を 2 つ表示する', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+    expect(hasField('開催日時')).toBe(false);
+    expect(hasField('終了日時')).toBe(false);
+
+    await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), 'ライブ');
+
+    expect(screen.getByLabelText('開催日時')).toHaveAttribute('type', 'datetime-local');
+    expect(screen.getByLabelText('終了日時')).toHaveAttribute('type', 'datetime-local');
+  });
+
+  it('既定の項目の設定のカテゴリーと「未設定」では、開催日時と終了日時を表示しない', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+
+    await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), 'スケールフィギュア');
+
+    expect(hasField('開催日時')).toBe(false);
+    expect(hasField('終了日時')).toBe(false);
+  });
+
+  it('日本時間で入力した開催日時と終了日時を、UTC の日時として送る', async () => {
+    const { requests } = stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct() }) });
+    const onSaved = vi.fn();
+    renderCreateDialog({ onSaved });
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'ライブ 東京公演');
+    await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), 'ライブ');
+    fireEvent.change(screen.getByLabelText('開催日時'), { target: { value: '2026-11-20T18:00' } });
+    fireEvent.change(screen.getByLabelText('終了日時'), { target: { value: '2026-11-21T00:30' } });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ eventStartsAt: '2026-11-20T09:00:00.000Z', eventEndsAt: '2026-11-20T15:30:00.000Z' });
+  });
+
+  it('開催日時だけを入力した場合、終了日時は未入力として送る', async () => {
+    const { requests } = stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct() }) });
+    const onSaved = vi.fn();
+    renderCreateDialog({ onSaved });
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'ライブ 東京公演');
+    await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), 'ライブ');
+    fireEvent.change(screen.getByLabelText('開催日時'), { target: { value: '2026-11-20T18:00' } });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ eventStartsAt: '2026-11-20T09:00:00.000Z', eventEndsAt: null });
+  });
+
+  it('終了日時が開催日時より前の場合、終了日時の下に文言を表示し、送信しない', async () => {
+    const { requests } = stubFetchRoutes({});
+    renderCreateDialog();
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'ライブ 東京公演');
+    await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), 'ライブ');
+    fireEvent.change(screen.getByLabelText('開催日時'), { target: { value: '2026-11-20T18:00' } });
+    fireEvent.change(screen.getByLabelText('終了日時'), { target: { value: '2026-11-20T17:59' } });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(screen.getByText('終了日時は開催日時以降にしてください。')).toBeInTheDocument();
+    expect(screen.getByLabelText('終了日時')).toHaveAttribute('aria-invalid', 'true');
+    expect(requests).toEqual([]);
+  });
+
+  it('編集の場合、保存されている開催日時と終了日時を日本時間で表示する', () => {
+    stubFetchRoutes({});
+    renderEditDialog(
+      createProduct({ categoryId: 'live', categoryName: 'ライブ', eventStartsAt: '2026-11-20T09:00:00.000Z', eventEndsAt: '2026-11-20T15:30:00.000Z' }),
+    );
+
+    expect(screen.getByLabelText('開催日時')).toHaveValue('2026-11-20T18:00');
+    expect(screen.getByLabelText('終了日時')).toHaveValue('2026-11-21T00:30');
+  });
+
+  it('カテゴリー未設定の商品は、開催日時か終了日時のどちらかに値があれば両方の入力欄を表示し、変えずに保存するとそのまま送る', async () => {
+    const { requests } = stubFetchRoutes({ 'PUT /api/products/product-1': () => ({ body: createProduct() }) });
+    const onSaved = vi.fn();
+    renderEditDialog(createProduct({ eventStartsAt: null, eventEndsAt: '2026-11-20T12:00:00.000Z' }), onSaved);
+
+    expect(screen.getByLabelText('開催日時')).toHaveValue('');
+    expect(screen.getByLabelText('終了日時')).toHaveValue('2026-11-20T21:00');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ eventStartsAt: null, eventEndsAt: '2026-11-20T12:00:00.000Z' });
+  });
+
+  it('カテゴリー未設定の商品で、開催日時と終了日時に値がない場合は表示しない', () => {
+    stubFetchRoutes({});
+    renderEditDialog(createProduct());
+
+    expect(hasField('開催日時')).toBe(false);
+    expect(hasField('終了日時')).toBe(false);
+  });
+
+  it('カテゴリーの定義を読めない場合（categories が null）、開催日時と終了日時を表示する', () => {
+    stubFetchRoutes({});
+    renderCreateDialog({ categories: null });
+
+    expect(hasField('開催日時')).toBe(true);
+    expect(hasField('終了日時')).toBe(true);
+  });
+
+  it('「保存して続けて追加」で保存した場合、開催日時と終了日時を空に戻す', async () => {
+    stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct() }) });
+    const onSavedAndContinued = vi.fn();
+    renderCreateDialog({ onSavedAndContinued });
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'ライブ 東京公演');
+    await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), 'ライブ');
+    fireEvent.change(screen.getByLabelText('開催日時'), { target: { value: '2026-11-20T18:00' } });
+    fireEvent.change(screen.getByLabelText('終了日時'), { target: { value: '2026-11-20T21:00' } });
+    await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+    await userEvent.click(screen.getByRole('menuitemradio', { name: '保存して続けて追加' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
+    await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
+
+    expect(screen.getByLabelText('開催日時')).toHaveValue('');
+    expect(screen.getByLabelText('終了日時')).toHaveValue('');
   });
 });

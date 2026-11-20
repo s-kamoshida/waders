@@ -35,6 +35,8 @@ describe('必須項目', () => {
       handlingFee: null,
       travelExpense: null,
       otherExpense: null,
+      eventStartsAt: null,
+      eventEndsAt: null,
     });
   });
 
@@ -210,5 +212,45 @@ describe('場所と費用（issue #26）', () => {
     const result = productInputSchema.safeParse({ ...minimumInput, location: '   ' });
 
     expect(result.error?.issues[0]).toMatchObject({ path: ['location'], message: '場所を入力しない場合は空にしてください。' });
+  });
+});
+
+describe('開催日時と終了日時（PR #30 のレビュー）', () => {
+  it('UTC の ISO 8601 の日時を受け付ける', () => {
+    const product = productInputSchema.parse({
+      ...minimumInput,
+      eventStartsAt: '2026-11-20T09:00:00.000Z',
+      eventEndsAt: '2026-11-20T12:00:00.000Z',
+    });
+
+    expect(product).toMatchObject({ eventStartsAt: '2026-11-20T09:00:00.000Z', eventEndsAt: '2026-11-20T12:00:00.000Z' });
+  });
+
+  it.each(['eventStartsAt', 'eventEndsAt'])('%s だけを入力した場合も受け付ける', (fieldName) => {
+    expect(isValid({ ...minimumInput, [fieldName]: '2026-11-20T09:00:00.000Z' })).toBe(true);
+  });
+
+  it.each([
+    ['日付だけ', '2026-11-20'],
+    ['時差のない日時（日本時間の入力欄の値のまま）', '2026-11-20T18:00'],
+    ['日時でない文字列', '11月20日 18時'],
+    ['存在しない日時', '2026-02-30T09:00:00.000Z'],
+  ])('%s（%s）の場合、拒否する', (_label, value) => {
+    expect(isValid({ ...minimumInput, eventStartsAt: value })).toBe(false);
+    expect(isValid({ ...minimumInput, eventEndsAt: value })).toBe(false);
+  });
+
+  it('終了日時が開催日時より前の場合、終了日時の誤りとして文言とともに拒否する', () => {
+    const result = productInputSchema.safeParse({
+      ...minimumInput,
+      eventStartsAt: '2026-11-20T09:00:00.000Z',
+      eventEndsAt: '2026-11-20T08:59:00.000Z',
+    });
+
+    expect(result.error?.issues[0]).toMatchObject({ path: ['eventEndsAt'], message: '終了日時は開催日時以降にしてください。' });
+  });
+
+  it('終了日時が開催日時と同じ場合は受け付ける', () => {
+    expect(isValid({ ...minimumInput, eventStartsAt: '2026-11-20T09:00:00.000Z', eventEndsAt: '2026-11-20T09:00:00.000Z' })).toBe(true);
   });
 });

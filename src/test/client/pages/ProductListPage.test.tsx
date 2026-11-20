@@ -33,6 +33,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     handlingFee: null,
     travelExpense: null,
     otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
@@ -1068,5 +1070,49 @@ describe('スマートフォンの幅でのリスト形式（issue #15）', () =
 
     expect(await screen.findByRole('status')).toHaveTextContent('発売月を 2027/01 に移動しました');
     expect(requests.filter((recorded) => recorded.method === 'PATCH')[0]?.body).toEqual({ releaseMonth: '2027-01' });
+  });
+});
+
+describe('開催日時と開催期間の表示（PR #30 のレビュー）', () => {
+  /** 画面の幅を偽装する。isPhoneWidth が true なら横幅 600px 以下として扱う。 */
+  function stubScreenWidth(isPhoneWidth: boolean) {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(max-width: 600px)' ? isPhoneWidth : false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+  }
+
+  /** 開催日時（日本時間 11/20 18:00）と終了日時（同 21:00）を持つ商品を返すスタブ。 */
+  function stubEventProduct() {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({ name: 'ライブ 東京公演', eventStartsAt: '2026-11-20T09:00:00.000Z', eventEndsAt: '2026-11-20T12:00:00.000Z' }),
+          ],
+        },
+      }),
+    });
+  }
+
+  it('PC の幅（カードを並べる形式）では、開催日時と終了日時を表示する', async () => {
+    stubScreenWidth(false);
+    stubEventProduct();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const card = (await screen.findByText('ライブ 東京公演')).closest('article');
+    expect(within(card as HTMLElement).getByText('開催 11/20 18:00〜21:00')).toBeInTheDocument();
+  });
+
+  it('スマートフォンの幅（リスト形式）では、開催期間を表示する', async () => {
+    stubScreenWidth(true);
+    stubEventProduct();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const item = (await screen.findByText('ライブ 東京公演')).closest('article');
+    expect(within(item as HTMLElement).getByText('開催 約3時間')).toBeInTheDocument();
+    expect(within(item as HTMLElement).queryByText(/18:00/)).not.toBeInTheDocument();
   });
 });

@@ -47,6 +47,8 @@ describe('商品の登録', () => {
       handlingFee: null,
       travelExpense: null,
       otherExpense: null,
+      eventStartsAt: null,
+      eventEndsAt: null,
       createdAt: TEST_CURRENT_TIME.toISOString(),
       updatedAt: TEST_CURRENT_TIME.toISOString(),
     });

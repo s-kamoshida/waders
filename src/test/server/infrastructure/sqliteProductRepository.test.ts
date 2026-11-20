@@ -44,14 +44,23 @@ function createProduct(overrides: Partial<Product> = {}): Product {
     handlingFee: 330,
     travelExpense: 2000,
     otherExpense: 600,
+    eventStartsAt: '2026-12-20T09:00:00.000Z',
+    eventEndsAt: '2026-12-20T12:00:00.000Z',
     createdAt: '2026-11-17T01:00:00.000Z',
     updatedAt: '2026-11-17T01:00:00.000Z',
     ...overrides,
   };
 }
 
-/** 版数 6 より前の DB にはない項目（場所と費用。issue #26）を未入力にしたもの。移行のテストで使う。 */
-const FIELDS_ADDED_IN_VERSION_SIX = { location: null, handlingFee: null, travelExpense: null, otherExpense: null } as const;
+/** 版数 6 より前の DB にはない項目（場所・費用・開催日時と終了日時。issue #26）を未入力にしたもの。移行のテストで使う。 */
+const FIELDS_ADDED_IN_VERSION_SIX = {
+  location: null,
+  handlingFee: null,
+  travelExpense: null,
+  otherExpense: null,
+  eventStartsAt: null,
+  eventEndsAt: null,
+} as const;
 
 /** 登録時に記録される履歴を除いた、変更の履歴を返す。 */
 function listChangesAfterRegistration(productId: ProductId) {
@@ -197,6 +206,16 @@ describe('更新と変更履歴', () => {
     expect(listChangesAfterRegistration(product.id)).toEqual([]);
   });
 
+  it('開催日時と終了日時を変更した場合、変更が保存され、片方だけでも保存できる（PR #30 のレビュー）', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+    const updated: Product = { ...product, eventStartsAt: '2027-01-10T01:30:00.000Z', eventEndsAt: null, updatedAt: change.changedAt };
+
+    repository.updateProduct(updated, change);
+
+    expect(repository.findProductById(product.id)).toEqual(updated);
+  });
+
   it('履歴は古い順に返す', () => {
     const product = createProduct({ status: 'considering' });
     repository.insertProduct(product);
@@ -256,6 +275,9 @@ describe('DB の制約（業務ルールの最後の防御）', () => {
     ['上限を超える交通費（issue #26）', { travelExpense: 10_000_000 }],
     ['負のその他費用（issue #26）', { otherExpense: -1 }],
     ['上限を超えるその他費用（issue #26）', { otherExpense: 10_000_000 }],
+    ['日時の形式でない開催日時（PR #30 のレビュー）', { eventStartsAt: '2026-12-20 18:00' }],
+    ['日時の形式でない終了日時（PR #30 のレビュー）', { eventEndsAt: '2026-12-20' }],
+    ['開催日時より前の終了日時（PR #30 のレビュー）', { eventStartsAt: '2026-12-20T09:00:00.000Z', eventEndsAt: '2026-12-20T08:00:00.000Z' }],
   ])('%s を保存しようとした場合、DB が拒否する', (_label, overrides) => {
     const invalidProduct = { ...createProduct(), ...overrides } as Product;
 
@@ -510,7 +532,7 @@ describe('スキーマの移行（版数 5 → 6。issue #26）', () => {
     versionFiveDatabase.close();
   }
 
-  it('版数 5 の DB を開いた場合、版数 6 に移行し、既存の商品のすべての項目を保ち、場所と費用は未入力になる', () => {
+  it('版数 5 の DB を開いた場合、版数 6 に移行し、既存の商品のすべての項目を保ち、場所・費用・開催日時と終了日時は未入力になる', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
     const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
     createVersionFiveDatabase(databaseFilePath, product);
@@ -526,21 +548,29 @@ describe('スキーマの移行（版数 5 → 6。issue #26）', () => {
     migratedDatabase.close();
   });
 
-  it('版数 6 に移行した後は、既存の商品に場所と費用を保存できる', () => {
+  it('版数 6 に移行した後は、既存の商品に場所・費用・開催日時と終了日時を保存できる', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
     const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
     createVersionFiveDatabase(databaseFilePath, product);
     const migratedDatabase = openProductDatabase(databaseFilePath);
     const migratedRepository = createSqliteProductRepository(migratedDatabase);
 
-    const updated: Product = { ...product, location: '日本武道館', handlingFee: 440, travelExpense: 3000, otherExpense: 0 };
+    const updated: Product = {
+      ...product,
+      location: '日本武道館',
+      handlingFee: 440,
+      travelExpense: 3000,
+      otherExpense: 0,
+      eventStartsAt: '2026-12-20T09:00:00.000Z',
+      eventEndsAt: '2026-12-21T09:00:00.000Z',
+    };
     migratedRepository.updateProduct(updated, { changedAt: '2026-11-18T00:00:00.000Z', changeKind: 'user' });
 
     expect(migratedRepository.findProductById(product.id)).toEqual(updated);
     migratedDatabase.close();
   });
 
-  it('版数 6 に移行した後も、場所と費用の範囲は DB が確かめる', () => {
+  it('版数 6 に移行した後も、場所・費用・開催日時と終了日時の範囲は DB が確かめる', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
     const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
     createVersionFiveDatabase(databaseFilePath, product);
@@ -550,6 +580,9 @@ describe('スキーマの移行（版数 5 → 6。issue #26）', () => {
     const change = { changedAt: '2026-11-18T00:00:00.000Z', changeKind: 'user' } as const;
     expect(() => migratedRepository.updateProduct({ ...product, handlingFee: -1 }, change)).toThrow();
     expect(() => migratedRepository.updateProduct({ ...product, location: '' }, change)).toThrow();
+    expect(() =>
+      migratedRepository.updateProduct({ ...product, eventStartsAt: '2026-12-20T09:00:00.000Z', eventEndsAt: '2026-12-20T08:00:00.000Z' }, change),
+    ).toThrow();
     migratedDatabase.close();
   });
 });

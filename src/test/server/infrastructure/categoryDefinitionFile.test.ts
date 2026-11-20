@@ -365,6 +365,18 @@ describe('カテゴリーごとの入力項目（issue #27）', () => {
     ]);
   });
 
+  it('開催日時と終了日時は 1 組の項目（eventPeriod）として指定でき、場所の次の順に並べる（PR #30 のレビュー）', () => {
+    writeDefinition({ version: 1, categories: [{ id: 'ticket', name: '電子チケット', fields: ['otherExpense', 'eventPeriod', 'location'] }] });
+
+    expect(createDefinition().readCategories()[0]?.fields).toEqual(['location', 'eventPeriod', 'otherExpense']);
+  });
+
+  it('開催日時と終了日時を個別の項目の名前で指定した場合は、定義の誤りとする', () => {
+    writeDefinition({ version: 1, categories: [{ id: 'ticket', name: '電子チケット', fields: ['eventStartsAt'] }] });
+
+    expect(() => createDefinition().readCategories()).toThrow(CategoryDefinitionError);
+  });
+
   it('項目の指定が空の場合、選べる項目をすべて無効とする', () => {
     writeDefinition({ version: 1, categories: [{ id: 'simple', name: '簡易', fields: [] }] });
 

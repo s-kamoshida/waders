@@ -35,6 +35,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     handlingFee: null,
     travelExpense: null,
     otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,

@@ -34,6 +34,8 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     handlingFee: null,
     travelExpense: null,
     otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
     createdAt,
     updatedAt: createdAt,
     deliveryConfirmationPending: false,

@@ -33,6 +33,8 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     handlingFee: null,
     travelExpense: null,
     otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     deliveryConfirmationPending: false,
@@ -460,7 +462,7 @@ describe('閉じる', () => {
 
 describe('入力する項目の設定（issue #27）', () => {
   /** 選べる項目のチェックボックスの表記（並び順）。 */
-  const FIELD_CHECKBOX_LABELS = ['送料', 'メーカー', '受注期限', 'キャンセル可', '場所', '手数料', '交通費（見込）', 'その他費用'];
+  const FIELD_CHECKBOX_LABELS = ['送料', 'メーカー', '受注期限', 'キャンセル可', '場所', '開催日時・終了日時', '手数料', '交通費（見込）', 'その他費用'];
 
   /** 電子チケットのカテゴリーを含む定義を返すスタブで管理のモーダルを開き、電子チケットの「入力する項目」を開く。 */
   async function openTicketFieldSettings(extraRoutes: StubRouteHandlers = {}) {
@@ -481,7 +483,7 @@ describe('入力する項目の設定（issue #27）', () => {
         }
         const updated = {
           ...ticket,
-          fields: ['shippingFee', 'maker', 'orderDeadline', 'cancelable', 'location', 'handlingFee', 'travelExpense', 'otherExpense'].filter((field) => enabled.has(field)),
+          fields: ['shippingFee', 'maker', 'orderDeadline', 'cancelable', 'location', 'eventPeriod', 'handlingFee', 'travelExpense', 'otherExpense'].filter((field) => enabled.has(field)),
           otherExpenseLabel: body.otherExpenseLabel === undefined ? ticket.otherExpenseLabel : (body.otherExpenseLabel ?? 'その他費用'),
         };
         categories = [categories[0] ?? ticket, updated];
@@ -534,6 +536,15 @@ describe('入力する項目の設定（issue #27）', () => {
         body: { fields: { travelExpense: true } },
       }),
     ]);
+  });
+
+  it('「開催日時・終了日時」のチェックを入れた場合、1 組の項目（eventPeriod）を有効にする変更を送る（PR #30 のレビュー）', async () => {
+    const { ticket, requests } = await openTicketFieldSettings();
+
+    await userEvent.click(within(ticket).getByRole('checkbox', { name: '開催日時・終了日時' }));
+
+    await waitFor(() => expect(within(ticket).getByRole('checkbox', { name: '開催日時・終了日時' })).toBeChecked());
+    expect(findChangingRequests(requests)).toEqual([expect.objectContaining({ body: { fields: { eventPeriod: true } } })]);
   });
 
   it('項目のチェックを外した場合、すぐにその項目だけを無効にする変更を送る', async () => {

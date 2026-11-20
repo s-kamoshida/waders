@@ -30,6 +30,8 @@ function createAwaitingProduct(id: string, name: string): ProductListItem {
     handlingFee: null,
     travelExpense: null,
     otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
     createdAt: '2026-06-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     deliveryConfirmationPending: true,

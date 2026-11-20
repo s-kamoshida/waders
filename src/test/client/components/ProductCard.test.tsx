@@ -28,6 +28,8 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     handlingFee: null,
     travelExpense: null,
     otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,
@@ -233,5 +235,42 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
 
     expect(screen.getByText('送料無料')).toBeInTheDocument();
     expect(screen.getByText('その他費用 600円')).toBeInTheDocument();
+  });
+});
+
+describe('開催日時と終了日時（PR #30 のレビュー）', () => {
+  const eventProduct = (overrides: Partial<ProductResponse> = {}) =>
+    createProduct({ eventStartsAt: '2026-11-20T09:00:00.000Z', eventEndsAt: '2026-11-20T12:00:00.000Z', ...overrides });
+
+  it('カードを並べる形式（既定）では、開催日時と終了日時を「開催 11/20 18:00〜21:00」と表示する', () => {
+    render(<ProductCard product={eventProduct()} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.getByText('開催 11/20 18:00〜21:00')).toBeInTheDocument();
+    expect(screen.queryByText(/約3時間/)).not.toBeInTheDocument();
+  });
+
+  it('スマートフォンの幅のリスト形式（layout が list）では、開催期間を「開催 約3時間」と表示し、日時は表示しない', () => {
+    render(<ProductCard product={eventProduct()} today={today} onSelect={vi.fn()} layout="list" />);
+
+    expect(screen.getByText('開催 約3時間')).toBeInTheDocument();
+    expect(screen.queryByText(/18:00/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['開催日時だけ', { eventEndsAt: null }],
+    ['終了日時だけ', { eventStartsAt: null }],
+  ])('%sの場合、どちらの形式でも開催の表示を出さない', (_label, overrides) => {
+    const { unmount } = render(<ProductCard product={eventProduct(overrides)} today={today} onSelect={vi.fn()} />);
+    expect(screen.queryByText(/^開催 /)).not.toBeInTheDocument();
+    unmount();
+
+    render(<ProductCard product={eventProduct(overrides)} today={today} onSelect={vi.fn()} layout="list" />);
+    expect(screen.queryByText(/^開催 /)).not.toBeInTheDocument();
+  });
+
+  it('開催日時と終了日時がない場合、開催の表示を出さない', () => {
+    render(<ProductCard product={createProduct()} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.queryByText(/^開催 /)).not.toBeInTheDocument();
   });
 });
