@@ -208,11 +208,11 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
     expect(screen.getByText('送料無料')).toBeInTheDocument();
   });
 
-  it('カテゴリー未設定・定義にないカテゴリーの商品で、送料が未入力の場合、「送料無料」と表示しない', () => {
+  it('カテゴリー未設定・定義にないカテゴリーの商品で、送料が未入力の場合、今までどおり「送料無料」と表示する', () => {
     const { unmount } = render(
       <ProductCard product={createProduct({ shippingFee: null })} today={today} onSelect={vi.fn()} categories={categories} />,
     );
-    expect(screen.queryByText('送料無料')).not.toBeInTheDocument();
+    expect(screen.getByText('送料無料')).toBeInTheDocument();
     unmount();
 
     render(
@@ -223,7 +223,7 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
         categories={categories}
       />,
     );
-    expect(screen.queryByText('送料無料')).not.toBeInTheDocument();
+    expect(screen.getByText('送料無料')).toBeInTheDocument();
   });
 
   it('カテゴリーの定義を読めない場合（categories が null）、送料が未入力なら「送料無料」と表示し、その他費用は「その他費用」と示す', () => {

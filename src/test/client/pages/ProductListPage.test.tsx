@@ -273,11 +273,8 @@ describe('メーカーの候補（issue #18）', () => {
     await screen.findByRole('region', { name: '2026/11' });
 
     await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
-    const dialog = screen.getByRole('dialog', { name: '商品を追加' });
-    await within(dialog).findByRole('option', { name: 'スケールフィギュア' });
-    await userEvent.selectOptions(within(dialog).getByLabelText('カテゴリー'), 'スケールフィギュア');
 
-    const makerInput = within(dialog).getByLabelText('メーカー');
+    const makerInput = within(screen.getByRole('dialog', { name: '商品を追加' })).getByLabelText('メーカー');
     const suggestionList = document.getElementById(makerInput.getAttribute('list') ?? '');
     expect(Array.from(suggestionList?.querySelectorAll('option') ?? []).map((option) => option.value)).toEqual([
       'メーカーA',

@@ -18,14 +18,6 @@ const DEFAULT_ENABLED_FIELDS: CategoryResponse['fields'] = ['shippingFee', 'make
 const figureCategory: CategoryResponse = { id: 'scale', name: 'スケールフィギュア', fields: DEFAULT_ENABLED_FIELDS, otherExpenseLabel: 'その他費用' };
 const actionCategory: CategoryResponse = { id: 'action', name: '可動フィギュア', fields: DEFAULT_ENABLED_FIELDS, otherExpenseLabel: 'その他費用' };
 
-/** 既定の項目の設定のカテゴリーの一覧（送料・メーカー・受注期限・キャンセル可を入力するテストで使う）。 */
-const FIGURE_CATEGORIES = [figureCategory, actionCategory];
-
-/** 追加のモーダルで、既定の項目の設定のカテゴリー（スケールフィギュア）を選ぶ（送料・メーカー・受注期限・キャンセル可を表示する）。 */
-async function chooseFigureCategory() {
-  await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), 'スケールフィギュア');
-}
-
 /** 場所と費用（issue #26）が未入力の送信の本文。 */
 const EMPTY_TICKET_FIELDS = { location: null, handlingFee: null, travelExpense: null, otherExpense: null };
 
@@ -79,12 +71,9 @@ describe('商品の追加', () => {
       'POST /api/products': () => ({ status: 201, body: createProduct() }),
     });
     const onSaved = vi.fn();
-    render(
-      <ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} categories={FIGURE_CATEGORIES} />,
-    );
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
 
     await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア セカンド・フォーム');
-    await chooseFigureCategory();
     fireEvent.change(screen.getByLabelText('発売月'), { target: { value: '2026-12' } });
     await userEvent.selectOptions(screen.getByLabelText('ステータス'), 'reserved');
     await userEvent.click(screen.getByLabelText('キャンセル可'));
@@ -109,7 +98,7 @@ describe('商品の追加', () => {
           shippingFee: 800,
           orderDeadline: '2026-11-30',
           url: 'https://shop.example.jp/item/1',
-          categoryId: 'scale',
+          categoryId: null,
           maker: null,
           note: null,
           ...EMPTY_TICKET_FIELDS,
@@ -275,7 +264,7 @@ describe('商品の削除', () => {
 });
 
 describe('メーカーと備考（issue #18）', () => {
-  it('メーカーを入力でき、渡された候補を入力の候補として出す', async () => {
+  it('メーカーを入力でき、渡された候補を入力の候補として出す', () => {
     stubFetchRoutes({});
     render(
       <ProductEditorDialog
@@ -283,10 +272,8 @@ describe('メーカーと備考（issue #18）', () => {
         onClose={vi.fn()}
         onSaved={vi.fn()}
         makerSuggestions={['メーカーA', 'メーカーB']}
-        categories={FIGURE_CATEGORIES}
       />,
     );
-    await chooseFigureCategory();
 
     const makerInput = screen.getByLabelText('メーカー');
     const suggestionList = document.getElementById(makerInput.getAttribute('list') ?? '');
@@ -298,12 +285,9 @@ describe('メーカーと備考（issue #18）', () => {
       'POST /api/products': () => ({ status: 201, body: createProduct() }),
     });
     const onSaved = vi.fn();
-    render(
-      <ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} categories={FIGURE_CATEGORIES} />,
-    );
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
 
     await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
-    await chooseFigureCategory();
     await userEvent.type(screen.getByLabelText('メーカー'), 'メーカーA');
     await userEvent.type(screen.getByLabelText('備考'), '初回特典付き{Enter}分割で届く');
     await userEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -331,12 +315,9 @@ describe('メーカーと備考（issue #18）', () => {
     ['備考', 'あ'.repeat(1001), '備考は 1,000 文字以内で入力してください。'],
   ])('%s が上限の文字数を超える場合、文言を表示し、送信しない', async (label, value, message) => {
     const { requests } = stubFetchRoutes({});
-    render(
-      <ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} categories={FIGURE_CATEGORIES} />,
-    );
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
 
     await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
-    await chooseFigureCategory();
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
     await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
@@ -355,12 +336,10 @@ describe('メーカーと備考（issue #18）', () => {
         onClose={vi.fn()}
         onSaved={vi.fn()}
         onSavedAndContinued={onSavedAndContinued}
-        categories={FIGURE_CATEGORIES}
       />,
     );
 
     await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
-    await chooseFigureCategory();
     await userEvent.type(screen.getByLabelText('メーカー'), 'メーカーA');
     await userEvent.type(screen.getByLabelText('備考'), '初回特典付き');
     await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
@@ -374,7 +353,7 @@ describe('メーカーと備考（issue #18）', () => {
 });
 
 describe('カテゴリー（issue #10）', () => {
-  const categories = FIGURE_CATEGORIES;
+  const categories = [figureCategory, actionCategory];
 
   /** プルダウンの選択肢の表記を返す。 */
   function listCategoryOptions(): string[] {
@@ -485,7 +464,6 @@ describe('連続追加（issue #16）', () => {
   /** 追加のモーダルを、商品名と全項目を入力した状態にする。 */
   async function fillAllFields(name: string) {
     await userEvent.type(screen.getByLabelText('商品名'), name);
-    await chooseFigureCategory();
     fireEvent.change(screen.getByLabelText('発売月'), { target: { value: '2027-01' } });
     await userEvent.selectOptions(screen.getByLabelText('ステータス'), 'reserved');
     await userEvent.click(screen.getByLabelText('キャンセル可'));
@@ -509,7 +487,6 @@ describe('連続追加（issue #16）', () => {
         onClose={vi.fn()}
         onSaved={callbacks.onSaved ?? vi.fn()}
         onSavedAndContinued={callbacks.onSavedAndContinued ?? vi.fn()}
-        categories={FIGURE_CATEGORIES}
       />,
     );
   }
@@ -633,7 +610,7 @@ describe('連続追加（issue #16）', () => {
       shippingFee: null,
       orderDeadline: '2026-11-30',
       url: null,
-      categoryId: 'scale',
+      categoryId: null,
       maker: null,
       note: null,
       ...EMPTY_TICKET_FIELDS,
@@ -747,12 +724,13 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
   }
 
   describe('追加', () => {
-    it('カテゴリーが「未設定」の場合、選べる項目の入力欄は表示せず、常に入力する項目だけを表示する', () => {
+    it('カテゴリーが「未設定」の場合、今までどおり送料・メーカー・受注期限・キャンセル可を表示し、場所と費用は表示しない', () => {
       stubFetchRoutes({});
       renderCreateDialog();
 
       expect(ALWAYS_SHOWN_LABELS.filter(hasField)).toEqual(ALWAYS_SHOWN_LABELS);
-      expect([...FIGURE_FIELD_LABELS, '場所', '手数料', '交通費（見込）', 'その他費用'].filter(hasField)).toEqual([]);
+      expect(FIGURE_FIELD_LABELS.filter(hasField)).toEqual(FIGURE_FIELD_LABELS);
+      expect(['場所', '手数料', '交通費（見込）', 'その他費用'].filter(hasField)).toEqual([]);
     });
 
     it('既定の項目の設定のカテゴリーを選んだ場合、送料・メーカー・受注期限・キャンセル可を表示し、場所と費用は表示しない', async () => {
@@ -799,9 +777,10 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
       expect(hasField('場所')).toBe(false);
       expect(hasField('送料（税込）')).toBe(true);
 
+      await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), '電子チケット');
       await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), '未設定');
       expect(hasField('場所')).toBe(false);
-      expect(hasField('送料（税込）')).toBe(false);
+      expect(hasField('送料（税込）')).toBe(true);
     });
 
     it('場所と費用を入力して保存した場合、その値を送り、表示していない項目は未入力として送る', async () => {
@@ -984,22 +963,38 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
       expect(screen.getByLabelText('キャンセル可')).toBeChecked();
     });
 
-    it('カテゴリー未設定の商品は、値が保存されている選べる項目だけを表示する', () => {
+    it('カテゴリー未設定の商品は、送料・メーカー・受注期限・キャンセル可を常に表示し、場所と費用は値が保存されている項目だけを表示する', () => {
       stubFetchRoutes({});
-      renderEditDialog(createPlainProduct({ maker: 'メーカーA', otherExpense: 600 }));
+      renderEditDialog(createPlainProduct({ otherExpense: 600 }));
 
-      expect(screen.getByLabelText('メーカー')).toHaveValue('メーカーA');
+      expect(FIGURE_FIELD_LABELS.filter(hasField)).toEqual(FIGURE_FIELD_LABELS);
       expect(screen.getByLabelText('その他費用')).toHaveValue(600);
-      expect(['送料（税込）', '受注期限', 'キャンセル可', '場所', '手数料', '交通費（見込）'].filter(hasField)).toEqual([]);
+      expect(['場所', '手数料', '交通費（見込）'].filter(hasField)).toEqual([]);
     });
 
-    it('定義にないカテゴリーの商品は、値が保存されている選べる項目だけを表示し、その他費用は「その他費用」と表示する', () => {
+    it('定義にないカテゴリーの商品は、カテゴリー未設定と同じく扱い、その他費用は「その他費用」と表示する', () => {
       stubFetchRoutes({});
       renderEditDialog(createPlainProduct({ categoryId: 'removed', categoryName: 'プライズ', location: '東京ドーム', otherExpense: 600 }));
 
+      expect(FIGURE_FIELD_LABELS.filter(hasField)).toEqual(FIGURE_FIELD_LABELS);
       expect(screen.getByLabelText('場所')).toHaveValue('東京ドーム');
       expect(screen.getByLabelText('その他費用')).toHaveValue(600);
-      expect(['送料（税込）', 'メーカー', '受注期限', 'キャンセル可', '手数料', '交通費（見込）'].filter(hasField)).toEqual([]);
+      expect(['手数料', '交通費（見込）'].filter(hasField)).toEqual([]);
+    });
+
+    it('カテゴリー未設定の商品で、送料・メーカー・受注期限・キャンセル可を新しく入力して保存できる', async () => {
+      const { requests } = stubFetchRoutes({ 'PUT /api/products/product-1': () => ({ body: createProduct() }) });
+      const onSaved = vi.fn();
+      renderEditDialog(createPlainProduct(), { onSaved });
+
+      await userEvent.type(screen.getByLabelText('送料（税込）'), '800');
+      await userEvent.type(screen.getByLabelText('メーカー'), 'メーカーA');
+      fireEvent.change(screen.getByLabelText('受注期限'), { target: { value: '2026-11-30' } });
+      await userEvent.click(screen.getByLabelText('キャンセル可'));
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      expect(requests[0]?.body).toMatchObject({ categoryId: null, shippingFee: 800, maker: 'メーカーA', orderDeadline: '2026-11-30', cancelable: true });
     });
 
     it('別のカテゴリーに選び直した場合、選んだカテゴリーで有効な項目と、値が保存されている項目を表示する', async () => {
