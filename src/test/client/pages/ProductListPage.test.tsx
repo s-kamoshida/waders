@@ -749,3 +749,245 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
     });
   });
 });
+
+describe('スマートフォンの幅でのリスト形式（issue #15）', () => {
+  /** スマートフォンの幅を判定するメディアクエリ（横幅 600px 以下）。 */
+  const PHONE_WIDTH_QUERY = '(max-width: 600px)';
+
+  /**
+   * 画面の幅を偽装する。isPhoneWidth が true なら横幅 600px 以下として扱う（タッチ操作の端末とする）。
+   * 戻り値の changeWidth で、画面の幅が変わったこと（端末の向きを変えたなど）を知らせる。
+   */
+  function stubScreenWidth(isPhoneWidth: boolean) {
+    let matchesPhoneWidth = isPhoneWidth;
+    const listeners = new Set<(event: { matches: boolean; media: string }) => void>();
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      get matches() {
+        return query === PHONE_WIDTH_QUERY ? matchesPhoneWidth : false;
+      },
+      media: query,
+      addEventListener: (_type: string, listener: (event: { matches: boolean; media: string }) => void) => {
+        if (query === PHONE_WIDTH_QUERY) listeners.add(listener);
+      },
+      removeEventListener: (_type: string, listener: (event: { matches: boolean; media: string }) => void) => {
+        listeners.delete(listener);
+      },
+    }));
+    return {
+      changeWidth(nextIsPhoneWidth: boolean) {
+        matchesPhoneWidth = nextIsPhoneWidth;
+        act(() => {
+          for (const listener of listeners) listener({ matches: nextIsPhoneWidth, media: PHONE_WIDTH_QUERY });
+        });
+      },
+    };
+  }
+
+  /** 商品名から、その商品の行（カード）を返す。 */
+  function findProductItem(productName: string): HTMLElement {
+    const item = screen.getByRole('button', { name: new RegExp(productName) }).closest('article');
+    if (item === null) throw new Error(`商品が見つかりません: ${productName}`);
+    return item;
+  }
+
+  /** 月の中で商品を並べている要素を返す。 */
+  function findProductContainer(monthLabel: string): HTMLElement {
+    const container = screen.getByRole('region', { name: monthLabel }).querySelector('.product-list, .product-grid');
+    if (!(container instanceof HTMLElement)) throw new Error(`商品の並びが見つかりません: ${monthLabel}`);
+    return container;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('横幅 600px 以下の場合、月の商品を 1 行に 1 件のリスト形式で表示する', async () => {
+    stubScreenWidth(true);
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '1 件目' }), createProduct({ name: '2 件目' })] } }) });
+
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('1 件目');
+
+    const container = findProductContainer('2026/11');
+    expect(container).toHaveClass('product-list');
+    expect(container).not.toHaveClass('product-grid');
+    expect(container).toContainElement(findProductItem('1 件目'));
+    expect(container).toContainElement(findProductItem('2 件目'));
+  });
+
+  it('横幅が 600px より広い場合、今までどおりカードを横に並べる（グリッド）', async () => {
+    stubScreenWidth(false);
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'PC の商品' })] } }) });
+
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('PC の商品');
+
+    const container = findProductContainer('2026/11');
+    expect(container).toHaveClass('product-grid');
+    expect(container).not.toHaveClass('product-list');
+  });
+
+  it('画面の幅が変わった場合（端末の向きを変えたなど）、表示の形式もそれに合わせて切り替える', async () => {
+    const screenWidth = stubScreenWidth(true);
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '向きを変える商品' })] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('向きを変える商品');
+    expect(findProductContainer('2026/11')).toHaveClass('product-list');
+
+    screenWidth.changeWidth(false);
+    expect(findProductContainer('2026/11')).toHaveClass('product-grid');
+
+    screenWidth.changeWidth(true);
+    expect(findProductContainer('2026/11')).toHaveClass('product-list');
+  });
+
+  it('リスト形式の場合、各行の左端（商品名より前）に共通のアイコンを表示し、ステータス・メーカー・商品名・金額・送料・備考の印・購入先を表示する', async () => {
+    stubScreenWidth(true);
+    const product = createProduct({
+      name: '全部入りの商品',
+      maker: 'メーカーA',
+      price: 24200,
+      shippingFee: 800,
+      note: '初回特典付き',
+      url: 'https://shop.example.jp/item/1',
+    });
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [product] } }) });
+
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('全部入りの商品');
+
+    const item = findProductItem('全部入りの商品');
+    const icon = item.querySelector('.product-card-placeholder');
+    expect(icon).not.toBeNull();
+    expect((icon?.compareDocumentPosition(within(item).getByText('全部入りの商品')) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(item).getByText('予約済')).toBeInTheDocument();
+    expect(within(item).getByText('メーカーA')).toBeInTheDocument();
+    expect(within(item).getByText('24,200円')).toBeInTheDocument();
+    expect(within(item).getByText('送料 800円')).toBeInTheDocument();
+    expect(within(item).getByRole('img', { name: '備考あり' })).toHaveTextContent('📝');
+    expect(within(item).queryByText('初回特典付き')).not.toBeInTheDocument();
+    expect(within(item).getByRole('link', { name: 'shop.example.jp' })).toBeInTheDocument();
+  });
+
+  it('リスト形式の場合も、送料が未入力または 0 円なら「送料無料」、金額が未入力なら「金額未入力」と表示する', async () => {
+    stubScreenWidth(true);
+    const products = [
+      createProduct({ name: '送料未入力の商品', price: 19800, shippingFee: null }),
+      createProduct({ name: '送料 0 円の商品', price: 19800, shippingFee: 0 }),
+      createProduct({ name: '金額未入力の商品', price: null, shippingFee: 800 }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('送料未入力の商品');
+
+    expect(within(findProductItem('送料未入力の商品')).getByText('送料無料')).toBeInTheDocument();
+    expect(within(findProductItem('送料 0 円の商品')).getByText('送料無料')).toBeInTheDocument();
+    const priceMissing = findProductItem('金額未入力の商品');
+    expect(within(priceMissing).getByText('金額未入力')).toBeInTheDocument();
+    expect(within(priceMissing).queryByText(/送料/)).not.toBeInTheDocument();
+  });
+
+  it('リスト形式の場合も、検討中で受注期限まで 1 週間以下の商品は商品名の先頭に ⚠️ を付け、受注期限を表示する', async () => {
+    stubScreenWidth(true);
+    stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products: [createProduct({ name: '期限が近い商品', status: 'considering', orderDeadline: '2026-11-24' })] } }),
+    });
+
+    render(<ProductListPage currentTime={currentTime} />);
+
+    expect(await screen.findByText('⚠️ 期限が近い商品')).toBeInTheDocument();
+    expect(within(findProductItem('期限が近い商品')).getByText('受注期限 11/24')).toBeInTheDocument();
+  });
+
+  it('リスト形式の場合も、検討中以外の商品には受注期限が近くても ⚠️ を付けず、受注期限も表示しない', async () => {
+    stubScreenWidth(true);
+    stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products: [createProduct({ name: '予約済の商品', status: 'reserved', orderDeadline: '2026-11-20' })] } }),
+    });
+
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('予約済の商品');
+
+    const item = findProductItem('予約済の商品');
+    expect(within(item).queryByText(/⚠️/)).not.toBeInTheDocument();
+    expect(within(item).queryByText(/受注期限/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['検討中', { status: 'considering', cancelable: false }, 'product-card--considering'],
+    ['予約済', { status: 'reserved', cancelable: false }, 'product-card--reserved'],
+    ['予約済（キャンセル可）', { status: 'reserved', cancelable: true }, 'product-card--cancelable'],
+    ['購入済', { status: 'purchased', cancelable: false }, 'product-card--purchased'],
+    ['未購入', { status: 'unpurchased', cancelable: false }, 'product-card--unpurchased'],
+  ] as const)('リスト形式の場合も、%s の商品はカードと同じステータスの見た目（色分け・未購入の見せ方）で表示する', async (statusLabel, statusFields, statusClassName) => {
+    stubScreenWidth(true);
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '色を見る商品', ...statusFields })] } }) });
+
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('色を見る商品');
+
+    const item = findProductItem('色を見る商品');
+    expect(item).toHaveClass(statusClassName);
+    expect(within(item).getByText(statusLabel)).toBeInTheDocument();
+  });
+
+  it('リスト形式の場合も、商品を押すと編集のモーダルを開く', async () => {
+    stubScreenWidth(true);
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '編集する商品' })] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('編集する商品');
+
+    await userEvent.click(screen.getByRole('button', { name: /編集する商品/ }));
+
+    expect(screen.getByRole('dialog', { name: '商品を編集' })).toBeInTheDocument();
+  });
+
+  it('リスト形式の場合も、購入先のリンクは新しいタブで開き、編集のモーダルは開かない', async () => {
+    stubScreenWidth(true);
+    stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リンクのある商品', url: 'https://shop.example.jp/item/1' })] } }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('リンクのある商品');
+
+    const link = within(findProductItem('リンクのある商品')).getByRole('link', { name: 'shop.example.jp' });
+    expect(link).toHaveAttribute('href', 'https://shop.example.jp/item/1');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    await userEvent.click(link);
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('リスト形式の場合も、行を 0.4 秒長押しして掴み、別の月まで動かして指を離すと、その月に移動する', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubScreenWidth(true);
+    let products = [createProduct({ id: 'moving', name: '動かす商品', releaseMonth: '2026-11' }), createProduct({ name: '1月の商品', releaseMonth: '2027-01' })];
+    const { requests } = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'PATCH /api/products/moving/release-month': (body) => {
+        const releaseMonth = (body as { releaseMonth: string }).releaseMonth;
+        products = products.map((product) => (product.id === 'moving' ? { ...product, releaseMonth } : product));
+        return { body: products[0] };
+      },
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('動かす商品');
+    expect(findProductContainer('2026/11')).toHaveClass('product-list');
+    const item = findProductItem('動かす商品');
+    const january = screen.getByRole('region', { name: '2027/01' });
+
+    fireEvent.pointerDown(item, { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 50, clientY: 300 });
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(item).toHaveClass('product-card--grabbed');
+    document.elementFromPoint = vi.fn(() => within(january).getByRole('button', { name: /^2027\/01 / }));
+    fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 60, clientY: 700 });
+    fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 60, clientY: 700 });
+
+    expect(await screen.findByRole('status')).toHaveTextContent('発売月を 2027/01 に移動しました');
+    expect(requests.filter((recorded) => recorded.method === 'PATCH')[0]?.body).toEqual({ releaseMonth: '2027-01' });
+  });
+});
