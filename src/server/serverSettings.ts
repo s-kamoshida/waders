@@ -1,5 +1,5 @@
 /**
- * サーバーの設定（ポート・データのフォルダ）の読み込みと検証。
+ * サーバーの設定（ポート・データのフォルダ・認証の有効・無効）の読み込みと検証。
  *
  * 所属: コンポジションルートの補助（main.ts と vite.config.ts から利用）
  * 責務:
@@ -17,16 +17,26 @@ export const DEFAULT_DATA_DIRECTORY_NAME = 'data';
 /** データのフォルダの中にある設定ファイルの名前。 */
 export const SETTINGS_FILE_NAME = 'settings.json';
 
+/** データのフォルダの中にある DB ファイル（商品・認証）の名前。 */
+export const DATABASE_FILE_NAME = 'waders.sqlite';
+
 /** リポジトリに含める設定ファイルのひな形の場所。 */
 export const SETTINGS_TEMPLATE_FILE_PATH = resolve(import.meta.dirname, '../../config/settings.example.json');
 
 const portSchema = z.number().int().min(1).max(65535);
 
-/** 設定ファイルの形式（version 1）。 */
+/**
+ * 設定ファイルの形式（version 1）。
+ * authenticationEnabled は issue #11 で追加した。この項目がない既存の設定ファイルは、認証を有効として扱う（安全側に倒す）。
+ */
 const settingsFileSchema = z.object({
   version: z.literal(1),
   port: portSchema,
+  authenticationEnabled: z.boolean().default(true),
 });
+
+/** 環境変数の認証の有効・無効。"true" か "false" だけを受け付ける（誤記で無効にならないようにする）。 */
+const environmentBooleanSchema = z.enum(['true', 'false']).transform((value) => value === 'true');
 
 /** 環境変数のポート。数字だけからなる文字列を受け付ける（"80.5" や空文字は不可）。 */
 const environmentPortSchema = z
@@ -41,6 +51,8 @@ export type ServerSettings = {
   readonly port: number;
   /** データのフォルダの絶対パス。 */
   readonly dataDirectory: string;
+  /** 認証を有効にするか（issue #11）。 */
+  readonly authenticationEnabled: boolean;
 };
 
 /** 設定ファイルや環境変数の内容に誤りがある場合のエラー。メッセージに誤りのある場所を含める。 */
@@ -53,7 +65,7 @@ export class ServerSettingsError extends Error {
 
 /** loadServerSettings の引数。 */
 export type LoadServerSettingsOptions = {
-  /** 環境変数（通常は process.env）。WADERS_PORT・WADERS_DATA_DIRECTORY を読む。 */
+  /** 環境変数（通常は process.env）。WADERS_PORT・WADERS_DATA_DIRECTORY・WADERS_AUTHENTICATION_ENABLED を読む。 */
   readonly environment: Record<string, string | undefined>;
   /** 設定ファイルがない場合に複製するひな形の場所。 */
   readonly templateFilePath: string;
@@ -63,7 +75,7 @@ export type LoadServerSettingsOptions = {
 
 /**
  * 設定を読み込む。設定ファイルがなければ、データのフォルダとともにひな形から作成する（所有者のみ読み書き可）。
- * 既存の設定ファイルは上書きしない。環境変数 WADERS_PORT があれば、設定ファイルのポートより優先する。
+ * 既存の設定ファイルは上書きしない。環境変数 WADERS_PORT・WADERS_AUTHENTICATION_ENABLED があれば、設定ファイルより優先する。
  * @returns 検証済みの設定
  * @throws {ServerSettingsError} 設定ファイルが JSON として読めない・形式に誤りがある、または環境変数の値が不正な場合
  */
@@ -78,7 +90,12 @@ export function loadServerSettings(options: LoadServerSettingsOptions): ServerSe
   const settingsFile = readSettingsFile(settingsFilePath);
   const environmentPort = options.environment.WADERS_PORT;
   const port = environmentPort === undefined ? settingsFile.port : parseEnvironmentPort(environmentPort);
-  return { port, dataDirectory };
+  const environmentAuthenticationEnabled = options.environment.WADERS_AUTHENTICATION_ENABLED;
+  const authenticationEnabled =
+    environmentAuthenticationEnabled === undefined
+      ? settingsFile.authenticationEnabled
+      : parseEnvironmentAuthenticationEnabled(environmentAuthenticationEnabled);
+  return { port, dataDirectory, authenticationEnabled };
 }
 
 /** 設定ファイルがなければ、データのフォルダを作り、ひな形を複製する。 */
@@ -113,6 +130,15 @@ function parseEnvironmentPort(value: string): number {
   const result = environmentPortSchema.safeParse(value);
   if (!result.success) {
     throw new ServerSettingsError(`環境変数 WADERS_PORT の値が不正です（1〜65535 の整数を指定してください）: "${value}"`);
+  }
+  return result.data;
+}
+
+/** 環境変数 WADERS_AUTHENTICATION_ENABLED を検証して真偽値にする。 */
+function parseEnvironmentAuthenticationEnabled(value: string): boolean {
+  const result = environmentBooleanSchema.safeParse(value);
+  if (!result.success) {
+    throw new ServerSettingsError(`環境変数 WADERS_AUTHENTICATION_ENABLED の値が不正です（true か false を指定してください）: "${value}"`);
   }
   return result.data;
 }

@@ -1,4 +1,5 @@
 {
   "version": 1,
-  "port": 8080
+  "port": 8080,
+  "authenticationEnabled": true
 }

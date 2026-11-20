@@ -7,12 +7,14 @@
  *  - 商品の登録・取得・一覧・更新・削除と、ステータス・発売月の変更履歴の記録
  *  - 延期の確認を待っている商品の記録（issue #9）
  *  - カテゴリーの改名・削除に伴う、商品のカテゴリーの一括の変更（issue #10）
+ * 認証のアカウントとログインした状態の表も同じ DB に置く（スキーマの移行はここに一本化。読み書きは sqliteAccountRepository.ts）。
  * 業務ルールに対応する CHECK 制約を DB にも付け、検証をすり抜けた不正な値を最後に拒否する。
  * SQLite は Node.js 標準の node:sqlite を使う（CLAUDE.md「技術スタック」）。
  */
 import { existsSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { MAXIMUM_LOGIN_ID_LENGTH } from '../../shared/authenticationContract.ts';
 import { MAXIMUM_CATEGORY_ID_LENGTH } from '../../shared/categoryContract.ts';
 import {
   MAXIMUM_CATEGORY_NAME_LENGTH,
@@ -99,6 +101,22 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
   CREATE TRIGGER products_category_pair_on_update BEFORE UPDATE ON products
     WHEN (NEW.category_id IS NULL) <> (NEW.category IS NULL)
     BEGIN SELECT RAISE(ABORT, 'category_id と category は両方あるか両方ないかのどちらかにする'); END;
+  `,
+  // 版数 5: 認証のアカウントとログインした状態（issue #11）。アカウントは 1 つだけ（id = 1）。
+  // パスワードは scrypt のハッシュ値（ソルトを含む）、ログインした状態は Cookie の値の SHA-256 だけを保存する
+  `
+  CREATE TABLE account (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    login_id TEXT NOT NULL CHECK (length(login_id) BETWEEN 1 AND ${MAXIMUM_LOGIN_ID_LENGTH}),
+    password_hash TEXT NOT NULL CHECK (password_hash GLOB 'scrypt$*'),
+    created_at TEXT NOT NULL
+  ) STRICT;
+
+  CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY CHECK (length(token_hash) = 64),
+    created_at TEXT NOT NULL,
+    last_used_at TEXT NOT NULL
+  ) STRICT;
   `,
 ];
 

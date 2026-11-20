@@ -20,6 +20,15 @@ export const SCREEN_MESSAGES = {
   categoryUnavailable: 'カテゴリーの定義に誤りがあるため、カテゴリーは変更できません。',
   uncategorized: 'カテゴリー未設定',
   categoryFilterClear: '選択を解除（すべて表示）',
+  /** 認証（issue #11）。 */
+  accountSetupTitle: 'アカウントの作成',
+  accountSetupNote: 'Waders を使うためのアカウントを作ります。アカウントは1つだけで、作った ID とパスワードでログインします。',
+  loginTitle: 'ログイン',
+  passwordMismatch: 'パスワードが一致しません。',
+  loginFieldsRequired: 'ID とパスワードを入力してください。',
+  authenticationFailed: 'ログインできませんでした。時間をおいて、もう一度お試しください。',
+  authenticationStatusLoadFailed: 'サーバーに接続できませんでした。時間をおいて、ページを読み込み直してください。',
+  logoutFailed: 'ログアウトできませんでした。時間をおいて、もう一度お試しください。',
   /** カテゴリーの管理（issue #10）。 */
   categoryManagerTitle: 'カテゴリーの管理',
   categoryManagerNote: '変更はすぐにカテゴリーの定義（categories.json）に保存します。名前を変えると、そのカテゴリーの商品も新しい名前になります。',

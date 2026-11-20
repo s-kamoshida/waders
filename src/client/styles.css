@@ -1059,3 +1059,73 @@ html:has(.dialog-backdrop) body {
     text-align: left;
   }
 }
+
+/* ログイン・アカウントの作成の画面（issue #11） */
+.authentication {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.authentication-form {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  max-width: 360px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.authentication-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.authentication-submit {
+  justify-self: stretch;
+  margin-top: 4px;
+}
+
+.header-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+}
+
+.application-message {
+  margin: 16px 0 0;
+}
+
+@media (max-width: 600px) {
+  /* スマートフォンの幅では、ヘッダーに収まるよう「ログアウト」を絵だけにする（文字は読み上げ用に残す） */
+  .application-header {
+    gap: 8px;
+  }
+
+  .header-button {
+    width: 34px;
+    height: 34px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .header-button-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .authentication {
+    padding: 24px 0;
+  }
+
+  .authentication-form {
+    padding: 18px;
+  }
+}

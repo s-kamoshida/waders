@@ -1,17 +1,20 @@
 /**
  * サーバーのテスト用の準備（テスト専用）。
  * メモリ上の DB、一時フォルダのカテゴリーの定義のファイル、時刻・ID を固定した商品の操作で Web アプリケーションを組み立てる。
+ * 認証は既定で無効（認証のテストでは有効にする。issue #11）。
  */
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type express from 'express';
+import { createAuthenticationService, type AuthenticationService } from '../../../server/application/authenticationService.ts';
 import { createCategoryService } from '../../../server/application/categoryService.ts';
 import { createProductService, type ProductService } from '../../../server/application/productService.ts';
 import type { CategoryId } from '../../../server/domain/category.ts';
 import type { ProductId } from '../../../server/domain/product.ts';
 import { CATEGORY_TEMPLATE_FILE_PATH, createCategoryDefinitionFile } from '../../../server/infrastructure/categoryDefinitionFile.ts';
+import { createSqliteAccountRepository } from '../../../server/infrastructure/sqliteAccountRepository.ts';
 import { createSqliteProductRepository, openProductDatabase, type ProductRepository } from '../../../server/infrastructure/sqliteProductRepository.ts';
 import { createWebApplication } from '../../../server/presentation/webApplication.ts';
 
@@ -30,6 +33,8 @@ export type WebApplicationTestHarness = {
   readonly database: DatabaseSync;
   readonly productRepository: ProductRepository;
   readonly productService: ProductService;
+  /** 認証の操作（issue #11）。 */
+  readonly authenticationService: AuthenticationService;
   /** カテゴリーの定義のファイルの場所（一時フォルダ）。 */
   readonly categoryDefinitionFilePath: string;
   /** カテゴリーの定義のファイルを書き換える（手で編集した場合を再現する）。文字列はそのまま書く。 */
@@ -38,11 +43,21 @@ export type WebApplicationTestHarness = {
   setCurrentTime(currentTime: Date): void;
 };
 
+/** createWebApplicationTestHarness の追加の引数。 */
+export type WebApplicationTestHarnessOptions = {
+  /** 認証を有効にするか。省略すると無効（issue #11）。 */
+  readonly authenticationEnabled?: boolean;
+};
+
 /**
  * テスト用の Web アプリケーションを組み立てる。商品の ID は product-1, product-2, … の順に振る。
  * @param clientBuildDirectory ビルド済みの画面のフォルダ（存在しなくてもよい）
+ * @param options 認証を有効にするかなど
  */
-export function createWebApplicationTestHarness(clientBuildDirectory: string): WebApplicationTestHarness {
+export function createWebApplicationTestHarness(
+  clientBuildDirectory: string,
+  options: WebApplicationTestHarnessOptions = {},
+): WebApplicationTestHarness {
   const database = openProductDatabase(':memory:');
   const categoryDefinitionFilePath = join(mkdtempSync(join(tmpdir(), 'waders-test-categories-')), 'categories.json');
   const writeCategoryDefinition = (content: unknown): void => {
@@ -70,15 +85,22 @@ export function createWebApplicationTestHarness(clientBuildDirectory: string): W
       return `product-${issuedIdCount}` as ProductId;
     },
   });
+  const authenticationService = createAuthenticationService({
+    accountRepository: createSqliteAccountRepository(database),
+    clock: { now: () => currentTime },
+    authenticationEnabled: options.authenticationEnabled ?? false,
+  });
   return {
     application: createWebApplication({
       clientBuildDirectory,
       productService,
       categoryService: createCategoryService({ categoryDefinition }),
+      authenticationService,
     }),
     database,
     productRepository,
     productService,
+    authenticationService,
     categoryDefinitionFilePath,
     writeCategoryDefinition,
     setCurrentTime(nextTime) {

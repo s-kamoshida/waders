@@ -319,8 +319,8 @@ describe('スキーマの移行（版数 1 から）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('最新のスキーマの版数は 4 である（issue #10）', () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(4);
+  it('最新のスキーマの版数は 5 である（issue #11）', () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(5);
   });
 
   it('版数 1 の DB を開いた場合、最新の版数に移行し、既存の商品と履歴を保ち、確認待ちは空、メーカーと備考は未入力になる', () => {
@@ -401,7 +401,7 @@ describe('スキーマの移行（版数 3 → 4。issue #10）', () => {
     versionThreeDatabase.close();
   }
 
-  it('版数 3 の DB を開いた場合、版数 4 に移行し、カテゴリーのない商品はカテゴリー未設定のまま', () => {
+  it('版数 3 の DB を開いた場合、最新の版数に移行し、カテゴリーのない商品はカテゴリー未設定のまま', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
     const product = createProduct({ maker: null, note: null, categoryId: null, categoryName: null });
     createVersionThreeDatabase(databaseFilePath, [product]);
@@ -410,7 +410,7 @@ describe('スキーマの移行（版数 3 → 4。issue #10）', () => {
     const migratedRepository = createSqliteProductRepository(migratedDatabase);
 
     const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
-    expect(version.user_version).toBe(4);
+    expect(version.user_version).toBe(LATEST_SCHEMA_VERSION);
     expect(migratedRepository.findProductById(product.id)).toEqual(product);
     migratedDatabase.close();
   });
@@ -424,6 +424,37 @@ describe('スキーマの移行（版数 3 → 4。issue #10）', () => {
     const migratedRepository = createSqliteProductRepository(migratedDatabase);
 
     expect(migratedRepository.findProductById(product.id)).toEqual({ ...product, categoryId: 'legacy:可動フィギュア' });
+    migratedDatabase.close();
+  });
+});
+
+describe('スキーマの移行（版数 4 → 5。issue #11）', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), 'waders-migration-'));
+  });
+
+  afterEach(() => {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  it('版数 4 の DB を開いた場合、版数 5 に移行し、既存の商品を保つ', () => {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const versionFourDatabase = new DatabaseSync(databaseFilePath);
+    versionFourDatabase.exec('PRAGMA foreign_keys = ON');
+    for (const migration of SCHEMA_MIGRATIONS.slice(0, 4)) versionFourDatabase.exec(migration);
+    versionFourDatabase.exec('PRAGMA user_version = 4');
+    const product = createProduct();
+    createSqliteProductRepository(versionFourDatabase).insertProduct(product);
+    versionFourDatabase.close();
+
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
+    expect(version.user_version).toBe(5);
+    expect(migratedRepository.findProductById(product.id)).toEqual(product);
     migratedDatabase.close();
   });
 });

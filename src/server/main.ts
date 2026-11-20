@@ -7,25 +7,25 @@
  *  - ステータスの自動遷移（起動時）
  *  - カテゴリーの定義のファイルがなければひな形から作成し、ID のないカテゴリーに ID を付ける（issue #10）
  *  - 各層の組み立て（依存の注入）と、HTTP サーバーの起動
+ *  - 認証の有効・無効を設定から受け取り、ログに出す（issue #11）
  *  - 終了シグナルを受けたときの後始末
  * 実行: `node src/server/main.ts`（Node.js 24 の型除去機能で TypeScript を直接実行する）
  */
 import { randomInt, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
+import { createAuthenticationService } from './application/authenticationService.ts';
 import { createCategoryService } from './application/categoryService.ts';
 import { createProductService } from './application/productService.ts';
 import { CategoryDefinitionError, type CategoryId } from './domain/category.ts';
 import type { ProductId } from './domain/product.ts';
+import { createSqliteAccountRepository } from './infrastructure/sqliteAccountRepository.ts';
 import { CATEGORY_TEMPLATE_FILE_PATH, createCategoryDefinitionFile } from './infrastructure/categoryDefinitionFile.ts';
 import { createSqliteProductRepository, openProductDatabase } from './infrastructure/sqliteProductRepository.ts';
 import { createWebApplication } from './presentation/webApplication.ts';
-import { SETTINGS_TEMPLATE_FILE_PATH, ServerSettingsError, loadServerSettings } from './serverSettings.ts';
+import { DATABASE_FILE_NAME, SETTINGS_TEMPLATE_FILE_PATH, ServerSettingsError, loadServerSettings } from './serverSettings.ts';
 import { writeStructuredLog } from './structuredLogger.ts';
 
 const CLIENT_BUILD_DIRECTORY = resolve(import.meta.dirname, '../../dist/client');
-
-/** データのフォルダの中にある商品の DB ファイルの名前。 */
-const DATABASE_FILE_NAME = 'waders.sqlite';
 
 /** データのフォルダの中にあるカテゴリーの定義のファイルの名前（issue #10）。 */
 const CATEGORY_DEFINITION_FILE_NAME = 'categories.json';
@@ -83,6 +83,11 @@ function startServer(): void {
     clientBuildDirectory: CLIENT_BUILD_DIRECTORY,
     productService,
     categoryService: createCategoryService({ categoryDefinition }),
+    authenticationService: createAuthenticationService({
+      accountRepository: createSqliteAccountRepository(database),
+      clock: { now: () => new Date() },
+      authenticationEnabled: settings.authenticationEnabled,
+    }),
   });
 
   const server = application.listen(settings.port, (error?: Error) => {
@@ -94,6 +99,7 @@ function startServer(): void {
       url: `http://localhost:${settings.port}`,
       dataDirectory: settings.dataDirectory,
       databaseFilePath,
+      authenticationEnabled: settings.authenticationEnabled,
     });
   });
 
