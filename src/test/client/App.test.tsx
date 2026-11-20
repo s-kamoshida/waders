@@ -548,3 +548,106 @@ describe('ページの中の領域でのスクロール（issue #21）', () => {
     });
   });
 });
+
+describe('キーボードで一覧をスクロールするためのフォーカス（issue #21・PR #29 のレビュー）', () => {
+  /** 一覧の領域（リスト・アーカイブを表示するタブの中身）を返す。 */
+  const getListRegion = () => screen.getByRole('tabpanel');
+
+  /** 画面の更新が落ち着くまで少し待つ（後からフォーカスを動かす処理があっても反映させるため）。 */
+  const waitForSettled = () => act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+
+  it('開いてリストを表示した場合、一覧の領域にフォーカスを置く', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+
+    await screen.findByText('リストの商品');
+
+    await waitFor(() => expect(getListRegion()).toHaveFocus());
+  });
+
+  it('ログインした後に一覧を表示した場合も、一覧の領域にフォーカスを置く', async () => {
+    let status = { authenticationEnabled: true, accountExists: true, loggedIn: false };
+    stubFetchRoutes({
+      'GET /api/auth/status': () => ({ body: status }),
+      'POST /api/auth/login': () => {
+        status = { authenticationEnabled: true, accountExists: true, loggedIn: true };
+        return { body: status };
+      },
+      'GET /api/products': () => ({ body: { products: [createProduct({ name: '一覧の商品' })] } }),
+    });
+    render(<App currentTime={currentTime} />);
+    await userEvent.type(await screen.findByRole('textbox', { name: 'ID' }), 'owner');
+    await userEvent.type(screen.getByLabelText('パスワード'), 'correct-horse');
+
+    await userEvent.click(screen.getByRole('button', { name: 'ログイン' }));
+
+    await screen.findByText('一覧の商品');
+    await waitFor(() => expect(getListRegion()).toHaveFocus());
+  });
+
+  it('タブを押してアーカイブに切り替えた場合、押したタブにあるフォーカスを奪わない', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: { products: [createProduct({ id: 'product-2', name: 'アーカイブの商品', releaseMonth: '2026-10', status: 'purchased' })] },
+      }),
+    });
+    render(<App currentTime={currentTime} />);
+    const archiveTab = await screen.findByRole('tab', { name: 'アーカイブ' });
+
+    await userEvent.click(archiveTab);
+    await screen.findByText('アーカイブの商品');
+    await waitForSettled();
+
+    expect(archiveTab).toHaveFocus();
+  });
+
+  it('追加のモーダルを開いた場合、商品名の入力欄にあるフォーカスを奪わない', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+    await screen.findByText('リストの商品');
+
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+    await waitForSettled();
+
+    expect(within(screen.getByRole('dialog', { name: '商品を追加' })).getByLabelText('商品名')).toHaveFocus();
+  });
+
+  it('開いたときに延期の確認のモーダルを表示する場合、フォーカスをモーダルの後ろの一覧の領域に置かない', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: { products: [createProduct({ name: '確認待ちの商品', releaseMonth: '2026-10', status: 'purchased', deliveryConfirmationPending: true })] },
+      }),
+    });
+    render(<App currentTime={currentTime} />);
+
+    await screen.findByRole('dialog', { name: '発売月を過ぎた予約商品の確認' });
+    await waitForSettled();
+
+    expect(getListRegion()).not.toHaveFocus();
+  });
+
+  it('追加のモーダルを閉じた場合、一覧の領域にフォーカスを置く', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+    await screen.findByText('リストの商品');
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(getListRegion()).toHaveFocus());
+  });
+
+  it('カテゴリーの管理のモーダルを閉じた場合も、一覧の領域にフォーカスを置く', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リストの商品' })] } }) });
+    render(<App currentTime={currentTime} />);
+    await screen.findByText('リストの商品');
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'カテゴリーの管理' }));
+    const dialog = await screen.findByRole('dialog', { name: 'カテゴリーの管理' });
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(getListRegion()).toHaveFocus());
+  });
+});
