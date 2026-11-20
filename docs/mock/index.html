@@ -91,7 +91,17 @@ details.month.drop-target { outline: 2px dashed var(--accent); outline-offset: 2
 .empty-month { color: var(--muted); font-size: 13px; padding: 4px 8px 10px 24px; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; padding: 4px 0 8px 16px; }
-.frame.phone .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); padding-left: 0; }
+/* スマートフォンの幅（横幅 600px 以下）は 1 行に 1 件のリスト形式。左端に小さなアイコン、右にステータス・商品名・金額・期限と購入先（#15） */
+.frame.phone .grid { display: flex; flex-direction: column; gap: 6px; padding-left: 0; }
+.frame.phone .card { display: grid; grid-template-columns: 40px minmax(0, 1fr); grid-template-areas: "icon badge" "icon body"; column-gap: 10px; align-items: start; padding: 8px 10px 6px; }
+.frame.phone .thumb { display: contents; }
+.frame.phone .thumb svg { grid-area: icon; box-sizing: border-box; width: 40px; height: 40px; padding: 7px; border-radius: 6px; background: #eceef1; }
+.frame.phone .thumb .source { display: none; }
+.frame.phone .badge { grid-area: badge; position: static; justify-self: start; }
+.frame.phone .body { grid-area: body; min-width: 0; padding: 2px 0 0; gap: 2px; }
+.frame.phone .name { -webkit-line-clamp: 2; }
+.frame.phone .card.unpurchased .thumb { opacity: 1; }
+.frame.phone .card.unpurchased .thumb svg { opacity: .45; }
 
 /* 商品カード */
 .card { background: var(--card-bg); border: 1px solid var(--border); border-left: 5px solid var(--card-line); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; cursor: pointer; text-align: left; padding: 0; color: inherit; }

@@ -187,3 +187,46 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
   });
 });
+
+describe('スマートフォンの幅でのリスト形式（issue #15）', () => {
+  /** 横幅 600px 以下として扱うように、画面の幅を偽装する。 */
+  function stubPhoneWidth(isPhoneWidth: boolean): void {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(max-width: 600px)' ? isPhoneWidth : false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  }
+
+  /** 月の中で商品を並べている要素を返す。 */
+  function findProductContainer(monthLabel: string): Element | null {
+    return screen.getByRole('region', { name: monthLabel }).querySelector('.product-list, .product-grid');
+  }
+
+  it('横幅 600px 以下の場合、アーカイブの商品も 1 行に 1 件のリスト形式で表示し、未購入の見せ方もカードと同じにする', async () => {
+    stubPhoneWidth(true);
+    const products = [
+      createProduct({ name: '届いた商品', releaseMonth: '2026-10', status: 'purchased' }),
+      createProduct({ name: '買わなかった商品', releaseMonth: '2026-10', status: 'unpurchased' }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ArchivePage currentTime={currentTime} />);
+    await screen.findByText('届いた商品');
+
+    expect(findProductContainer('2026/10')).toHaveClass('product-list');
+    expect(screen.getByRole('button', { name: /届いた商品/ }).closest('article')).toHaveClass('product-card--purchased');
+    expect(screen.getByRole('button', { name: /買わなかった商品/ }).closest('article')).toHaveClass('product-card--unpurchased');
+  });
+
+  it('横幅が 600px より広い場合、アーカイブも今までどおりカードを横に並べる（グリッド）', async () => {
+    stubPhoneWidth(false);
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: 'PC の商品', releaseMonth: '2026-10' })] } }) });
+
+    render(<ArchivePage currentTime={currentTime} />);
+    await screen.findByText('PC の商品');
+
+    expect(findProductContainer('2026/10')).toHaveClass('product-grid');
+  });
+});
