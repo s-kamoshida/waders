@@ -37,6 +37,18 @@ export type Product = {
   readonly maker: string | null;
   /** 備考（複数行）。未入力は null（issue #18）。 */
   readonly note: string | null;
+  /** 場所（イベントの会場など）。未入力は null（issue #26）。 */
+  readonly location: string | null;
+  /** 手数料（円）。未入力は null（issue #26）。 */
+  readonly handlingFee: number | null;
+  /** 交通費（見込）（円）。未入力は null（issue #26）。 */
+  readonly travelExpense: number | null;
+  /** その他費用（円。名前はカテゴリーごとに決める）。未入力は null（issue #26・#27）。 */
+  readonly otherExpense: number | null;
+  /** 開催日時（UTC の ISO 8601）。未入力は null（PR #30 のレビュー）。 */
+  readonly eventStartsAt: string | null;
+  /** 終了日時（UTC の ISO 8601。開催日時より前にはならない）。未入力は null（PR #30 のレビュー）。 */
+  readonly eventEndsAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 };

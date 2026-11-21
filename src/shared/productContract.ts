@@ -27,6 +27,9 @@ export const MAXIMUM_MAKER_LENGTH = 100;
 /** 備考の上限の文字数（issue #18）。 */
 export const MAXIMUM_NOTE_LENGTH = 1000;
 
+/** 場所の上限の文字数（issue #26）。 */
+export const MAXIMUM_LOCATION_LENGTH = 100;
+
 /**
  * 商品のステータス。画面では日本語で表示する。
  * - considering: 検討中（初期値）
@@ -84,6 +87,28 @@ export const productUrlSchema = z
   .max(MAXIMUM_URL_LENGTH, `URL は ${MAXIMUM_URL_LENGTH} 文字以内で入力してください。`)
   .refine(isHttpUrl, 'URL は http:// または https:// で始まるものを入力してください。');
 
+/** 存在する UTC の日時か（例: 2026-02-30T00:00:00.000Z は不可）を確かめる。 */
+function isExistingDateTime(value: string): boolean {
+  const time = Date.parse(value);
+  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === value.slice(0, 10);
+}
+
+/**
+ * 開催日時・終了日時（UTC の ISO 8601。例: 2026-11-20T09:00:00.000Z。PR #30 のレビュー）。
+ * 画面では日本時間で分まで入力し、UTC にして送る。保存する形を揃えるため、ミリ秒まである形（toISOString）にする。
+ * @param label 誤りの文言に使う項目の名前（開催日時・終了日時）
+ */
+function createEventDateTimeSchema(label: string) {
+  const message = `${label}は「2026-11-20T09:00:00.000Z」の形式（UTC）で送ってください。`;
+  return z
+    .iso.datetime({ message })
+    .refine(isExistingDateTime, message)
+    .transform((value) => new Date(value).toISOString());
+}
+
+/** 終了日時が開催日時より前の場合の文言（同じ時刻はよい）。 */
+export const EVENT_END_BEFORE_START_MESSAGE = '終了日時は開催日時以降にしてください。';
+
 /**
  * 商品の入力（登録・編集）のスキーマ。
  * 必須は商品名と発売月。ステータスの既定は検討中、キャンセル可否の既定は不可、任意の項目の既定は未入力（null）。
@@ -119,7 +144,28 @@ export const productInputSchema = z.object({
     .max(MAXIMUM_NOTE_LENGTH, `備考は ${MAXIMUM_NOTE_LENGTH.toLocaleString('ja-JP')} 文字以内で入力してください。`)
     .nullable()
     .default(null),
-});
+  /** 場所（イベントの会場など。前後の空白を除いて 1〜100 文字。未入力は null。issue #26）。 */
+  location: z
+    .string()
+    .trim()
+    .min(1, '場所を入力しない場合は空にしてください。')
+    .max(MAXIMUM_LOCATION_LENGTH, `場所は ${MAXIMUM_LOCATION_LENGTH} 文字以内で入力してください。`)
+    .nullable()
+    .default(null),
+  /** 手数料（円。issue #26）。 */
+  handlingFee: yenAmountSchema.nullable().default(null),
+  /** 交通費（見込）（円。issue #26）。 */
+  travelExpense: yenAmountSchema.nullable().default(null),
+  /** その他費用（円。名前はカテゴリーごとに変えられる。issue #26・#27）。 */
+  otherExpense: yenAmountSchema.nullable().default(null),
+  /** 開催日時（UTC）。未入力は null。 */
+  eventStartsAt: createEventDateTimeSchema('開催日時').nullable().default(null),
+  /** 終了日時（UTC）。未入力は null。開催日時より前は不可（同じ時刻はよい）。 */
+  eventEndsAt: createEventDateTimeSchema('終了日時').nullable().default(null),
+}).refine(
+  (input) => input.eventStartsAt === null || input.eventEndsAt === null || input.eventEndsAt >= input.eventStartsAt,
+  { message: EVENT_END_BEFORE_START_MESSAGE, path: ['eventEndsAt'] },
+);
 
 /** 検証済みの商品の入力。 */
 export type ProductInput = z.infer<typeof productInputSchema>;
@@ -141,6 +187,12 @@ export const productSchema = z.object({
   categoryName: z.string().nullable(),
   maker: z.string().nullable(),
   note: z.string().nullable(),
+  location: z.string().nullable(),
+  handlingFee: z.number().int().nullable(),
+  travelExpense: z.number().int().nullable(),
+  otherExpense: z.number().int().nullable(),
+  eventStartsAt: z.string().nullable(),
+  eventEndsAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

@@ -15,7 +15,12 @@ import {
   type ProductListItem,
   type ProductResponse,
 } from '../shared/productContract.ts';
-import { categoryListResponseSchema, categorySchema, type CategoryResponse } from '../shared/categoryContract.ts';
+import {
+  categoryListResponseSchema,
+  categorySchema,
+  type CategoryFieldSettingsChange,
+  type CategoryResponse,
+} from '../shared/categoryContract.ts';
 import { authenticationStatusSchema, type AuthenticationStatus } from '../shared/authenticationContract.ts';
 
 /** API の呼び出しの失敗。サーバーが入力の誤りを返した場合は fieldErrors に項目ごとの文言が入る。 */
@@ -147,6 +152,14 @@ export async function addUndefinedCategoryToDefinition(categoryId: string): Prom
  */
 export async function reassignUndefinedCategoryProducts(categoryId: string, moveToCategoryId: string | null): Promise<void> {
   await sendApiRequest('POST', buildCategoryPath(categoryId, '/reassign-products'), { moveToCategoryId });
+}
+
+/**
+ * カテゴリーの入力項目と「その他費用」の名前のうち、指定したものだけを変える（issue #27）。
+ * @param changes 変える項目（fields は変える項目だけ。otherExpenseLabel が null なら「その他費用」に戻す）
+ */
+export async function updateCategoryFieldSettings(categoryId: string, changes: CategoryFieldSettingsChange): Promise<CategoryResponse> {
+  return categorySchema.parse(await sendApiRequest('PATCH', buildCategoryPath(categoryId, '/field-settings'), changes));
 }
 
 /** 認証の状態を取得する（issue #11）。 */

@@ -8,6 +8,9 @@
  *  - メーカー（登録済みのメーカーを入力の候補に出す）と複数行の備考を入力できる（issue #18）
  *  - カテゴリーを定義の並び順から選ぶ。定義にないカテゴリーは「名前（定義にない）」で示し、
  *    定義を読めない場合は変更できなくする（issue #10）
+ *  - 場所・手数料・交通費（見込）・その他費用（issue #26）と、開催日時・終了日時（日本時間で分まで入力し、UTC で送る。PR #30 のレビュー）を入力できる
+ *  - カテゴリーごとに出し入れする項目は、選んでいるカテゴリーで有効な項目と、開いた時点で値が保存されている項目だけを表示し、
+ *    表示していない項目は未入力として送る。その他費用はカテゴリーの名前で示す（issue #27）
  *  - 削除は確認のうえで行う（元に戻せない）
  *  - アーカイブされた商品の編集では、発売月を変更できなくし、「リストに戻す」ボタンを表示する（issue #9）
  *  - 追加では、保存ボタンの横のプルダウンで保存の方法（「保存」「保存して続けて追加」）を選べる。選んだ方法はモーダルを
@@ -23,8 +26,14 @@ import {
   type ProductStatus,
 } from '../../shared/productContract.ts';
 import { ApiRequestError, createProduct, deleteProduct, updateProduct } from '../productApiClient.ts';
-import type { CategoryResponse } from '../../shared/categoryContract.ts';
-import { getStatusLabel } from '../productDisplay.ts';
+import type { CategoryControlledField, CategoryResponse } from '../../shared/categoryContract.ts';
+import {
+  convertJapanDateTimeInputToUtc,
+  determineVisibleCategoryFields,
+  formatUtcAsJapanDateTimeInput,
+  getStatusLabel,
+  resolveOtherExpenseLabel,
+} from '../productDisplay.ts';
 import { formatUndefinedCategoryLabel } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 
@@ -45,7 +54,8 @@ export type ProductEditorDialogProps = {
   readonly onRestoreRequested?: () => void;
   /**
    * 追加の場合に渡すと、保存ボタンの横に保存の方法のプルダウンを表示する。「保存して続けて追加」で保存したときに呼ぶ（モーダルは閉じない）。
-   * 次の入力では、商品名・金額・送料・URL を空に戻し、発売月・ステータス・キャンセル可・受注期限を残す。
+   * 次の入力では、商品名・金額・送料・URL・メーカー・備考・場所・費用・開催日時・終了日時を空に戻し、
+   * 発売月・ステータス・キャンセル可・受注期限・カテゴリーを残す。
    */
   readonly onSavedAndContinued?: () => void;
   /** メーカーの入力の候補（登録済みの商品のメーカー。issue #18）。 */
@@ -79,12 +89,36 @@ type FormValues = {
   note: string;
   /** カテゴリーの ID。未設定は空文字。 */
   categoryId: string;
+  location: string;
+  handlingFee: string;
+  travelExpense: string;
+  otherExpense: string;
+  /** 開催日時（日本時間の日時の入力欄の値。例: 2026-11-20T18:00）。 */
+  eventStartsAt: string;
+  /** 終了日時（日本時間の日時の入力欄の値）。 */
+  eventEndsAt: string;
 };
+
+/** 「保存して続けて追加」で空に戻す項目の値。 */
+const CLEARED_FOR_NEXT_PRODUCT = {
+  name: '',
+  price: '',
+  shippingFee: '',
+  url: '',
+  maker: '',
+  note: '',
+  location: '',
+  handlingFee: '',
+  travelExpense: '',
+  otherExpense: '',
+  eventStartsAt: '',
+  eventEndsAt: '',
+} as const satisfies Partial<FormValues>;
 
 /** 用途に応じた入力欄の初期値を作る。 */
 function createInitialValues(mode: ProductEditorMode): FormValues {
   if (mode.kind === 'create') {
-    return { name: '', releaseMonth: mode.defaultReleaseMonth, status: 'considering', cancelable: false, price: '', shippingFee: '', orderDeadline: '', url: '', maker: '', note: '', categoryId: '' };
+    return { ...CLEARED_FOR_NEXT_PRODUCT, releaseMonth: mode.defaultReleaseMonth, status: 'considering', cancelable: false, orderDeadline: '', categoryId: '' };
   }
   const { product } = mode;
   return {
@@ -99,6 +133,39 @@ function createInitialValues(mode: ProductEditorMode): FormValues {
     maker: product.maker ?? '',
     categoryId: product.categoryId ?? '',
     note: product.note ?? '',
+    location: product.location ?? '',
+    handlingFee: product.handlingFee === null ? '' : String(product.handlingFee),
+    travelExpense: product.travelExpense === null ? '' : String(product.travelExpense),
+    otherExpense: product.otherExpense === null ? '' : String(product.otherExpense),
+    eventStartsAt: formatUtcAsJapanDateTimeInput(product.eventStartsAt),
+    eventEndsAt: formatUtcAsJapanDateTimeInput(product.eventEndsAt),
+  };
+}
+
+/**
+ * 入力欄の値を、送信する入力にする。表示していない項目は未入力（キャンセル可否は不可）にする（issue #27）。
+ * @param visibleFields 表示している、出し入れする項目
+ */
+function convertToProductInput(values: FormValues, visibleFields: ReadonlySet<CategoryControlledField>): Record<string, unknown> {
+  const whenVisible = <Value,>(field: CategoryControlledField, value: Value): Value | null => (visibleFields.has(field) ? value : null);
+  return {
+    name: values.name,
+    releaseMonth: values.releaseMonth,
+    status: values.status,
+    cancelable: visibleFields.has('cancelable') && values.cancelable,
+    price: convertToNumberOrNull(values.price),
+    shippingFee: whenVisible('shippingFee', convertToNumberOrNull(values.shippingFee)),
+    orderDeadline: whenVisible('orderDeadline', convertToTextOrNull(values.orderDeadline)),
+    url: convertToTextOrNull(values.url),
+    maker: whenVisible('maker', convertToTextOrNull(values.maker)),
+    note: convertToTextOrNull(values.note),
+    categoryId: values.categoryId === '' ? null : values.categoryId,
+    location: whenVisible('location', convertToTextOrNull(values.location)),
+    handlingFee: whenVisible('handlingFee', convertToNumberOrNull(values.handlingFee)),
+    travelExpense: whenVisible('travelExpense', convertToNumberOrNull(values.travelExpense)),
+    otherExpense: whenVisible('otherExpense', convertToNumberOrNull(values.otherExpense)),
+    eventStartsAt: whenVisible('eventPeriod', convertJapanDateTimeInputToUtc(values.eventStartsAt)),
+    eventEndsAt: whenVisible('eventPeriod', convertJapanDateTimeInputToUtc(values.eventEndsAt)),
   };
 }
 
@@ -153,6 +220,9 @@ export function ProductEditorDialog({
   const title = mode.kind === 'create' ? '商品を追加' : '商品を編集';
   const isArchived = mode.kind === 'edit' && onRestoreRequested !== undefined;
   const canChooseSaveMethod = mode.kind === 'create' && onSavedAndContinued !== undefined;
+  const selectedCategoryId = values.categoryId === '' ? null : values.categoryId;
+  const visibleFields = determineVisibleCategoryFields(categories, selectedCategoryId, mode.kind === 'edit' ? mode.product : undefined);
+  const otherExpenseLabel = resolveOtherExpenseLabel(categories, selectedCategoryId);
 
   useEffect(() => {
     nameInputRef.current?.focus();
@@ -165,7 +235,7 @@ export function ProductEditorDialog({
 
   /** 「保存して続けて追加」で保存した後、次の商品の入力に備える。 */
   const prepareNextProduct = (savedName: string) => {
-    setValues((current) => ({ ...current, name: '', price: '', shippingFee: '', url: '', maker: '', note: '' }));
+    setValues((current) => ({ ...current, ...CLEARED_FOR_NEXT_PRODUCT }));
     setSavedNotice(SCREEN_MESSAGES.productAddedAndContinue(savedName));
     setIsSubmitting(false);
     nameInputRef.current?.focus();
@@ -179,19 +249,7 @@ export function ProductEditorDialog({
   const saveProduct = async (continuesAdding: boolean) => {
     setIsSaveMenuOpen(false);
     setSavedNotice(null);
-    const parsed = productInputSchema.safeParse({
-      name: values.name,
-      releaseMonth: values.releaseMonth,
-      status: values.status,
-      cancelable: values.cancelable,
-      price: convertToNumberOrNull(values.price),
-      shippingFee: convertToNumberOrNull(values.shippingFee),
-      orderDeadline: convertToTextOrNull(values.orderDeadline),
-      url: convertToTextOrNull(values.url),
-      maker: convertToTextOrNull(values.maker),
-      note: convertToTextOrNull(values.note),
-      categoryId: values.categoryId === '' ? null : values.categoryId,
-    });
+    const parsed = productInputSchema.safeParse(convertToProductInput(values, visibleFields));
     if (!parsed.success) {
       setFieldErrors(collectFieldErrors(parsed.error));
       return;
@@ -259,6 +317,41 @@ export function ProductEditorDialog({
     );
   const describedBy = (fieldName: string) => (fieldErrors[fieldName] === undefined ? undefined : `${fieldId(fieldName)}-error`);
 
+  /** 円の金額の入力欄（送料・手数料・交通費・その他費用）を描画する。 */
+  const renderYenField = (fieldName: 'shippingFee' | 'handlingFee' | 'travelExpense' | 'otherExpense', label: string) => (
+    <div className="field">
+      <label htmlFor={fieldId(fieldName)}>{label}</label>
+      <input
+        id={fieldId(fieldName)}
+        type="number"
+        inputMode="numeric"
+        min={0}
+        step={1}
+        value={values[fieldName]}
+        aria-invalid={fieldErrors[fieldName] !== undefined}
+        aria-describedby={describedBy(fieldName)}
+        onChange={(event) => updateValue(fieldName, event.target.value)}
+      />
+      {renderFieldError(fieldName)}
+    </div>
+  );
+
+  /** 日本時間の日時（分まで）の入力欄（開催日時・終了日時）を描画する。 */
+  const renderDateTimeField = (fieldName: 'eventStartsAt' | 'eventEndsAt', label: string) => (
+    <div className="field">
+      <label htmlFor={fieldId(fieldName)}>{label}</label>
+      <input
+        id={fieldId(fieldName)}
+        type="datetime-local"
+        value={values[fieldName]}
+        aria-invalid={fieldErrors[fieldName] !== undefined}
+        aria-describedby={describedBy(fieldName)}
+        onChange={(event) => updateValue(fieldName, event.target.value)}
+      />
+      {renderFieldError(fieldName)}
+    </div>
+  );
+
   return (
     <div className="dialog-backdrop">
       <div
@@ -303,24 +396,26 @@ export function ProductEditorDialog({
               />
               {renderFieldError('name')}
             </div>
-            <div className="field">
-              <label htmlFor={fieldId('maker')}>メーカー</label>
-              <input
-                id={fieldId('maker')}
-                list={fieldId('maker-suggestions')}
-                autoComplete="off"
-                value={values.maker}
-                aria-invalid={fieldErrors.maker !== undefined}
-                aria-describedby={describedBy('maker')}
-                onChange={(event) => updateValue('maker', event.target.value)}
-              />
-              <datalist id={fieldId('maker-suggestions')}>
-                {makerSuggestions.map((maker) => (
-                  <option key={maker} value={maker} />
-                ))}
-              </datalist>
-              {renderFieldError('maker')}
-            </div>
+            {visibleFields.has('maker') && (
+              <div className="field">
+                <label htmlFor={fieldId('maker')}>メーカー</label>
+                <input
+                  id={fieldId('maker')}
+                  list={fieldId('maker-suggestions')}
+                  autoComplete="off"
+                  value={values.maker}
+                  aria-invalid={fieldErrors.maker !== undefined}
+                  aria-describedby={describedBy('maker')}
+                  onChange={(event) => updateValue('maker', event.target.value)}
+                />
+                <datalist id={fieldId('maker-suggestions')}>
+                  {makerSuggestions.map((maker) => (
+                    <option key={maker} value={maker} />
+                  ))}
+                </datalist>
+                {renderFieldError('maker')}
+              </div>
+            )}
             <div className="field">
               <label htmlFor={fieldId('categoryId')}>カテゴリー</label>
               <select
@@ -374,15 +469,17 @@ export function ProductEditorDialog({
                 </select>
               </div>
             </div>
-            <div className="field-check">
-              <input
-                id={fieldId('cancelable')}
-                type="checkbox"
-                checked={values.cancelable}
-                onChange={(event) => updateValue('cancelable', event.target.checked)}
-              />
-              <label htmlFor={fieldId('cancelable')}>キャンセル可</label>
-            </div>
+            {visibleFields.has('cancelable') && (
+              <div className="field-check">
+                <input
+                  id={fieldId('cancelable')}
+                  type="checkbox"
+                  checked={values.cancelable}
+                  onChange={(event) => updateValue('cancelable', event.target.checked)}
+                />
+                <label htmlFor={fieldId('cancelable')}>キャンセル可</label>
+              </div>
+            )}
             <div className="field-row field-row--keep-columns">
               <div className="field">
                 <label htmlFor={fieldId('price')}>金額（税込）</label>
@@ -399,34 +496,48 @@ export function ProductEditorDialog({
                 />
                 {renderFieldError('price')}
               </div>
-              <div className="field">
-                <label htmlFor={fieldId('shippingFee')}>送料（税込）</label>
-                <input
-                  id={fieldId('shippingFee')}
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  step={1}
-                  value={values.shippingFee}
-                  aria-invalid={fieldErrors.shippingFee !== undefined}
-                  aria-describedby={describedBy('shippingFee')}
-                  onChange={(event) => updateValue('shippingFee', event.target.value)}
-                />
-                {renderFieldError('shippingFee')}
+              {visibleFields.has('shippingFee') && renderYenField('shippingFee', '送料（税込）')}
+            </div>
+            {(visibleFields.has('handlingFee') || visibleFields.has('travelExpense')) && (
+              <div className="field-row field-row--keep-columns">
+                {visibleFields.has('handlingFee') && renderYenField('handlingFee', '手数料')}
+                {visibleFields.has('travelExpense') && renderYenField('travelExpense', '交通費（見込）')}
               </div>
-            </div>
-            <div className="field">
-              <label htmlFor={fieldId('orderDeadline')}>受注期限</label>
-              <input
-                id={fieldId('orderDeadline')}
-                type="date"
-                value={values.orderDeadline}
-                aria-invalid={fieldErrors.orderDeadline !== undefined}
-                aria-describedby={describedBy('orderDeadline')}
-                onChange={(event) => updateValue('orderDeadline', event.target.value)}
-              />
-              {renderFieldError('orderDeadline')}
-            </div>
+            )}
+            {visibleFields.has('otherExpense') && renderYenField('otherExpense', otherExpenseLabel)}
+            {visibleFields.has('eventPeriod') && (
+              <div className="field-row">
+                {renderDateTimeField('eventStartsAt', '開催日時')}
+                {renderDateTimeField('eventEndsAt', '終了日時')}
+              </div>
+            )}
+            {visibleFields.has('location') && (
+              <div className="field">
+                <label htmlFor={fieldId('location')}>場所</label>
+                <input
+                  id={fieldId('location')}
+                  value={values.location}
+                  aria-invalid={fieldErrors.location !== undefined}
+                  aria-describedby={describedBy('location')}
+                  onChange={(event) => updateValue('location', event.target.value)}
+                />
+                {renderFieldError('location')}
+              </div>
+            )}
+            {visibleFields.has('orderDeadline') && (
+              <div className="field">
+                <label htmlFor={fieldId('orderDeadline')}>受注期限</label>
+                <input
+                  id={fieldId('orderDeadline')}
+                  type="date"
+                  value={values.orderDeadline}
+                  aria-invalid={fieldErrors.orderDeadline !== undefined}
+                  aria-describedby={describedBy('orderDeadline')}
+                  onChange={(event) => updateValue('orderDeadline', event.target.value)}
+                />
+                {renderFieldError('orderDeadline')}
+              </div>
+            )}
             <div className="field">
               <label htmlFor={fieldId('url')}>購入先の URL</label>
               <input

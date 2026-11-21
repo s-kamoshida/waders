@@ -1,7 +1,7 @@
 {
   "version": 1,
   "categories": [
-    { "name": "スケールフィギュア" },
-    { "name": "可動フィギュア" }
+    { "name": "スケールフィギュア", "fields": ["shippingFee", "maker", "orderDeadline", "cancelable"] },
+    { "name": "可動フィギュア", "fields": ["shippingFee", "maker", "orderDeadline", "cancelable"] }
   ]
 }

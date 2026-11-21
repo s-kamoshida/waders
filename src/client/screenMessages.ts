@@ -38,6 +38,9 @@ export const SCREEN_MESSAGES = {
     `「${categoryName}」は ${productCount} 件の商品が使っています。商品をどうしますか？`,
   undefinedCategoryHeading: '定義にないカテゴリー',
   undefinedCategoryNote: 'カテゴリーの定義にないカテゴリーを使っている商品があります。どうするかを選んでください。',
+  /** カテゴリーごとの入力項目の説明（SCR-07。issue #27）。 */
+  categoryFieldSettingsNote:
+    'チェックした項目を、このカテゴリーの商品の追加・編集で入力できます。チェックを外しても、値が保存されている商品では表示します。',
   /** ドラッグアンドドロップで発売月を移動した（issue #13）。monthLabel は「2027/02」の形。 */
   productMoved: (monthLabel: string) => `発売月を ${monthLabel} に移動しました`,
   /** 移動を元に戻した。 */

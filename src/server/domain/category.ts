@@ -5,6 +5,7 @@
  * 責務: カテゴリー（ID と名前）と、カテゴリーに関する業務ルールのエラーを定義する（要件「商品カテゴリー」、issue #10）。
  * カテゴリーの定義の正本は、データのフォルダにある JSON ファイル（infrastructure/categoryDefinitionFile.ts）。
  */
+import type { CategoryControlledField } from '../../shared/categoryContract.ts';
 
 /** カテゴリーの ID。定義のファイルに書かれた文字列（1〜100 文字）。名前と取り違えないようブランド型にする。 */
 export type CategoryId = string & { readonly brand: 'CategoryId' };
@@ -13,6 +14,10 @@ export type CategoryId = string & { readonly brand: 'CategoryId' };
 export type Category = {
   readonly id: CategoryId;
   readonly name: string;
+  /** 有効な入力項目（決まった並び。issue #27）。定義で省略されていれば既定（DEFAULT_ENABLED_FIELDS）。 */
+  readonly fields: readonly CategoryControlledField[];
+  /** 「その他費用」の名前。定義で省略されていれば「その他費用」（issue #27）。 */
+  readonly otherExpenseLabel: string;
 };
 
 /**

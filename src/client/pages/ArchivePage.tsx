@@ -96,6 +96,7 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
           formatSummary={formatArchiveSummary}
           today={today}
           onSelect={(selected) => setOpenDialog({ kind: 'edit', product: selected })}
+          categories={categoryFilter.categories ?? null}
         />
       )}
 

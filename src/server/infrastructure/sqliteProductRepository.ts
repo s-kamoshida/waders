@@ -18,6 +18,7 @@ import { MAXIMUM_LOGIN_ID_LENGTH } from '../../shared/authenticationContract.ts'
 import { MAXIMUM_CATEGORY_ID_LENGTH } from '../../shared/categoryContract.ts';
 import {
   MAXIMUM_CATEGORY_NAME_LENGTH,
+  MAXIMUM_LOCATION_LENGTH,
   MAXIMUM_MAKER_LENGTH,
   MAXIMUM_NOTE_LENGTH,
   MAXIMUM_PRICE_YEN,
@@ -34,6 +35,9 @@ import type {
 } from '../domain/product.ts';
 
 const statusList = PRODUCT_STATUSES.map((status) => `'${status}'`).join(', ');
+
+/** UTC の ISO 8601 の日時（toISOString の形。例: 2026-11-20T09:00:00.000Z）にあてはまる GLOB の型。 */
+const utcDateTimePattern = '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9].[0-9][0-9][0-9]Z';
 
 /**
  * スキーマの移行。**既存の要素は絶対に書き換えず、変更は末尾に要素を追加する**（利用者の既存の DB が壊れるため）。
@@ -118,6 +122,19 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
     last_used_at TEXT NOT NULL
   ) STRICT;
   `,
+  // 版数 6: 場所・手数料・交通費（見込）・その他費用（issue #26）と、開催日時・終了日時（PR #30 のレビュー）。
+  // 既存の商品は未入力（NULL）になる。日時は UTC の ISO 8601（toISOString の形）で、終了日時は開催日時より前にしない
+  `
+  ALTER TABLE products ADD COLUMN location TEXT CHECK (location IS NULL OR length(location) BETWEEN 1 AND ${MAXIMUM_LOCATION_LENGTH});
+  ALTER TABLE products ADD COLUMN handling_fee INTEGER CHECK (handling_fee IS NULL OR handling_fee BETWEEN 0 AND ${MAXIMUM_PRICE_YEN});
+  ALTER TABLE products ADD COLUMN travel_expense INTEGER CHECK (travel_expense IS NULL OR travel_expense BETWEEN 0 AND ${MAXIMUM_PRICE_YEN});
+  ALTER TABLE products ADD COLUMN other_expense INTEGER CHECK (other_expense IS NULL OR other_expense BETWEEN 0 AND ${MAXIMUM_PRICE_YEN});
+  ALTER TABLE products ADD COLUMN event_starts_at TEXT CHECK (event_starts_at IS NULL OR event_starts_at GLOB '${utcDateTimePattern}');
+  ALTER TABLE products ADD COLUMN event_ends_at TEXT CHECK (
+    event_ends_at IS NULL
+    OR (event_ends_at GLOB '${utcDateTimePattern}' AND (event_starts_at IS NULL OR event_ends_at >= event_starts_at))
+  );
+  `,
 ];
 
 /** 最新のスキーマの版数。 */
@@ -195,6 +212,12 @@ const productRowSchema = z.object({
   category_id: z.string().nullable(),
   maker: z.string().nullable(),
   note: z.string().nullable(),
+  location: z.string().nullable(),
+  handling_fee: z.number().int().nullable(),
+  travel_expense: z.number().int().nullable(),
+  other_expense: z.number().int().nullable(),
+  event_starts_at: z.string().nullable(),
+  event_ends_at: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -224,6 +247,12 @@ function convertRowToProduct(row: unknown): Product {
     categoryName: parsedRow.category,
     maker: parsedRow.maker,
     note: parsedRow.note,
+    location: parsedRow.location,
+    handlingFee: parsedRow.handling_fee,
+    travelExpense: parsedRow.travel_expense,
+    otherExpense: parsedRow.other_expense,
+    eventStartsAt: parsedRow.event_starts_at,
+    eventEndsAt: parsedRow.event_ends_at,
     createdAt: parsedRow.created_at,
     updatedAt: parsedRow.updated_at,
   };
@@ -320,8 +349,9 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
       runInTransaction(database, () => {
         database
           .prepare(
-            `INSERT INTO products (id, name, release_month, status, cancelable, price, shipping_fee, order_deadline, url, category_id, category, maker, note, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO products (id, name, release_month, status, cancelable, price, shipping_fee, order_deadline, url, category_id, category, maker, note,
+                                   location, handling_fee, travel_expense, other_expense, event_starts_at, event_ends_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             product.id,
@@ -337,6 +367,12 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
             product.categoryName,
             product.maker,
             product.note,
+            product.location,
+            product.handlingFee,
+            product.travelExpense,
+            product.otherExpense,
+            product.eventStartsAt,
+            product.eventEndsAt,
             product.createdAt,
             product.updatedAt,
           );
@@ -360,7 +396,8 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
           .prepare(
             `UPDATE products
              SET name = ?, release_month = ?, status = ?, cancelable = ?, price = ?, shipping_fee = ?,
-                 order_deadline = ?, url = ?, category_id = ?, category = ?, maker = ?, note = ?, updated_at = ?
+                 order_deadline = ?, url = ?, category_id = ?, category = ?, maker = ?, note = ?,
+                 location = ?, handling_fee = ?, travel_expense = ?, other_expense = ?, event_starts_at = ?, event_ends_at = ?, updated_at = ?
              WHERE id = ?`,
           )
           .run(
@@ -376,6 +413,12 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
             product.categoryName,
             product.maker,
             product.note,
+            product.location,
+            product.handlingFee,
+            product.travelExpense,
+            product.otherExpense,
+            product.eventStartsAt,
+            product.eventEndsAt,
             product.updatedAt,
             product.id,
           );

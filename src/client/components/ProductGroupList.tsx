@@ -6,8 +6,10 @@
  * 見出しの集計の表記（見込みか実績か）と、月の見出しの追加ボタンを置くか（リストだけ。issue #16）、
  * ドラッグアンドドロップで発売月を移動できるか（リストだけ。issue #13）は呼び出し側が決める。
  * 商品は、スマートフォンの幅（横幅 600px 以下）では 1 行に 1 件のリスト形式、それより広い幅ではカードのグリッドで並べる（issue #15）。
+ * カードにはカテゴリーの定義と並べ方を渡す（リスト形式では開催日時の代わりに開催期間を示す。PR #30 のレビュー）。
  */
 import { useCallback, useState, useSyncExternalStore } from 'react';
+import type { CategoryResponse } from '../../shared/categoryContract.ts';
 import type { ProductResponse } from '../../shared/productContract.ts';
 import type { GroupSummary, YearGroup } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
@@ -56,10 +58,20 @@ export type ProductGroupListProps = {
   readonly onAddToMonth?: (month: string) => void;
   /** 渡すと、商品をドラッグアンドドロップで別の月に移動できる。別の月に落としたときに呼ぶ（issue #13）。 */
   readonly onMoveProduct?: (product: ProductResponse, month: string) => void;
+  /** カテゴリーの定義（カードの「送料無料」と「その他費用」の名前に使う。issue #27）。読めない・読み込み中は null。 */
+  readonly categories?: readonly CategoryResponse[] | null;
 };
 
 /** 年・月のグループを表示する。 */
-export function ProductGroupList({ yearGroups, formatSummary, today, onSelect, onAddToMonth, onMoveProduct }: ProductGroupListProps) {
+export function ProductGroupList({
+  yearGroups,
+  formatSummary,
+  today,
+  onSelect,
+  onAddToMonth,
+  onMoveProduct,
+  categories = null,
+}: ProductGroupListProps) {
   const [collapsedYearKeys, setCollapsedYearKeys] = useState<ReadonlySet<string>>(new Set());
   const [collapsedMonths, setCollapsedMonths] = useState<ReadonlySet<string>>(new Set());
   const moveProduct = useCallback(
@@ -68,7 +80,8 @@ export function ProductGroupList({ yearGroups, formatSummary, today, onSelect, o
   );
   const dragAndDrop = useProductDragAndDrop(moveProduct);
   const canMove = onMoveProduct !== undefined;
-  const productContainerClassName = useIsPhoneWidth() ? 'product-list' : 'product-grid';
+  const isPhoneWidth = useIsPhoneWidth();
+  const productContainerClassName = isPhoneWidth ? 'product-list' : 'product-grid';
 
   const groups = yearGroups.map((yearGroup) => {
     const isYearExpanded = !collapsedYearKeys.has(yearGroup.key);
@@ -129,6 +142,8 @@ export function ProductGroupList({ yearGroups, formatSummary, today, onSelect, o
                         onSelect={onSelect}
                         dragHandlers={canMove ? dragAndDrop.getCardHandlers(product) : undefined}
                         isGrabbed={dragAndDrop.grabbedProductId === product.id}
+                        categories={categories}
+                        layout={isPhoneWidth ? 'list' : 'grid'}
                       />
                     ))}
                   </div>
