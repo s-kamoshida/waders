@@ -122,8 +122,8 @@ describe('環境変数 WADERS_DATA_DIRECTORY がない場合', () => {
 });
 
 describe('認証の有効・無効（issue #11）', () => {
-  it('ひな形から設定ファイルを作成した場合、認証を有効にする', () => {
-    expect(loadWithEnvironment().authenticationEnabled).toBe(true);
+  it('ひな形から設定ファイルを作成した場合、認証を無効にする（issue #33）', () => {
+    expect(loadWithEnvironment().authenticationEnabled).toBe(false);
   });
 
   it('設定ファイルで authenticationEnabled を false にした場合、認証を無効にする', () => {
