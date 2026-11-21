@@ -58,6 +58,12 @@ describe('POST /api/products', () => {
       categoryName: null,
       maker: null,
       note: null,
+      location: null,
+      handlingFee: null,
+      travelExpense: null,
+      otherExpense: null,
+      eventStartsAt: null,
+      eventEndsAt: null,
       createdAt: TEST_CURRENT_TIME.toISOString(),
       updatedAt: TEST_CURRENT_TIME.toISOString(),
     });
@@ -127,6 +133,76 @@ describe('メーカーと備考（issue #18）', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error.fieldErrors).toEqual({ [fieldName]: message });
+    expect(harness.productService.listProducts()).toEqual([]);
+  });
+});
+
+describe('場所と費用（issue #26）', () => {
+  const ticketInput = { ...validInput, location: ' 東京ドーム ', handlingFee: 330, travelExpense: 2000, otherExpense: 600 };
+
+  it('場所と費用を付けて登録した場合、場所の前後の空白を取り除いて保存し、一覧でも返す', async () => {
+    const product = await createProductThroughApi(ticketInput);
+
+    const expected = { location: '東京ドーム', handlingFee: 330, travelExpense: 2000, otherExpense: 600 };
+    expect(product).toMatchObject(expected);
+    const listResponse = await request(harness.application).get('/api/products').expect(200);
+    expect(listResponse.body.products[0]).toMatchObject(expected);
+  });
+
+  it('場所と費用を更新した場合、200 と更新した商品を返す（null で未入力に戻せる）', async () => {
+    const created = await createProductThroughApi(ticketInput);
+
+    const response = await request(harness.application)
+      .put(`/api/products/${created.id}`)
+      .send({ ...validInput, location: '日本武道館', handlingFee: null, travelExpense: 0, otherExpense: null })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ location: '日本武道館', handlingFee: null, travelExpense: 0, otherExpense: null });
+  });
+
+  it.each([
+    ['location', 'あ'.repeat(101), '場所は 100 文字以内で入力してください。'],
+    ['handlingFee', -1, '金額は 0 円以上で入力してください。'],
+    ['travelExpense', 10_000_000, '金額は 9,999,999 円以下で入力してください。'],
+    ['otherExpense', 1.5, '金額は整数で入力してください。'],
+  ])('%s が範囲外の場合、400 とその項目の文言を返し、登録しない', async (fieldName, value, message) => {
+    const response = await request(harness.application)
+      .post('/api/products')
+      .send({ ...validInput, [fieldName]: value });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.fieldErrors).toEqual({ [fieldName]: message });
+    expect(harness.productService.listProducts()).toEqual([]);
+  });
+
+  it('カテゴリーで有効でない項目やカテゴリー未設定の商品でも、API は値を受け付けて保存する（項目の出し入れは画面で行う。issue #27）', async () => {
+    const product = await createProductThroughApi({ ...ticketInput, shippingFee: 800, maker: 'メーカーA', categoryId: null });
+
+    expect(product).toMatchObject({ categoryId: null, shippingFee: 800, maker: 'メーカーA', location: '東京ドーム', handlingFee: 330 });
+  });
+});
+
+describe('開催日時と終了日時（PR #30 のレビュー）', () => {
+  it('開催日時と終了日時を付けて登録した場合、UTC の日時のまま保存し、一覧でも返す', async () => {
+    const product = await createProductThroughApi({
+      ...validInput,
+      eventStartsAt: '2026-12-20T09:00:00.000Z',
+      eventEndsAt: '2026-12-20T12:00:00.000Z',
+    });
+
+    const expected = { eventStartsAt: '2026-12-20T09:00:00.000Z', eventEndsAt: '2026-12-20T12:00:00.000Z' };
+    expect(product).toMatchObject(expected);
+    const listResponse = await request(harness.application).get('/api/products').expect(200);
+    expect(listResponse.body.products[0]).toMatchObject(expected);
+  });
+
+  it('終了日時が開催日時より前の場合、400 と終了日時の文言を返し、登録しない', async () => {
+    const response = await request(harness.application)
+      .post('/api/products')
+      .send({ ...validInput, eventStartsAt: '2026-12-20T09:00:00.000Z', eventEndsAt: '2026-12-20T08:00:00.000Z' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.fieldErrors).toEqual({ eventEndsAt: '終了日時は開催日時以降にしてください。' });
     expect(harness.productService.listProducts()).toEqual([]);
   });
 });

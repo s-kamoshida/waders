@@ -7,13 +7,25 @@
  *  - 読み込むたびに Zod で検証する（手で編集されるため）。誤りがあれば CategoryDefinitionError にし、ファイルは書き換えない
  *  - ID のないカテゴリーに ID を付けて書き戻す。書き込みは一時ファイルに書いてから置き換える（途中で壊れないようにする）
  *  - カテゴリーの追加・改名・削除（issue #10）。変更する時点の最新のファイルを読み直して変更し、手で書かれたほかの項目は残す
+ *  - カテゴリーごとの入力項目（fields）と「その他費用」の名前（otherExpenseLabel）の読み込みと変更（issue #27）。
+ *    どちらも省略でき、省略したカテゴリーは既定（既存の項目を有効、「その他費用」）とする。形式の版（version）は 1 のまま
  * ひな形は初回のコピー元にだけ使い、実行中に読み書きしない（CLAUDE.md「その他」）。
  */
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
-import { categoryIdSchema, categoryNameSchema } from '../../shared/categoryContract.ts';
+import {
+  DEFAULT_ENABLED_FIELDS,
+  DEFAULT_OTHER_EXPENSE_LABEL,
+  categoryControlledFieldSchema,
+  categoryIdSchema,
+  categoryNameSchema,
+  otherExpenseLabelSchema,
+  sortCategoryControlledFields,
+  type CategoryControlledField,
+  type CategoryFieldSettingsChange,
+} from '../../shared/categoryContract.ts';
 import {
   CategoryAlreadyDefinedError,
   CategoryDefinitionError,
@@ -28,11 +40,47 @@ export { CategoryDefinitionError } from '../domain/category.ts';
 /** リポジトリに含める定義のファイルのひな形の場所。 */
 export const CATEGORY_TEMPLATE_FILE_PATH = resolve(import.meta.dirname, '../../../config/categories.example.json');
 
-/** 定義のファイルの形式（version 1）。各カテゴリーの id は省略でき、省略されていればアプリが付ける。 */
+/**
+ * 定義のファイルの形式（version 1）。各カテゴリーの id は省略でき、省略されていればアプリが付ける。
+ * fields（有効な入力項目）と otherExpenseLabel（「その他費用」の名前）は省略でき、省略されていれば既定とする（issue #27）。
+ */
 const definitionFileSchema = z.object({
   version: z.literal(1),
-  categories: z.array(z.object({ id: categoryIdSchema.optional(), name: categoryNameSchema })),
+  categories: z.array(
+    z.object({
+      id: categoryIdSchema.optional(),
+      name: categoryNameSchema,
+      fields: z.array(categoryControlledFieldSchema).optional(),
+      otherExpenseLabel: otherExpenseLabelSchema.optional(),
+    }),
+  ),
 });
+
+/** 定義のファイルに書かれたカテゴリー（検証済み）。 */
+type DefinitionEntry = z.infer<typeof definitionFileSchema>['categories'][number];
+
+/** 検証済みの定義のカテゴリーと ID から、カテゴリー（項目の設定は既定で補う）を作る。 */
+function createCategory(categoryId: CategoryId, entry: Pick<DefinitionEntry, 'name' | 'fields' | 'otherExpenseLabel'>): Category {
+  return {
+    id: categoryId,
+    name: entry.name,
+    fields: sortCategoryControlledFields(entry.fields ?? DEFAULT_ENABLED_FIELDS),
+    otherExpenseLabel: entry.otherExpenseLabel ?? DEFAULT_OTHER_EXPENSE_LABEL,
+  };
+}
+
+/** 今の有効な項目に、変える項目（true で有効、false で無効）を反映する。 */
+function applyFieldChanges(
+  currentFields: readonly CategoryControlledField[],
+  changes: NonNullable<CategoryFieldSettingsChange['fields']>,
+): CategoryControlledField[] {
+  const enabledFields = new Set(currentFields);
+  for (const [field, isEnabled] of Object.entries(changes) as [CategoryControlledField, boolean | undefined][]) {
+    if (isEnabled === true) enabledFields.add(field);
+    if (isEnabled === false) enabledFields.delete(field);
+  }
+  return sortCategoryControlledFields(enabledFields);
+}
 
 /** 書き戻すときに、手で書かれたほかの項目を残すため、元の JSON のまま扱うカテゴリーの項目。 */
 type RawCategoryEntry = Record<string, unknown>;
@@ -68,6 +116,15 @@ export type CategoryDefinition = {
    * @throws {CategoryDefinitionError} 定義のファイルに誤りがある場合
    */
   deleteCategory(categoryId: string): void;
+  /**
+   * 最新の定義のカテゴリーの入力項目と「その他費用」の名前を変え、変更したカテゴリーを返す（issue #27）。
+   * 変える項目だけを反映し、ほかの項目・ほかのカテゴリー・手で書かれた内容は変えない。
+   * 項目を変えた場合は、有効な項目をすべて決まった並びで書く。名前に null を指定すると、名前をファイルから取り除く。
+   * @param changes 変える項目（検証済み）
+   * @throws {CategoryNotFoundError} カテゴリーが定義にない場合
+   * @throws {CategoryDefinitionError} 定義のファイルに誤りがある場合
+   */
+  updateCategoryFieldSettings(categoryId: string, changes: CategoryFieldSettingsChange): Category;
 };
 
 /** createCategoryDefinitionFile の引数。 */
@@ -165,11 +222,11 @@ export function createCategoryDefinitionFile(options: CategoryDefinitionFileOpti
     const usedIds = new Set(definition.categories.flatMap((category) => (category.id === undefined ? [] : [category.id])));
     let assignedCount = 0;
     const categories: Category[] = definition.categories.map((category, index) => {
-      if (category.id !== undefined) return { id: category.id as CategoryId, name: category.name };
+      if (category.id !== undefined) return createCategory(category.id as CategoryId, category);
       const categoryId = generateUniqueId(usedIds);
       raw.categories[index] = { id: categoryId, ...raw.categories[index] };
       assignedCount += 1;
-      return { id: categoryId, name: category.name };
+      return createCategory(categoryId, category);
     });
     return { raw, categories, usedIds, assignedCount };
   };
@@ -195,7 +252,7 @@ export function createCategoryDefinitionFile(options: CategoryDefinitionFileOpti
       const trimmedName = name.trim();
       if (categoryId !== undefined && usedIds.has(categoryId)) throw new CategoryAlreadyDefinedError(categoryId);
       if (categories.some((category) => category.name === trimmedName)) throw new CategoryNameDuplicateError(trimmedName);
-      const added: Category = { id: categoryId === undefined ? generateUniqueId(usedIds) : (categoryId as CategoryId), name: trimmedName };
+      const added = createCategory(categoryId === undefined ? generateUniqueId(usedIds) : (categoryId as CategoryId), { name: trimmedName });
       raw.categories.push({ id: added.id, name: added.name });
       writeDefinition(raw);
       return added;
@@ -205,13 +262,14 @@ export function createCategoryDefinitionFile(options: CategoryDefinitionFileOpti
       const { raw, categories } = loadWithIds();
       const trimmedName = name.trim();
       const index = categories.findIndex((category) => category.id === categoryId);
-      if (index === -1) throw new CategoryNotFoundError(categoryId);
+      const current = categories[index];
+      if (current === undefined) throw new CategoryNotFoundError(categoryId);
       if (categories.some((category) => category.id !== categoryId && category.name === trimmedName)) {
         throw new CategoryNameDuplicateError(trimmedName);
       }
       raw.categories[index] = { ...raw.categories[index], name: trimmedName };
       writeDefinition(raw);
-      return { id: categoryId as CategoryId, name: trimmedName };
+      return { ...current, name: trimmedName };
     },
 
     deleteCategory(categoryId) {
@@ -220,6 +278,28 @@ export function createCategoryDefinitionFile(options: CategoryDefinitionFileOpti
       if (index === -1) throw new CategoryNotFoundError(categoryId);
       raw.categories.splice(index, 1);
       writeDefinition(raw);
+    },
+
+    updateCategoryFieldSettings(categoryId, changes) {
+      const { raw, categories } = loadWithIds();
+      const index = categories.findIndex((category) => category.id === categoryId);
+      const current = categories[index];
+      if (current === undefined) throw new CategoryNotFoundError(categoryId);
+      const entry: RawCategoryEntry = { ...raw.categories[index] };
+      const fields = changes.fields === undefined ? current.fields : applyFieldChanges(current.fields, changes.fields);
+      if (changes.fields !== undefined) entry.fields = fields;
+      let otherExpenseLabel = current.otherExpenseLabel;
+      if (changes.otherExpenseLabel === null) {
+        delete entry.otherExpenseLabel;
+        otherExpenseLabel = DEFAULT_OTHER_EXPENSE_LABEL;
+      }
+      if (typeof changes.otherExpenseLabel === 'string') {
+        otherExpenseLabel = changes.otherExpenseLabel.trim();
+        entry.otherExpenseLabel = otherExpenseLabel;
+      }
+      raw.categories[index] = entry;
+      writeDefinition(raw);
+      return { ...current, fields, otherExpenseLabel };
     },
   };
 }

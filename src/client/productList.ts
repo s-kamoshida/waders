@@ -11,7 +11,10 @@ import { formatYen } from './productDisplay.ts';
 /** 年のまとめ方。calendar は暦年（1月〜12月）、fiscal は年度（4月〜翌3月）。 */
 export type YearMode = 'calendar' | 'fiscal';
 
-/** 見出しの集計。未購入を除いた個数と、金額と送料の合計（金額が未入力の商品は個数だけに含める）。 */
+/**
+ * 見出しの集計。未購入を除いた個数と、金額・送料・手数料・交通費（見込）・その他費用の合計
+ * （金額が未入力の商品は個数だけに含める。手数料などは issue #26）。
+ */
 export type GroupSummary = { readonly count: number; readonly totalYen: number };
 
 /** 月のグループ。 */
@@ -59,13 +62,17 @@ function listMonthsToShow(products: readonly ProductResponse[], currentMonth: st
   return months;
 }
 
+/** 商品の合計金額への寄与。金額が未入力なら 0（送料・手数料なども含めない）。 */
+function calculateProductTotalYen(product: ProductResponse): number {
+  if (product.price === null) return 0;
+  const additionalCosts = [product.shippingFee, product.handlingFee, product.travelExpense, product.otherExpense];
+  return additionalCosts.reduce<number>((total, cost) => total + (cost ?? 0), product.price);
+}
+
 /** 商品の見出しの集計を求める。 */
 function summarizeProducts(products: readonly ProductResponse[]): GroupSummary {
   const countedProducts = products.filter((product) => product.status !== 'unpurchased');
-  const totalYen = countedProducts.reduce(
-    (total, product) => (product.price === null ? total : total + product.price + (product.shippingFee ?? 0)),
-    0,
-  );
+  const totalYen = countedProducts.reduce((total, product) => total + calculateProductTotalYen(product), 0);
   return { count: countedProducts.length, totalYen };
 }
 
@@ -193,7 +200,7 @@ export function filterProductsByCategory<Item extends ProductResponse>(products:
  * 定義にないカテゴリーの商品があれば「名前（定義にない）」を重複なく加える。
  */
 export function buildCategoryFilterOptions(
-  categories: readonly CategoryResponse[],
+  categories: readonly Pick<CategoryResponse, 'id' | 'name'>[],
   products: readonly ProductResponse[],
 ): CategoryFilterOption[] {
   const options: CategoryFilterOption[] = categories.map((category) => ({ id: category.id, label: category.name }));
@@ -220,10 +227,10 @@ export type CategoryUsage = { readonly id: string; readonly name: string; readon
  * @returns definedCategories は定義の並び順の各カテゴリーと商品の数（使っていなければ 0）。
  *   undefinedCategories は定義にないカテゴリー（最初に現れた商品の順、名前は商品に最後に保存した名前）と商品の数
  */
-export function summarizeCategoryUsage(
-  categories: readonly CategoryResponse[],
+export function summarizeCategoryUsage<Category extends Pick<CategoryResponse, 'id' | 'name'>>(
+  categories: readonly Category[],
   products: readonly ProductResponse[],
-): { definedCategories: CategoryUsage[]; undefinedCategories: CategoryUsage[] } {
+): { definedCategories: (Category & { readonly productCount: number })[]; undefinedCategories: CategoryUsage[] } {
   const productCounts = new Map<string, number>();
   const undefinedCategoryNames = new Map<string, string>();
   const definedIds = new Set(categories.map((category) => category.id));

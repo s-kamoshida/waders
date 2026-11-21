@@ -1,14 +1,25 @@
 /**
- * 商品の表示の補助（金額・送料・購入先・ステータスの表記、受注期限の警告、日本時間の日付）。
+ * 商品の表示の補助（金額・送料・購入先・ステータスの表記、受注期限の警告、日本時間の日付、開催日時と開催期間、
+ * カテゴリーごとに表示する入力項目と「その他費用」の名前）。
  *
  * 所属: クライアント
- * 責務: 商品の値を画面の表記に変える純粋な関数をまとめる（要件「主な機能」「商品の表示」）。
+ * 責務: 商品の値を画面の表記に変える純粋な関数をまとめる（要件「主な機能」「商品の表示」「カテゴリーごとの入力項目」）。
  */
-import type { ProductStatus } from '../shared/productContract.ts';
+import {
+  CATEGORY_CONTROLLED_FIELDS,
+  DEFAULT_ENABLED_FIELDS,
+  DEFAULT_OTHER_EXPENSE_LABEL,
+  type CategoryControlledField,
+  type CategoryResponse,
+} from '../shared/categoryContract.ts';
+import type { ProductResponse, ProductStatus } from '../shared/productContract.ts';
 
 export { formatDateInJapan, formatMonthInJapan } from '../shared/japanCalendar.ts';
 
 const MILLISECONDS_PER_DAY = 86_400_000;
+const MILLISECONDS_PER_MINUTE = 60_000;
+/** 日本時間と UTC の差（日本は夏時間がないため一定）。 */
+const JAPAN_OFFSET_MILLISECONDS = 9 * 60 * MILLISECONDS_PER_MINUTE;
 /** 受注期限の警告（⚠️）を出す日数。受注期限まで 0〜7 日（当日と 7 日後を含む）。 */
 const ORDER_DEADLINE_WARNING_DAYS = 7;
 
@@ -76,4 +87,126 @@ export function isOrderDeadlineApproaching(
 export function formatShortDate(date: string): string {
   const [, month = '', day = ''] = date.split('-');
   return `${Number(month)}/${day}`;
+}
+
+/** 日本時間の日時の各部分。 */
+type JapanDateTimeParts = { year: number; month: number; day: number; hour: number; minute: number };
+
+/** UTC の日時（ISO 8601）を、日本時間の年・月・日・時・分にする。 */
+function convertToJapanDateTimeParts(utcDateTime: string): JapanDateTimeParts {
+  const japanTime = new Date(Date.parse(utcDateTime) + JAPAN_OFFSET_MILLISECONDS);
+  return {
+    year: japanTime.getUTCFullYear(),
+    month: japanTime.getUTCMonth() + 1,
+    day: japanTime.getUTCDate(),
+    hour: japanTime.getUTCHours(),
+    minute: japanTime.getUTCMinutes(),
+  };
+}
+
+/** 時刻を「18:00」「0:30」の形にする（時は 0 を付けず、分は 2 桁）。 */
+function formatClockTime(parts: JapanDateTimeParts): string {
+  return `${parts.hour}:${String(parts.minute).padStart(2, '0')}`;
+}
+
+/**
+ * 開催日時と終了日時を、日本時間で「11/20 18:00〜21:00」の形にする（カードを並べる形式。PR #30 のレビュー）。
+ * 終了が開催と同じ日なら終了の日付を省き、別の日なら「11/20 18:00〜11/21 0:30」、年が変わるなら「2026/12/31 22:00〜2027/1/1 2:00」とする。
+ * @param eventStartsAt 開催日時（UTC の ISO 8601）
+ * @param eventEndsAt 終了日時（UTC の ISO 8601）
+ */
+export function formatEventPeriod(eventStartsAt: string, eventEndsAt: string): string {
+  const start = convertToJapanDateTimeParts(eventStartsAt);
+  const end = convertToJapanDateTimeParts(eventEndsAt);
+  const isSameYear = start.year === end.year;
+  const formatDate = (parts: JapanDateTimeParts) => (isSameYear ? `${parts.month}/${parts.day}` : `${parts.year}/${parts.month}/${parts.day}`);
+  const isSameDay = isSameYear && start.month === end.month && start.day === end.day;
+  const endLabel = isSameDay ? formatClockTime(end) : `${formatDate(end)} ${formatClockTime(end)}`;
+  return `${formatDate(start)} ${formatClockTime(start)}〜${endLabel}`;
+}
+
+/** 0.5 刻みの数（半単位の個数で受け取る）を、小数がある場合だけ小数第一位まで示す（例: 3 → 1.5、4 → 2）。 */
+function formatHalfUnits(halfUnitCount: number): string {
+  return halfUnitCount % 2 === 0 ? String(halfUnitCount / 2) : (halfUnitCount / 2).toFixed(1);
+}
+
+/** 分を、単位の半分（halfUnitMinutes 分）ごとの個数に四捨五入する（ちょうど半分は切り上げ）。 */
+function roundToHalfUnits(minutes: number, halfUnitMinutes: number): number {
+  return Math.floor((minutes + halfUnitMinutes / 2) / halfUnitMinutes);
+}
+
+/**
+ * 開催日時から終了日時までの開催期間を「約3時間」「約1.5日」の形にする（スマートフォンの幅のリスト形式。PR #30 のレビュー）。
+ * 時間の単位で 0.5 刻みに四捨五入し（最小は 0.5 時間）、その結果が 24 時間以上なら日の単位で 0.5 刻みに四捨五入する。
+ * 浮動小数の誤差を避けるため、分の整数で計算する。
+ * @param eventStartsAt 開催日時（UTC の ISO 8601）
+ * @param eventEndsAt 終了日時（UTC の ISO 8601。開催日時以降）
+ */
+export function formatEventDuration(eventStartsAt: string, eventEndsAt: string): string {
+  const minutes = Math.max(0, Math.round((Date.parse(eventEndsAt) - Date.parse(eventStartsAt)) / MILLISECONDS_PER_MINUTE));
+  const halfHourCount = Math.max(1, roundToHalfUnits(minutes, 30));
+  if (halfHourCount < 48) return `約${formatHalfUnits(halfHourCount)}時間`;
+  return `約${formatHalfUnits(roundToHalfUnits(minutes, 12 * 60))}日`;
+}
+
+/** 日本時間の日時の入力欄の値（例: 2026-11-20T18:00）を、UTC の ISO 8601 にする。空なら null。 */
+export function convertJapanDateTimeInputToUtc(value: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value.trim());
+  if (match === null) return value.trim() === '' ? null : value.trim();
+  const [, year, month, day, hour, minute] = match.map(Number) as [number, number, number, number, number, number];
+  return new Date(Date.UTC(year, month - 1, day, hour, minute) - JAPAN_OFFSET_MILLISECONDS).toISOString();
+}
+
+/** UTC の ISO 8601 を、日本時間の日時の入力欄の値（例: 2026-11-20T18:00）にする。未入力なら空。 */
+export function formatUtcAsJapanDateTimeInput(utcDateTime: string | null): string {
+  if (utcDateTime === null) return '';
+  return new Date(Date.parse(utcDateTime) + JAPAN_OFFSET_MILLISECONDS).toISOString().slice(0, 16);
+}
+
+/** 商品に値が保存されている、出し入れできる入力項目。キャンセル可否は「可」の場合、開催日時と終了日時はどちらかに値がある場合。 */
+export function listStoredCategoryFields(product: ProductResponse): CategoryControlledField[] {
+  const hasValue: Readonly<Record<CategoryControlledField, boolean>> = {
+    shippingFee: product.shippingFee !== null,
+    maker: product.maker !== null,
+    orderDeadline: product.orderDeadline !== null,
+    cancelable: product.cancelable,
+    location: product.location !== null,
+    eventPeriod: product.eventStartsAt !== null || product.eventEndsAt !== null,
+    handlingFee: product.handlingFee !== null,
+    travelExpense: product.travelExpense !== null,
+    otherExpense: product.otherExpense !== null,
+  };
+  return CATEGORY_CONTROLLED_FIELDS.filter((field) => hasValue[field]);
+}
+
+/**
+ * カテゴリーで有効な入力項目を返す（issue #27）。
+ * 定義を読めない場合（categories が null）はすべての項目、定義にあるカテゴリーはその設定、
+ * カテゴリー未設定・定義にないカテゴリーは既定（既存の項目。PR #30 の確認への回答）とする。
+ */
+export function listEnabledCategoryFields(
+  categories: readonly CategoryResponse[] | null,
+  categoryId: string | null,
+): readonly CategoryControlledField[] {
+  if (categories === null) return CATEGORY_CONTROLLED_FIELDS;
+  const category = categories.find((candidate) => candidate.id === categoryId);
+  return category === undefined ? DEFAULT_ENABLED_FIELDS : category.fields;
+}
+
+/**
+ * 表示する入力項目を返す（issue #27）。カテゴリーで有効な項目と、値が保存されている項目。
+ * @param storedProduct 値が保存されているかを見る商品（追加の場合は省略）
+ */
+export function determineVisibleCategoryFields(
+  categories: readonly CategoryResponse[] | null,
+  categoryId: string | null,
+  storedProduct?: ProductResponse,
+): ReadonlySet<CategoryControlledField> {
+  const storedFields = storedProduct === undefined ? [] : listStoredCategoryFields(storedProduct);
+  return new Set([...listEnabledCategoryFields(categories, categoryId), ...storedFields]);
+}
+
+/** 「その他費用」の名前を返す。定義にあるカテゴリーはその名前、それ以外（未設定・定義にない・定義を読めない）は「その他費用」（issue #27）。 */
+export function resolveOtherExpenseLabel(categories: readonly CategoryResponse[] | null, categoryId: string | null): string {
+  return categories?.find((candidate) => candidate.id === categoryId)?.otherExpenseLabel ?? DEFAULT_OTHER_EXPENSE_LABEL;
 }

@@ -202,6 +202,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           onSelect={(selected) => openEditor({ kind: 'edit', product: selected })}
           onAddToMonth={(month) => openEditor({ kind: 'create', defaultReleaseMonth: month })}
           onMoveProduct={(product, month) => void moveProduct(product, month)}
+          categories={categoryFilter.categories ?? null}
         />
       )}
 

@@ -29,6 +29,12 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     categoryName: null,
     maker: null,
     note: null,
+    location: null,
+    handlingFee: null,
+    travelExpense: null,
+    otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
@@ -750,6 +756,81 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
   });
 });
 
+describe('場所と費用・カテゴリーごとの入力項目（issue #26・#27）', () => {
+  /** 物品と電子チケットのカテゴリーの定義（電子チケットは送料を使わず、場所と費用を使う。その他費用の名前は「ドリンク代」）。 */
+  const categoryRoutes = {
+    'GET /api/categories': () => ({
+      body: {
+        categories: [
+          { id: 'scale', name: 'スケールフィギュア', fields: ['shippingFee', 'maker', 'orderDeadline', 'cancelable'], otherExpenseLabel: 'その他費用' },
+          { id: 'ticket', name: '電子チケット', fields: ['location', 'handlingFee', 'travelExpense', 'otherExpense'], otherExpenseLabel: 'ドリンク代' },
+        ],
+      },
+    }),
+  };
+
+  it('電子チケットの商品のカードに、場所と、カテゴリーの名前で示した費用を表示し、「送料無料」は表示しない', async () => {
+    stubFetchRoutes({
+      ...categoryRoutes,
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({
+              name: 'ライブ 東京公演',
+              categoryId: 'ticket',
+              categoryName: '電子チケット',
+              price: 8800,
+              location: '東京ドーム',
+              handlingFee: 330,
+              otherExpense: 600,
+            }),
+          ],
+        },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const card = (await screen.findByText('ライブ 東京公演')).closest('article');
+    expect(card).not.toBeNull();
+    await waitFor(() => expect(within(card as HTMLElement).getByText('ドリンク代 600円')).toBeInTheDocument());
+    expect(within(card as HTMLElement).getByText('東京ドーム')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('手数料 330円')).toBeInTheDocument();
+    expect(within(card as HTMLElement).queryByText('送料無料')).not.toBeInTheDocument();
+  });
+
+  it('見出しの合計金額に、手数料・交通費（見込）・その他費用を含める', async () => {
+    stubFetchRoutes({
+      ...categoryRoutes,
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({ categoryId: 'ticket', categoryName: '電子チケット', price: 8800, handlingFee: 330, travelExpense: 2000, otherExpense: 600 }),
+          ],
+        },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    expect(await screen.findByRole('region', { name: '2026/11' })).toBeInTheDocument();
+    expect(screen.getAllByText(/1個（合計 11,730円見込）/).length).toBeGreaterThan(0);
+  });
+
+  it('追加のモーダルで電子チケットのカテゴリーを選んだ場合、カテゴリーの定義に従って場所と費用の入力欄を表示する', async () => {
+    stubFetchRoutes({ ...categoryRoutes, 'GET /api/products': () => ({ body: { products: [] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByRole('region', { name: '2026/11' });
+
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+    const dialog = screen.getByRole('dialog', { name: '商品を追加' });
+    await within(dialog).findByRole('option', { name: '電子チケット' });
+    await userEvent.selectOptions(within(dialog).getByLabelText('カテゴリー'), '電子チケット');
+
+    expect(within(dialog).getByLabelText('場所')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('ドリンク代')).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('送料（税込）')).not.toBeInTheDocument();
+  });
+});
+
 describe('スマートフォンの幅でのリスト形式（issue #15）', () => {
   /** スマートフォンの幅を判定するメディアクエリ（横幅 600px 以下）。 */
   const PHONE_WIDTH_QUERY = '(max-width: 600px)';
@@ -989,5 +1070,49 @@ describe('スマートフォンの幅でのリスト形式（issue #15）', () =
 
     expect(await screen.findByRole('status')).toHaveTextContent('発売月を 2027/01 に移動しました');
     expect(requests.filter((recorded) => recorded.method === 'PATCH')[0]?.body).toEqual({ releaseMonth: '2027-01' });
+  });
+});
+
+describe('開催日時と開催期間の表示（PR #30 のレビュー）', () => {
+  /** 画面の幅を偽装する。isPhoneWidth が true なら横幅 600px 以下として扱う。 */
+  function stubScreenWidth(isPhoneWidth: boolean) {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(max-width: 600px)' ? isPhoneWidth : false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+  }
+
+  /** 開催日時（日本時間 11/20 18:00）と終了日時（同 21:00）を持つ商品を返すスタブ。 */
+  function stubEventProduct() {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({ name: 'ライブ 東京公演', eventStartsAt: '2026-11-20T09:00:00.000Z', eventEndsAt: '2026-11-20T12:00:00.000Z' }),
+          ],
+        },
+      }),
+    });
+  }
+
+  it('PC の幅（カードを並べる形式）では、開催日時と終了日時を表示する', async () => {
+    stubScreenWidth(false);
+    stubEventProduct();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const card = (await screen.findByText('ライブ 東京公演')).closest('article');
+    expect(within(card as HTMLElement).getByText('開催 11/20 18:00〜21:00')).toBeInTheDocument();
+  });
+
+  it('スマートフォンの幅（リスト形式）では、開催期間を表示する', async () => {
+    stubScreenWidth(true);
+    stubEventProduct();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const item = (await screen.findByText('ライブ 東京公演')).closest('article');
+    expect(within(item as HTMLElement).getByText('開催 約3時間')).toBeInTheDocument();
+    expect(within(item as HTMLElement).queryByText(/18:00/)).not.toBeInTheDocument();
   });
 });

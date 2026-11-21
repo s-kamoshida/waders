@@ -7,11 +7,20 @@
  *  - 追加・改名・削除を、操作ごとにすぐサーバーに送る（まとめて保存するボタンは置かない）。操作の後は読み込み直す
  *  - 商品が使っているカテゴリーの削除は、移す先を選んで「移して削除」／「カテゴリー未設定にして削除」／「やめる」で確認する
  *  - 定義にないカテゴリーの商品があれば、「定義に追加する」「別のカテゴリーに移す」「カテゴリー未設定にする」を選ばせる
+ *  - 定義のカテゴリーごとに「入力する項目」を開き、出し入れする項目と「その他費用」の名前を変える（issue #27）。
+ *    チェックは押すたびに変えた項目だけをすぐ送り、名前は「費用の名前を変更」か Enter キーで送る（空にすると「その他費用」に戻す）
  *  - 定義に誤りがある場合は理由を表示し、変更の欄を出さない
  *  - 閉じるときに、変更したかどうかを呼び出し元に知らせる（表示中の一覧を読み込み直すため）
  */
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
-import { categoryNameSchema, type CategoryResponse } from '../../shared/categoryContract.ts';
+import {
+  CATEGORY_CONTROLLED_FIELDS,
+  categoryNameSchema,
+  otherExpenseLabelSchema,
+  type CategoryControlledField,
+  type CategoryFieldSettingsChange,
+  type CategoryResponse,
+} from '../../shared/categoryContract.ts';
 import type { ProductListItem } from '../../shared/productContract.ts';
 import {
   addCategory,
@@ -22,6 +31,7 @@ import {
   fetchProducts,
   reassignUndefinedCategoryProducts,
   renameCategory,
+  updateCategoryFieldSettings,
 } from '../productApiClient.ts';
 import { formatUndefinedCategoryLabel, summarizeCategoryUsage, type CategoryUsage } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
@@ -44,6 +54,109 @@ function describeChangeError(error: unknown): string {
 function validateCategoryName(name: string): string | null {
   const result = categoryNameSchema.safeParse(name);
   return result.success ? null : (result.error.issues[0]?.message ?? SCREEN_MESSAGES.categorySaveFailed);
+}
+
+/** 「その他費用」の名前を検証する。空なら null（「その他費用」に戻す）。誤りがあれば文言を返す。 */
+function validateOtherExpenseLabel(label: string): { label: string | null } | { error: string } {
+  if (label.trim() === '') return { label: null };
+  const result = otherExpenseLabelSchema.safeParse(label);
+  return result.success ? { label: result.data } : { error: result.error.issues[0]?.message ?? SCREEN_MESSAGES.categorySaveFailed };
+}
+
+/** 出し入れする項目のチェックボックスの表記（CATEGORY_CONTROLLED_FIELDS の並び）。 */
+const CATEGORY_FIELD_LABELS: Readonly<Record<CategoryControlledField, string>> = {
+  shippingFee: '送料',
+  maker: 'メーカー',
+  orderDeadline: '受注期限',
+  cancelable: 'キャンセル可',
+  location: '場所',
+  eventPeriod: '開催日時・終了日時',
+  handlingFee: '手数料',
+  travelExpense: '交通費（見込）',
+  otherExpense: 'その他費用',
+};
+
+/** 「その他費用」の名前の欄（保存した名前が変わったら、呼び出し側が key を変えて入力を作り直す）。 */
+function OtherExpenseLabelEditor({
+  savedLabel,
+  isSubmitting,
+  onSave,
+  onInvalidLabel,
+}: {
+  readonly savedLabel: string;
+  readonly isSubmitting: boolean;
+  readonly onSave: (label: string | null) => void;
+  readonly onInvalidLabel: (message: string) => void;
+}) {
+  const [draftLabel, setDraftLabel] = useState(savedLabel);
+  const hasChanged = draftLabel.trim() !== savedLabel;
+
+  const submitLabel = () => {
+    const validated = validateOtherExpenseLabel(draftLabel);
+    if ('error' in validated) {
+      onInvalidLabel(validated.error);
+      return;
+    }
+    onSave(validated.label);
+  };
+
+  return (
+    <div className="category-fields-label">
+      <input
+        type="text"
+        aria-label="その他費用の名前"
+        className="category-row-name"
+        value={draftLabel}
+        disabled={isSubmitting}
+        onChange={(event) => setDraftLabel(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && hasChanged) submitLabel();
+        }}
+      />
+      <button type="button" className="button" disabled={isSubmitting || !hasChanged} onClick={submitLabel}>
+        費用の名前を変更
+      </button>
+    </div>
+  );
+}
+
+/** カテゴリーの入力する項目の設定（チェックボックスと「その他費用」の名前。issue #27）。 */
+function CategoryFieldSettings({
+  category,
+  isSubmitting,
+  onChange,
+  onInvalidLabel,
+}: {
+  readonly category: CategoryResponse;
+  readonly isSubmitting: boolean;
+  readonly onChange: (changes: CategoryFieldSettingsChange) => void;
+  readonly onInvalidLabel: (message: string) => void;
+}) {
+  return (
+    <div className="category-fields">
+      <p className="hint">{SCREEN_MESSAGES.categoryFieldSettingsNote}</p>
+      <div className="category-fields-options">
+        {CATEGORY_CONTROLLED_FIELDS.map((field) => (
+          <label key={field} className="category-fields-option">
+            <input
+              type="checkbox"
+              checked={category.fields.includes(field)}
+              disabled={isSubmitting}
+              onChange={(event) => onChange({ fields: { [field]: event.target.checked } })}
+            />
+            {CATEGORY_FIELD_LABELS[field]}
+          </label>
+        ))}
+      </div>
+      <OtherExpenseLabelEditor
+        key={category.otherExpenseLabel}
+        savedLabel={category.otherExpenseLabel}
+        isSubmitting={isSubmitting}
+        onSave={(label) => onChange({ otherExpenseLabel: label })}
+        onInvalidLabel={onInvalidLabel}
+      />
+    </div>
+  );
 }
 
 /** 移す先のプルダウン。 */
@@ -79,17 +192,22 @@ function DefinedCategoryRow({
   onRename,
   onDelete,
   onInvalidName,
+  onChangeFieldSettings,
 }: {
-  readonly category: CategoryUsage;
+  readonly category: CategoryResponse & { readonly productCount: number };
   /** 削除するときの移す先（このカテゴリー以外の定義のカテゴリー）。 */
   readonly destinations: readonly CategoryResponse[];
   readonly isSubmitting: boolean;
   readonly onRename: (name: string) => void;
   readonly onDelete: (moveToCategoryId: string | null) => void;
   readonly onInvalidName: (message: string) => void;
+  /** 入力する項目と「その他費用」の名前を変える（issue #27）。 */
+  readonly onChangeFieldSettings: (changes: CategoryFieldSettingsChange) => void;
 }) {
   const [draftName, setDraftName] = useState(category.name);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isFieldSettingsOpen, setIsFieldSettingsOpen] = useState(false);
+  const fieldSettingsId = useId();
   const [destinationId, setDestinationId] = useState(destinations[0]?.id ?? '');
 
   const submitRename = () => {
@@ -130,7 +248,26 @@ function DefinedCategoryRow({
         <button type="button" className="button button--danger" disabled={isSubmitting || isConfirmingDelete} onClick={startDelete}>
           削除
         </button>
+        <button
+          type="button"
+          className="button"
+          aria-expanded={isFieldSettingsOpen}
+          aria-controls={fieldSettingsId}
+          onClick={() => setIsFieldSettingsOpen((current) => !current)}
+        >
+          入力する項目
+        </button>
       </div>
+      {isFieldSettingsOpen && (
+        <div id={fieldSettingsId}>
+          <CategoryFieldSettings
+            category={category}
+            isSubmitting={isSubmitting}
+            onChange={onChangeFieldSettings}
+            onInvalidLabel={onInvalidName}
+          />
+        </div>
+      )}
       {isConfirmingDelete && (
         <div className="category-confirmation">
           <p>{SCREEN_MESSAGES.categoryDeleteConfirmation(category.name, category.productCount)}</p>
@@ -307,6 +444,7 @@ export function CategoryManagerDialog({ onClose }: CategoryManagerDialogProps) {
                     onRename={(name) => void runChange(() => renameCategory(category.id, name))}
                     onDelete={(moveToCategoryId) => void runChange(() => deleteCategory(category.id, moveToCategoryId))}
                     onInvalidName={setChangeErrorMessage}
+                    onChangeFieldSettings={(changes) => void runChange(() => updateCategoryFieldSettings(category.id, changes))}
                   />
                 ))}
               </div>

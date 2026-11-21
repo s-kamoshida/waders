@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   extractShopDomain,
   formatDateInJapan,
+  formatEventDuration,
+  formatEventPeriod,
   formatMonthInJapan,
   formatPriceLabel,
   formatShippingLabel,
@@ -88,5 +90,66 @@ describe('日本時間の日付と月', () => {
 
     expect(formatDateInJapan(now)).toBe('2026-12-01');
     expect(formatMonthInJapan(now)).toBe('2026-12');
+  });
+});
+
+describe('開催日時と開催期間の表記（PR #30 のレビュー）', () => {
+  /** 開催日時（日本時間 2026/11/20 18:00）。 */
+  const EVENT_STARTS_AT = '2026-11-20T09:00:00.000Z';
+
+  /** 開催日時から指定した分だけ後の日時（UTC の ISO 8601）。 */
+  function minutesAfterStart(minutes: number): string {
+    return new Date(Date.parse(EVENT_STARTS_AT) + minutes * 60_000).toISOString();
+  }
+
+  describe('開催日時と終了日時（カードを並べる幅）', () => {
+    it('終了が開催と同じ日（日本時間）の場合、「11/20 18:00〜21:00」のように終了の日付を省く', () => {
+      expect(formatEventPeriod(EVENT_STARTS_AT, '2026-11-20T12:00:00.000Z')).toBe('11/20 18:00〜21:00');
+    });
+
+    it('終了が別の日の場合、終了の日付も示す（日付は日本時間で決める）', () => {
+      expect(formatEventPeriod(EVENT_STARTS_AT, '2026-11-20T15:30:00.000Z')).toBe('11/20 18:00〜11/21 0:30');
+      expect(formatEventPeriod('2026-11-30T23:00:00.000Z', '2026-12-02T09:05:00.000Z')).toBe('12/1 8:00〜12/2 18:05');
+    });
+
+    it('年が変わる場合、年も示す', () => {
+      expect(formatEventPeriod('2026-12-31T13:00:00.000Z', '2026-12-31T17:00:00.000Z')).toBe('2026/12/31 22:00〜2027/1/1 2:00');
+    });
+  });
+
+  describe('開催期間（スマートフォンの幅のリスト形式）', () => {
+    it.each([
+      [0, '約0.5時間'],
+      [10, '約0.5時間'],
+      [29, '約0.5時間'],
+      [30, '約0.5時間'],
+      [44, '約0.5時間'],
+      [45, '約1時間'],
+      [60, '約1時間'],
+      [90, '約1.5時間'],
+      [104, '約1.5時間'],
+      [105, '約2時間'],
+      [180, '約3時間'],
+      [23 * 60 + 14, '約23時間'],
+      [23 * 60 + 15, '約23.5時間'],
+      [23 * 60 + 44, '約23.5時間'],
+    ])('%i 分の場合、「%s」と示す（時間の単位で 0.5 刻みに四捨五入）', (minutes, expected) => {
+      expect(formatEventDuration(EVENT_STARTS_AT, minutesAfterStart(minutes))).toBe(expected);
+    });
+
+    it.each([
+      [23 * 60 + 45, '約1日'],
+      [23 * 60 + 50, '約1日'],
+      [24 * 60, '約1日'],
+      [29 * 60 + 59, '約1日'],
+      [30 * 60, '約1.5日'],
+      [36 * 60, '約1.5日'],
+      [41 * 60 + 59, '約1.5日'],
+      [42 * 60, '約2日'],
+      [54 * 60, '約2.5日'],
+      [10 * 24 * 60, '約10日'],
+    ])('%i 分の場合、「%s」と示す（時間で四捨五入して 24 時間以上なら日の単位で 0.5 刻みに四捨五入）', (minutes, expected) => {
+      expect(formatEventDuration(EVENT_STARTS_AT, minutesAfterStart(minutes))).toBe(expected);
+    });
   });
 });

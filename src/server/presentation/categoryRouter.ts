@@ -9,6 +9,7 @@
  *  - DELETE /api/categories/:categoryId                     削除（{ moveToCategoryId }。204。商品は移す先か未設定にする）
  *  - POST   /api/categories/:categoryId/add-to-definition   定義にないカテゴリーを定義に戻す（201 とカテゴリー）
  *  - POST   /api/categories/:categoryId/reassign-products   定義にないカテゴリーの商品を付け替える（{ moveToCategoryId }。204）
+ *  - PATCH  /api/categories/:categoryId/field-settings      入力項目と「その他費用」の名前を変える（{ fields?, otherExpenseLabel? }。200 とカテゴリー。issue #27）
  * 定義のファイルに誤りがある場合は 503（CATEGORY_DEFINITION_INVALID）と、ファイル名と誤りの場所を含む理由を返す
  * （利用者がファイルを直す手がかりにするため。中身は利用者自身が書いた定義で、秘密の情報は含まない）。
  * そのほかのエラーの対応は CATEGORY_ERROR_RESPONSES を参照。
@@ -24,7 +25,11 @@ import {
   CategoryNameDuplicateError,
   CategoryNotFoundError,
 } from '../domain/category.ts';
-import { categoryNameRequestSchema, categoryReassignRequestSchema } from '../../shared/categoryContract.ts';
+import {
+  categoryFieldSettingsRequestSchema,
+  categoryNameRequestSchema,
+  categoryReassignRequestSchema,
+} from '../../shared/categoryContract.ts';
 import { collectFieldErrors, type ApiErrorResponse } from '../../shared/productContract.ts';
 
 /** カテゴリーが見つからない場合の文言（画面にそのまま表示する）。 */
@@ -155,6 +160,14 @@ export function createCategoryRouter(categoryService: CategoryService, productSe
     respondWithCategoryOperation(response, () => {
       productService.reassignUndefinedCategoryProducts(request.params.categoryId, reassignRequest.moveToCategoryId);
       response.status(204).end();
+    });
+  });
+
+  router.patch('/:categoryId/field-settings', (request, response) => {
+    const changes = parseRequestBody(categoryFieldSettingsRequestSchema, request.body, response);
+    if (changes === undefined) return;
+    respondWithCategoryOperation(response, () => {
+      response.json(categoryService.updateCategoryFieldSettings(request.params.categoryId, changes));
     });
   });
 

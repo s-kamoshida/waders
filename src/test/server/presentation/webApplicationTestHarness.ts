@@ -27,6 +27,17 @@ export const TEST_CATEGORIES = [
   { id: 'action', name: '可動フィギュア' },
 ] as const;
 
+/**
+ * 項目の指定がないカテゴリーで有効な、選べる項目（既定。issue #27）。
+ * 送料・メーカー・受注期限・キャンセル可否を有効、場所・手数料・交通費（見込）・その他費用を無効とする。
+ */
+export const DEFAULT_ENABLED_FIELDS = ['shippingFee', 'maker', 'orderDeadline', 'cancelable'] as const;
+
+/** カテゴリーの ID と名前に、既定の項目の設定（既定の項目と、「その他費用」の名前）を付ける（API の応答の期待値。issue #27）。 */
+export function withDefaultFieldSettings(category: { readonly id: string; readonly name: string }) {
+  return { ...category, fields: [...DEFAULT_ENABLED_FIELDS], otherExpenseLabel: 'その他費用' };
+}
+
 /** テスト用に組み立てたもの。 */
 export type WebApplicationTestHarness = {
   readonly application: express.Express;
