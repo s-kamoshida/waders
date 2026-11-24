@@ -60,6 +60,8 @@ export type WebApplicationTestHarnessOptions = {
   readonly authenticationEnabled?: boolean;
   /** Host ヘッダーで追加で許す名前（設定の allowedHosts）。省略すると追加なし（issue #35）。 */
   readonly allowedHosts?: readonly string[];
+  /** Host・Origin を確かめるか（設定の hostValidationEnabled）。省略すると確かめる（issue #35）。 */
+  readonly hostValidationEnabled?: boolean;
 };
 
 /**
@@ -110,6 +112,7 @@ export function createWebApplicationTestHarness(
       categoryService: createCategoryService({ categoryDefinition }),
       authenticationService,
       allowedHosts: options.allowedHosts ?? [],
+      hostValidationEnabled: options.hostValidationEnabled ?? true,
     }),
     database,
     productRepository,

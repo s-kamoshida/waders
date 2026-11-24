@@ -197,3 +197,37 @@ describe('Host ヘッダーで追加で許す名前（issue #35）', () => {
     expect(() => loadWithEnvironment()).toThrow(ServerSettingsError);
   });
 });
+
+describe('Host・Origin の確認の有効・無効（issue #35。PR #37 のレビュー）', () => {
+  it('ひな形から設定ファイルを作成した場合、確認を有効にする', () => {
+    expect(loadWithEnvironment().hostValidationEnabled).toBe(true);
+  });
+
+  it('既存の設定ファイルに hostValidationEnabled がない場合、確認を有効として扱う（安全側に倒す）', () => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090 }));
+
+    expect(loadWithEnvironment().hostValidationEnabled).toBe(true);
+  });
+
+  it('設定ファイルで hostValidationEnabled を false にした場合、確認を無効にする', () => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, hostValidationEnabled: false }));
+
+    expect(loadWithEnvironment().hostValidationEnabled).toBe(false);
+  });
+
+  it.each([
+    ['文字列', 'false'],
+    ['数値', 0],
+    ['null', null],
+  ])('hostValidationEnabled が真偽値でない（%s）場合、エラーにする', (_label, hostValidationEnabled) => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, hostValidationEnabled }));
+
+    expect(() => loadWithEnvironment()).toThrow(ServerSettingsError);
+  });
+
+  it('環境変数では切り替えない', () => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, hostValidationEnabled: true }));
+
+    expect(loadWithEnvironment({ WADERS_HOST_VALIDATION_ENABLED: 'false' }).hostValidationEnabled).toBe(true);
+  });
+});

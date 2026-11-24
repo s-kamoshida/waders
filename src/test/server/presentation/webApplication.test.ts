@@ -208,3 +208,33 @@ describe('Origin ヘッダーの確認（issue #35）', () => {
     expect(response.status).toBe(200);
   });
 });
+
+describe('Host・Origin の確認を無効にした場合（issue #35。PR #37 のレビュー）', () => {
+  it('許可していない名前の Host でも、API と画面のファイルに応答する', async () => {
+    writeClientBuild();
+    const application = createWebApplicationTestHarness(clientBuildDirectory, { hostValidationEnabled: false }).application;
+
+    expect((await request(application).get('/api/health').set('Host', 'waders.example.com')).status).toBe(200);
+    expect((await request(application).get('/').set('Host', 'waders.example.com')).status).toBe(200);
+  });
+
+  it('状態を変えるリクエストで Origin が Host と一致しなくても、処理する', async () => {
+    const harness = createWebApplicationTestHarness(clientBuildDirectory, { hostValidationEnabled: false });
+
+    const response = await request(harness.application)
+      .post('/api/products')
+      .set('Host', 'waders.example.com')
+      .set('Origin', 'https://other.example.com')
+      .send({ name: 'フィギュア', releaseMonth: '2026-12' });
+
+    expect(response.status).toBe(201);
+  });
+
+  it('Content-Type が application/json でない状態を変えるリクエストは、今までどおり 415 を返す', async () => {
+    const application = createWebApplicationTestHarness(clientBuildDirectory, { hostValidationEnabled: false }).application;
+
+    const response = await request(application).post('/api/products').set('Host', 'waders.example.com').type('form').send('name=x');
+
+    expect(response.status).toBe(415);
+  });
+});
