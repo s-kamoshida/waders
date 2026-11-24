@@ -58,6 +58,8 @@ export type WebApplicationTestHarness = {
 export type WebApplicationTestHarnessOptions = {
   /** 認証を有効にするか。省略すると無効（issue #11）。 */
   readonly authenticationEnabled?: boolean;
+  /** Host ヘッダーで追加で許す名前（設定の allowedHosts）。省略すると追加なし（issue #35）。 */
+  readonly allowedHosts?: readonly string[];
 };
 
 /**
@@ -107,6 +109,7 @@ export function createWebApplicationTestHarness(
       productService,
       categoryService: createCategoryService({ categoryDefinition }),
       authenticationService,
+      allowedHosts: options.allowedHosts ?? [],
     }),
     database,
     productRepository,

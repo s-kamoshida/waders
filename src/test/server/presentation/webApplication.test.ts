@@ -91,3 +91,120 @@ describe('画面の配信', () => {
     expect(response.status).toBe(200);
   });
 });
+
+describe('Host ヘッダーの確認（issue #35。DNS リバインディング対策）', () => {
+  /** 許可していない名前（攻撃者のドメイン）。 */
+  const ATTACKER_HOST = 'attacker.example:8080';
+
+  it.each([
+    ['IPv4 のアドレス', '192.168.1.10:8080'],
+    ['IPv6 のアドレス', '[fe80::1]:8080'],
+    ['localhost', 'localhost:5173'],
+    ['.local で終わる名前', 'raspberrypi.local:8080'],
+    ['大文字の .local', 'RaspberryPi.LOCAL:8080'],
+    ['ポートのない名前', 'raspberrypi.local'],
+  ])('Host が %s の場合、API に応答する', async (_label, host) => {
+    const response = await request(createWebApplication({ clientBuildDirectory })).get('/api/health').set('Host', host);
+
+    expect(response.status).toBe(200);
+  });
+
+  it.each([
+    ['攻撃者のドメイン', ATTACKER_HOST],
+    ['.local を途中に含む名前', 'raspberrypi.local.attacker.example'],
+    ['localhost を途中に含む名前', 'localhost.attacker.example'],
+    ['.localhost で終わる名前', 'waders.localhost'],
+  ])('Host が許可していない名前（%s）の場合、API に 403 を返す', async (_label, host) => {
+    const response = await request(createWebApplication({ clientBuildDirectory })).get('/api/products').set('Host', host);
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: { code: 'HOST_NOT_ALLOWED', message: expect.any(String) } });
+    expect(response.text).not.toContain('products');
+  });
+
+  it('Host が許可していない名前の場合、商品の登録を処理しない', async () => {
+    const harness = createWebApplicationTestHarness(clientBuildDirectory);
+
+    const response = await request(harness.application)
+      .post('/api/products')
+      .set('Host', ATTACKER_HOST)
+      .send({ name: '攻撃者が登録した商品', releaseMonth: '2026-12' });
+
+    expect(response.status).toBe(403);
+    expect(harness.productService.listProducts()).toEqual([]);
+  });
+
+  it('Host が許可していない名前の場合、画面のファイルも返さない', async () => {
+    writeClientBuild();
+
+    const response = await request(createWebApplication({ clientBuildDirectory })).get('/').set('Host', ATTACKER_HOST);
+
+    expect(response.status).toBe(403);
+    expect(response.text).not.toContain('<title>Waders</title>');
+  });
+
+  it('403 の応答にも、自サイト以外を禁止する CSP を付ける', async () => {
+    const response = await request(createWebApplication({ clientBuildDirectory })).get('/api/health').set('Host', ATTACKER_HOST);
+
+    expectSelfOnlyContentSecurityPolicy(response.headers['content-security-policy']);
+  });
+
+  it('設定の allowedHosts に書いた名前の場合、大文字・小文字とポートを問わず応答する', async () => {
+    const application = createWebApplicationTestHarness(clientBuildDirectory, { allowedHosts: ['waders.home.example'] }).application;
+
+    expect((await request(application).get('/api/health').set('Host', 'waders.home.example')).status).toBe(200);
+    expect((await request(application).get('/api/health').set('Host', 'Waders.Home.Example:8080')).status).toBe(200);
+    expect((await request(application).get('/api/health').set('Host', 'other.home.example')).status).toBe(403);
+  });
+});
+
+describe('Origin ヘッダーの確認（issue #35）', () => {
+  /** 商品を登録する（Host は raspberrypi.local:8080）。 */
+  function postProduct(application: ReturnType<typeof createWebApplication>, origin: string | undefined) {
+    const pending = request(application).post('/api/products').set('Host', 'raspberrypi.local:8080');
+    if (origin !== undefined) pending.set('Origin', origin);
+    return pending.send({ name: 'フィギュア', releaseMonth: '2026-12' });
+  }
+
+  it('状態を変えるリクエストで、Origin の名前とポートが Host と一致する場合、処理する', async () => {
+    const response = await postProduct(createWebApplication({ clientBuildDirectory }), 'http://raspberrypi.local:8080');
+
+    expect(response.status).toBe(201);
+  });
+
+  it('状態を変えるリクエストで、Origin がない場合（curl など）、処理する', async () => {
+    const response = await postProduct(createWebApplication({ clientBuildDirectory }), undefined);
+
+    expect(response.status).toBe(201);
+  });
+
+  it.each([
+    ['ほかのサイト', 'http://attacker.example'],
+    ['ポートが違う', 'http://raspberrypi.local:8581'],
+    ['名前が違う', 'http://192.168.1.10:8080'],
+    ['null', 'null'],
+  ])('状態を変えるリクエストで、Origin が Host と一致しない（%s）場合、403 を返して処理しない', async (_label, origin) => {
+    const harness = createWebApplicationTestHarness(clientBuildDirectory);
+
+    const response = await postProduct(harness.application, origin);
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({ error: { code: 'ORIGIN_NOT_ALLOWED', message: expect.any(String) } });
+    expect(harness.productService.listProducts()).toEqual([]);
+  });
+
+  it('Origin の名前の大文字・小文字は区別しない', async () => {
+    const response = await postProduct(createWebApplication({ clientBuildDirectory }), 'http://RaspberryPi.Local:8080');
+
+    expect(response.status).toBe(201);
+  });
+
+  it('読み取りのリクエスト（GET）では、Origin を確かめない', async () => {
+    const response = await request(createWebApplication({ clientBuildDirectory }))
+      .get('/api/health')
+      .set('Host', 'raspberrypi.local:8080')
+      .set('Origin', 'http://attacker.example');
+
+    expect(response.status).toBe(200);
+  });
+});
