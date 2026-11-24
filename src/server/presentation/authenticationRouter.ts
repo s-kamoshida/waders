@@ -2,10 +2,11 @@
  * 認証の API（/api/auth）と、ほかの API に認証を求めるミドルウェア。
  *
  * 所属: プレゼンテーション層
- * 責務（issue #11）:
+ * 責務（issue #11・#36）:
  *  - GET  /api/auth/status  認証の状態（{ authenticationEnabled, accountExists, loggedIn }）。ログインしていなくても使える
  *  - POST /api/auth/setup   アカウントの作成（{ loginId, password }）。201 と状態、ログインした状態の Cookie
- *  - POST /api/auth/login   ログイン（{ loginId, password }）。200 と状態、Cookie。誤りは 401（どちらが誤りかを示さない）、制限中は 429
+ *  - POST /api/auth/login   ログイン（{ loginId, password }）。200 と状態、Cookie。誤りは 401（どちらが誤りかを示さない）、制限中は 429。
+ *    失敗の回数は TCP の接続元（request.socket.remoteAddress）ごとに数える。X-Forwarded-For は偽装できるため使わない（issue #36）
  *  - POST /api/auth/logout  ログアウト。204 と、Cookie の消去
  *  - 認証が有効なときは、/api/auth と /api/health 以外の API にログインを求める（ない・期限切れは 401）。
  *    使うたびに Cookie の有効期間（30 日）を付け直す
@@ -114,7 +115,8 @@ export function createAuthenticationRouter(authenticationService: Authentication
       return;
     }
     try {
-      const token = await authenticationService.logIn(parsed.data.loginId, parsed.data.password);
+      // TCP の接続元を使う（リバースプロキシを使わないため、X-Forwarded-For や trust proxy の値は信じない）
+      const token = await authenticationService.logIn(parsed.data.loginId, parsed.data.password, request.socket.remoteAddress);
       setSessionCookie(response, token);
       response.json({ authenticationEnabled: true, accountExists: true, loggedIn: true });
     } catch (error) {
