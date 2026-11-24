@@ -4,6 +4,8 @@
  * 所属: プレゼンテーション層
  * 責務:
  *  - すべての応答（API・画面のファイル）へのセキュリティヘッダーの付与
+ *  - 宛先の名前（Host ヘッダー）と、状態を変えるリクエストの送信元（Origin ヘッダー）の確認（DNS リバインディング対策。issue #35）。
+ *    許す名前は IP アドレス・localhost・*.local と、設定の allowedHosts。設定（hostValidationEnabled）で無効にできる
  *  - API のミドルウェアとルーティングの順序（Content-Type の確認 → JSON の解析 → 動作確認・認証 → ログインの確認 → 各 API → 404）
  *  - 状態を変えるリクエストに Content-Type: application/json を必須にする（CSRF 対策）
  *  - 認証が有効なときは、/api/health と /api/auth 以外の API にログインを求める（issue #11）。
@@ -12,6 +14,7 @@
  *  - 想定外のエラーを 500 の応答に変え、詳細はログにだけ出す
  */
 import { existsSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { join } from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import type { AuthenticationService } from '../application/authenticationService.ts';
@@ -65,6 +68,10 @@ export type WebApplicationOptions = {
   readonly categoryService: CategoryService;
   /** 認証の操作（issue #11）。 */
   readonly authenticationService: AuthenticationService;
+  /** Host ヘッダーで、既定のほかに許す名前（小文字。設定の allowedHosts。issue #35）。 */
+  readonly allowedHosts: readonly string[];
+  /** Host・Origin を確かめるか（設定の hostValidationEnabled。issue #35）。 */
+  readonly hostValidationEnabled: boolean;
 };
 
 /** 状態を変える HTTP メソッド。 */
@@ -108,6 +115,62 @@ function handleRequestBodyError(error: unknown, _request: Request, response: Res
   next(error);
 }
 
+/**
+ * Host ヘッダー（例: raspberrypi.local:8080・[fe80::1]:8080）を URL の規則で解釈する。
+ * 戻り値の hostname は小文字の名前、host は「名前:ポート」（既定のポートは省く）。名前として読めない値・ないときは undefined。
+ */
+function parseHostHeader(hostHeader: string | undefined): URL | undefined {
+  if (hostHeader === undefined || hostHeader === '' || /[/?#@\\\s]/.test(hostHeader)) return undefined;
+  try {
+    return new URL(`http://${hostHeader}`);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 既定で許す名前（IP アドレス・localhost・*.local）か、設定で許した名前かを判定する。 */
+function isAllowedHostName(hostName: string, allowedHosts: readonly string[]): boolean {
+  const bareHostName = hostName.replace(/^\[(.*)\]$/, '$1');
+  if (isIP(bareHostName) !== 0) return true;
+  if (hostName === 'localhost' || hostName.endsWith('.local')) return true;
+  return allowedHosts.includes(hostName);
+}
+
+/**
+ * 宛先の名前（Host）と、状態を変えるリクエストの送信元（Origin）を確かめるミドルウェアを作る（issue #35）。
+ * 攻撃者のドメインの名前解決を Waders の IP アドレスに切り替える DNS リバインディングでは、ブラウザは攻撃者のドメインを Host に付けるため、
+ * 許した名前以外を拒否すれば、外部のサイトから API を読み書きされない。Origin は二重の対策として、Host と同じ「名前:ポート」のときだけ通す。
+ */
+function createHostValidation(allowedHosts: readonly string[]) {
+  return function validateHostAndOrigin(request: Request, response: Response, next: NextFunction): void {
+    const host = parseHostHeader(request.headers.host);
+    if (host === undefined || !isAllowedHostName(host.hostname, allowedHosts)) {
+      sendApiError(response, 403, 'HOST_NOT_ALLOWED', 'この名前では接続できません。設定の allowedHosts を確認してください。');
+      return;
+    }
+    const origin = request.headers.origin;
+    if (!STATE_CHANGING_METHODS.has(request.method) || origin === undefined) {
+      next();
+      return;
+    }
+    if (parseOriginHost(origin) !== host.host) {
+      sendApiError(response, 403, 'ORIGIN_NOT_ALLOWED', 'ほかのサイトからの操作は受け付けません。');
+      return;
+    }
+    next();
+  };
+}
+
+/** Origin ヘッダー（例: http://raspberrypi.local:8080）の「名前:ポート」を小文字で返す。null や読めない値は undefined。 */
+function parseOriginHost(origin: string): string | undefined {
+  try {
+    const originUrl = new URL(origin);
+    return originUrl.origin === 'null' ? undefined : originUrl.host;
+  } catch {
+    return undefined;
+  }
+}
+
 /** すべての応答にセキュリティヘッダーを付けるミドルウェア。 */
 function applySecurityHeaders(_request: Request, response: Response, next: NextFunction): void {
   for (const [headerName, headerValue] of Object.entries(SECURITY_HEADERS)) response.setHeader(headerName, headerValue);
@@ -131,13 +194,14 @@ function handleUnexpectedError(error: unknown, request: Request, response: Respo
 
 /**
  * Web アプリケーションを組み立てる。
- * @param options ビルド済みの画面のフォルダと、商品・カテゴリー・認証の操作
+ * @param options ビルド済みの画面のフォルダ、商品・カテゴリー・認証の操作、Host・Origin の確認の設定
  * @returns 待ち受けを開始していない Express のアプリケーション
  */
 export function createWebApplication(options: WebApplicationOptions): express.Express {
   const application = express();
   application.disable('x-powered-by');
   application.use(applySecurityHeaders);
+  if (options.hostValidationEnabled) application.use(createHostValidation(options.allowedHosts));
 
   const apiRouter = express.Router();
   apiRouter.use(rejectNonJsonStateChangingRequests, express.json({ limit: '100kb' }));

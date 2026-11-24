@@ -1,5 +1,5 @@
 /**
- * サーバーの設定（ポート・データのフォルダ・認証の有効・無効）の読み込みと検証。
+ * サーバーの設定（ポート・データのフォルダ・認証の有効・無効・接続を受け付ける名前）の読み込みと検証。
  *
  * 所属: コンポジションルートの補助（main.ts と vite.config.ts から利用）
  * 責務:
@@ -25,14 +25,23 @@ export const SETTINGS_TEMPLATE_FILE_PATH = resolve(import.meta.dirname, '../../c
 
 const portSchema = z.number().int().min(1).max(65535);
 
+/** ホスト名（英数字とハイフンのラベルをドットでつないだもの。ポート・URL・空白は不可）。大文字・小文字は区別しないため小文字にする（issue #35）。 */
+const hostNameSchema = z
+  .string()
+  .regex(/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i, 'ホスト名を書いてください（ポートや http:// は付けない）')
+  .transform((value) => value.toLowerCase());
+
 /**
  * 設定ファイルの形式（version 1）。
  * authenticationEnabled は issue #11 で追加した。この項目がない既存の設定ファイルは、認証を有効として扱う（安全側に倒す）。
+ * allowedHosts・hostValidationEnabled は issue #35 で追加した。項目がなければ、追加で許す名前はなく、Host・Origin の確認は有効とする（安全側に倒す）。
  */
 const settingsFileSchema = z.object({
   version: z.literal(1),
   port: portSchema,
   authenticationEnabled: z.boolean().default(true),
+  allowedHosts: z.array(hostNameSchema).default([]),
+  hostValidationEnabled: z.boolean().default(true),
 });
 
 /** 環境変数の認証の有効・無効。"true" か "false" だけを受け付ける（誤記で無効にならないようにする）。 */
@@ -53,6 +62,10 @@ export type ServerSettings = {
   readonly dataDirectory: string;
   /** 認証を有効にするか（issue #11）。 */
   readonly authenticationEnabled: boolean;
+  /** Host ヘッダーで、既定（IP アドレス・localhost・*.local）のほかに許す名前（小文字。issue #35）。 */
+  readonly allowedHosts: readonly string[];
+  /** Host・Origin を確かめるか（DNS リバインディング対策。issue #35）。環境変数では切り替えない。 */
+  readonly hostValidationEnabled: boolean;
 };
 
 /** 設定ファイルや環境変数の内容に誤りがある場合のエラー。メッセージに誤りのある場所を含める。 */
@@ -95,7 +108,13 @@ export function loadServerSettings(options: LoadServerSettingsOptions): ServerSe
     environmentAuthenticationEnabled === undefined
       ? settingsFile.authenticationEnabled
       : parseEnvironmentAuthenticationEnabled(environmentAuthenticationEnabled);
-  return { port, dataDirectory, authenticationEnabled };
+  return {
+    port,
+    dataDirectory,
+    authenticationEnabled,
+    allowedHosts: settingsFile.allowedHosts,
+    hostValidationEnabled: settingsFile.hostValidationEnabled,
+  };
 }
 
 /** 設定ファイルがなければ、データのフォルダを作り、ひな形を複製する。 */

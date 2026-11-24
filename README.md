@@ -130,7 +130,9 @@ DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自�
 {
   "version": 1,
   "port": 8080,
-  "authenticationEnabled": false
+  "authenticationEnabled": false,
+  "allowedHosts": [],
+  "hostValidationEnabled": true
 }
 ```
 
@@ -138,6 +140,8 @@ DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自�
 | --- | --- | --- |
 | `port` | 待ち受けるポート番号（1〜65535） | `8080` |
 | `authenticationEnabled` | ID とパスワードによる認証を使うか（`true` か `false`）。ひな形では `false`。項目がなければ安全のため `true` として扱います | `false`（ひな形） |
+| `allowedHosts` | 開くときに使う名前のうち、IP アドレス・`localhost`・`.local` で終わる名前（`raspberrypi.local` など）以外のもの（例: `["waders.home.example"]`）。ポートや `http://` は付けません。詳しくは「[接続を受け付ける名前](#接続を受け付ける名前)」 | `[]` |
+| `hostValidationEnabled` | 接続を受け付ける名前を確かめるか（`true` か `false`）。項目がなければ `true` として扱います | `true` |
 
 次の環境変数を指定すると、設定ファイルより優先されます。
 
@@ -184,6 +188,29 @@ DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自�
 > Waders は HTTPS に対応していません。ログインのときのパスワードやログインした状態の情報は、**暗号化されずにネットワークを流れます**。家庭の LAN の外（インターネット）には公開しないでください。外から使いたい場合は、VPN などで家庭の LAN に入ってから使ってください。
 
 **認証を無効にする**場合（既定）は、`settings.json` の `authenticationEnabled` を `false` にして再起動します（または環境変数 `WADERS_AUTHENTICATION_ENABLED=false`）。無効にすると、Waders に接続できる人は誰でも、ログインなしで商品を見たり変えたりできます。**無効で使うのは、信頼できる人だけがつながる家庭の LAN の中に限ってください。**
+
+### 接続を受け付ける名前
+
+Waders は、開くときに使う名前（URL のホスト名）が次のどれかの場合だけ応答します。悪意あるサイトを家庭の LAN の中の端末で開いたときに、そのサイトから Waders を操作されないようにするためです（DNS リバインディング対策。認証が無効なときも守ります）。
+
+- IP アドレス（例: `http://192.168.1.10:8080`）
+- `localhost`
+- `.local` で終わる名前（例: `http://raspberrypi.local:8080`）
+- `settings.json` の `allowedHosts` に書いた名前
+
+自宅の DNS や VPN（Tailscale など）の名前で開く場合は、その名前を `allowedHosts` に書いて再起動してください。書いていない名前で開くと、「この名前では接続できません」と表示されます。
+
+```json
+{
+  "version": 1,
+  "port": 8080,
+  "authenticationEnabled": false,
+  "allowedHosts": ["waders.home.example"],
+  "hostValidationEnabled": true
+}
+```
+
+リバースプロキシなどでインターネットに公開し、名前を前もって決められない場合は、`hostValidationEnabled` を `false` にすると確かめなくなります。**その場合は認証を有効にしてください**（認証が無効のまま確かめないと、悪意あるサイトから操作されるおそれがあります）。
 
 ### カテゴリーの定義
 

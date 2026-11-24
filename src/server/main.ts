@@ -8,6 +8,7 @@
  *  - カテゴリーの定義のファイルがなければひな形から作成し、ID のないカテゴリーに ID を付ける（issue #10）
  *  - 各層の組み立て（依存の注入）と、HTTP サーバーの起動
  *  - 認証の有効・無効を設定から受け取り、ログに出す（issue #11）
+ *  - Host・Origin の確認の有効・無効と、追加で許す名前を設定から受け取り、ログに出す（issue #35）
  *  - 終了シグナルを受けたときの後始末
  * 実行: `node src/server/main.ts`（Node.js 24 の型除去機能で TypeScript を直接実行する）
  */
@@ -88,6 +89,8 @@ function startServer(): void {
       clock: { now: () => new Date() },
       authenticationEnabled: settings.authenticationEnabled,
     }),
+    allowedHosts: settings.allowedHosts,
+    hostValidationEnabled: settings.hostValidationEnabled,
   });
 
   const server = application.listen(settings.port, (error?: Error) => {
@@ -100,6 +103,8 @@ function startServer(): void {
       dataDirectory: settings.dataDirectory,
       databaseFilePath,
       authenticationEnabled: settings.authenticationEnabled,
+      hostValidationEnabled: settings.hostValidationEnabled,
+      allowedHosts: settings.allowedHosts.join(','),
     });
   });
 

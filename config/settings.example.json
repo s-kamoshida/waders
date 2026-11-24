@@ -1,5 +1,7 @@
 {
   "version": 1,
   "port": 8080,
-  "authenticationEnabled": false
+  "authenticationEnabled": false,
+  "allowedHosts": [],
+  "hostValidationEnabled": true
 }
