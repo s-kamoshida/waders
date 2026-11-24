@@ -387,3 +387,35 @@ describe('認証が有効で、アカウントがある場合（issue #11）', (
     });
   });
 });
+
+describe('ログインの失敗の制限を接続元ごとに数える（issue #36）', () => {
+  beforeEach(async () => {
+    createHarness(true);
+    await setUpAccount();
+  });
+
+  it('この端末から5回続けて失敗しても、ほかの接続元からはログインできる', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect((await logIn(LOGIN_ID, 'wrong-password')).status).toBe(401);
+    }
+
+    expect((await logIn(LOGIN_ID, PASSWORD)).status).toBe(429);
+    await expect(harness.authenticationService.logIn(LOGIN_ID, PASSWORD, '192.168.1.20')).resolves.toEqual(expect.any(String));
+  });
+
+  it('ほかの接続元から5回続けて失敗しても、この端末からはログインできる', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(harness.authenticationService.logIn(LOGIN_ID, 'wrong-password', '192.168.1.66')).rejects.toThrow();
+    }
+
+    expect((await logIn(LOGIN_ID, PASSWORD)).status).toBe(200);
+  });
+
+  it('この端末（ループバック）の接続元で5回続けて失敗した場合、この端末からの要求は制限する', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(harness.authenticationService.logIn(LOGIN_ID, 'wrong-password', '127.0.0.1')).rejects.toThrow();
+    }
+
+    expect((await logIn(LOGIN_ID, PASSWORD)).status).toBe(429);
+  });
+});
