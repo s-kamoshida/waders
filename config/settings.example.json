@@ -3,5 +3,6 @@
   "port": 8080,
   "authenticationEnabled": false,
   "allowedHosts": [],
-  "hostValidationEnabled": true
+  "hostValidationEnabled": true,
+  "basePath": "/waders"
 }

@@ -10,7 +10,7 @@
  *  - POST /api/auth/logout  ログアウト。204 と、Cookie の消去
  *  - 認証が有効なときは、/api/auth と /api/health 以外の API にログインを求める（ない・期限切れは 401）。
  *    使うたびに Cookie の有効期間（30 日）を付け直す
- * Cookie は HttpOnly・SameSite=Strict・Path=/。HTTPS の仕組みがないため Secure は付けない（README に注意を書く）。
+ * Cookie は HttpOnly・SameSite=Strict。Path は画面と API を置くパス（`/` の下なら `/`。issue #39）。HTTPS の仕組みがないため Secure は付けない（README に注意を書く）。
  */
 import express, { type NextFunction, type Request, type Response } from 'express';
 import type { AuthenticationService } from '../application/authenticationService.ts';
@@ -27,8 +27,10 @@ import { collectFieldErrors, type ApiErrorResponse } from '../../shared/productC
 /** ログインした状態の Cookie の名前。 */
 export const SESSION_COOKIE_NAME = 'waders_session';
 
-/** Cookie に付ける属性。 */
-const SESSION_COOKIE_OPTIONS = { httpOnly: true, sameSite: 'strict', path: '/' } as const;
+/** Cookie に付ける属性（Path は画面と API を置くパスで決める）。 */
+function createSessionCookieOptions(cookiePath: string) {
+  return { httpOnly: true, sameSite: 'strict', path: cookiePath } as const;
+}
 
 /** エラーの応答を返す。 */
 function sendError(response: Response, status: number, error: ApiErrorResponse['error']): void {
@@ -49,13 +51,13 @@ function readSessionToken(request: Request): string | undefined {
 }
 
 /** ログインした状態の Cookie を付ける（有効期間は 30 日）。 */
-function setSessionCookie(response: Response, token: string): void {
-  response.cookie(SESSION_COOKIE_NAME, token, { ...SESSION_COOKIE_OPTIONS, maxAge: SESSION_LIFETIME_MILLISECONDS });
+function setSessionCookie(response: Response, token: string, cookiePath: string): void {
+  response.cookie(SESSION_COOKIE_NAME, token, { ...createSessionCookieOptions(cookiePath), maxAge: SESSION_LIFETIME_MILLISECONDS });
 }
 
 /** ログインした状態の Cookie を消す。 */
-function clearSessionCookie(response: Response): void {
-  response.cookie(SESSION_COOKIE_NAME, '', { ...SESSION_COOKIE_OPTIONS, maxAge: 0 });
+function clearSessionCookie(response: Response, cookiePath: string): void {
+  response.cookie(SESSION_COOKIE_NAME, '', { ...createSessionCookieOptions(cookiePath), maxAge: 0 });
 }
 
 /** 認証の操作のエラーを応答にする。想定外のエラーはそのまま投げる（500 の処理へ）。 */
@@ -85,8 +87,9 @@ function sendAuthenticationError(response: Response, error: unknown): void {
 /**
  * 認証の API のルーターを作る。
  * @param authenticationService 認証の操作
+ * @param cookiePath Cookie の Path（画面と API を置くパス。`/` の下なら `/`。issue #39）
  */
-export function createAuthenticationRouter(authenticationService: AuthenticationService): express.Router {
+export function createAuthenticationRouter(authenticationService: AuthenticationService, cookiePath: string): express.Router {
   const router = express.Router();
 
   router.get('/status', (request, response) => {
@@ -101,7 +104,7 @@ export function createAuthenticationRouter(authenticationService: Authentication
     }
     try {
       const token = await authenticationService.setUpAccount(parsed.data.loginId, parsed.data.password);
-      setSessionCookie(response, token);
+      setSessionCookie(response, token, cookiePath);
       response.status(201).json({ authenticationEnabled: true, accountExists: true, loggedIn: true });
     } catch (error) {
       sendAuthenticationError(response, error);
@@ -117,7 +120,7 @@ export function createAuthenticationRouter(authenticationService: Authentication
     try {
       // TCP の接続元を使う（リバースプロキシを使わないため、X-Forwarded-For や trust proxy の値は信じない）
       const token = await authenticationService.logIn(parsed.data.loginId, parsed.data.password, request.socket.remoteAddress);
-      setSessionCookie(response, token);
+      setSessionCookie(response, token, cookiePath);
       response.json({ authenticationEnabled: true, accountExists: true, loggedIn: true });
     } catch (error) {
       sendAuthenticationError(response, error);
@@ -126,7 +129,7 @@ export function createAuthenticationRouter(authenticationService: Authentication
 
   router.post('/logout', (request, response) => {
     authenticationService.logOut(readSessionToken(request));
-    clearSessionCookie(response);
+    clearSessionCookie(response, cookiePath);
     response.status(204).end();
   });
 
@@ -136,8 +139,10 @@ export function createAuthenticationRouter(authenticationService: Authentication
 /**
  * 認証が有効なとき、ログインを求めるミドルウェアを作る。認証が無効なら何もしない。
  * ログインしていれば Cookie の有効期間を付け直して次へ進み、していなければ 401 を返す。
+ * @param authenticationService 認証の操作
+ * @param cookiePath 付け直す Cookie の Path（createAuthenticationRouter と同じ値。issue #39）
  */
-export function createAuthenticationRequirement(authenticationService: AuthenticationService) {
+export function createAuthenticationRequirement(authenticationService: AuthenticationService, cookiePath: string) {
   return function requireAuthentication(request: Request, response: Response, next: NextFunction): void {
     if (!authenticationService.isAuthenticationEnabled()) {
       next();
@@ -148,7 +153,7 @@ export function createAuthenticationRequirement(authenticationService: Authentic
       sendError(response, 401, { code: 'AUTHENTICATION_REQUIRED', message: 'ログインしてください。' });
       return;
     }
-    setSessionCookie(response, token);
+    setSessionCookie(response, token, cookiePath);
     next();
   };
 }

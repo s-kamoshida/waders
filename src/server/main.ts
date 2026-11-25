@@ -91,6 +91,7 @@ function startServer(): void {
     }),
     allowedHosts: settings.allowedHosts,
     hostValidationEnabled: settings.hostValidationEnabled,
+    basePath: settings.basePath,
   });
 
   const server = application.listen(settings.port, (error?: Error) => {
@@ -99,12 +100,13 @@ function startServer(): void {
       process.exit(1);
     }
     writeStructuredLog('info', 'サーバーを起動しました', {
-      url: `http://localhost:${settings.port}`,
+      url: `http://localhost:${settings.port}${settings.basePath}/`,
       dataDirectory: settings.dataDirectory,
       databaseFilePath,
       authenticationEnabled: settings.authenticationEnabled,
       hostValidationEnabled: settings.hostValidationEnabled,
       allowedHosts: settings.allowedHosts.join(','),
+      basePath: settings.basePath,
     });
   });
 
