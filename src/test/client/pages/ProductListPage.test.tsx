@@ -1150,3 +1150,72 @@ describe('商品の画像を保存できなかった場合（issue #41）', () =
     expect(await screen.findByRole('status')).toHaveTextContent('商品は保存しましたが、画像を保存できませんでした。');
   });
 });
+
+describe('カード画像の取得中の読み直し（issue #42）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** 一覧の読み込み（GET /api/products）の回数を返す。 */
+  function countListRequests(requests: readonly { method: string; path: string }[]): number {
+    return requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products').length;
+  }
+
+  it('カード画像を取得中の商品がある場合、2 秒後に一覧を読み直し、取れた画像を表示する', async () => {
+    const product = createProduct({ name: 'カードを取りに行く商品', url: 'https://shop.example.jp/item/1' });
+    let listed = { ...product, cardImagePending: true };
+    const { requests } = stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [listed] } }) });
+    const { container } = render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('カードを取りに行く商品');
+    expect(container.querySelector('.product-card-thumbnail img')).toBeNull();
+
+    listed = { ...product, cardImagePending: false, imageUrl: `/api/products/${product.id}/image?v=card` };
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+
+    await waitFor(() => expect(container.querySelector('.product-card-thumbnail img')).toHaveAttribute('src', `/api/products/${product.id}/image?v=card`));
+    expect(countListRequests(requests)).toBe(2);
+  });
+
+  it('取得中の商品がなくなったら、それ以上は読み直さない', async () => {
+    const product = createProduct({ name: 'カードを取りに行く商品' });
+    let listed = { ...product, cardImagePending: true };
+    const { requests } = stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [listed] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('カードを取りに行く商品');
+    listed = { ...product, cardImagePending: false };
+
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    await waitFor(() => expect(countListRequests(requests)).toBe(2));
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+
+    expect(countListRequests(requests)).toBe(2);
+  });
+
+  it('取得中の商品がない場合、読み直さない', async () => {
+    const { requests } = stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '画像のない商品' })] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('画像のない商品');
+
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+
+    expect(countListRequests(requests)).toBe(1);
+  });
+
+  it('取得中のままでも、読み直すのは 30 秒までにする', async () => {
+    const product = createProduct({ name: '取得中のままの商品' });
+    const { requests } = stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [{ ...product, cardImagePending: true }] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('取得中のままの商品');
+
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 2000) {
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+    }
+
+    expect(countListRequests(requests)).toBeGreaterThan(1);
+    expect(countListRequests(requests)).toBeLessThanOrEqual(16);
+  });
+});
