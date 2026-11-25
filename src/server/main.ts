@@ -9,6 +9,7 @@
  *  - 各層の組み立て（依存の注入）と、HTTP サーバーの起動
  *  - 認証の有効・無効を設定から受け取り、ログに出す（issue #11）
  *  - Host・Origin の確認の有効・無効と、追加で許す名前を設定から受け取り、ログに出す（issue #35）
+ *  - 商品の画像を保存するフォルダ（データのフォルダの images）を商品の操作に渡す（issue #41）
  *  - 終了シグナルを受けたときの後始末
  * 実行: `node src/server/main.ts`（Node.js 24 の型除去機能で TypeScript を直接実行する）
  */
@@ -30,6 +31,9 @@ const CLIENT_BUILD_DIRECTORY = resolve(import.meta.dirname, '../../dist/client')
 
 /** データのフォルダの中にあるカテゴリーの定義のファイルの名前（issue #10）。 */
 const CATEGORY_DEFINITION_FILE_NAME = 'categories.json';
+
+/** データのフォルダの中にある、商品の画像を保存するフォルダの名前（issue #41）。 */
+const PRODUCT_IMAGE_DIRECTORY_NAME = 'images';
 
 const CATEGORY_ID_CHARACTERS = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -76,6 +80,7 @@ function startServer(): void {
     clock: { now: () => new Date() },
     generateProductId: () => randomUUID() as ProductId,
     categoryDefinition,
+    productImageDirectory: join(settings.dataDirectory, PRODUCT_IMAGE_DIRECTORY_NAME),
   });
   // 停止中に発売月や受注期限を超過した商品を、起動時に自動遷移させる（issue #9）
   const transitionedCount = productService.applyAutomaticTransitions();
