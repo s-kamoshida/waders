@@ -109,4 +109,4 @@ Node.js 24（TypeScript を型除去で直接実行）/ React / Express / SQLite
 | --- | --- |
 | `npm run dev` | 開発（画面 :5173、API は設定のポート。既定 :8080） |
 | `npm run check` | 型チェック・ESLint・全テスト（完了の条件） |
-| `npm run build && npm start` | 本番ビルドで起動（既定 :8080） |
+| `npm run build && npm start` | 本番ビルドで起動（既定 http://localhost:8080/waders/） |

@@ -238,3 +238,110 @@ describe('Host・Origin の確認を無効にした場合（issue #35。PR #37 �
     expect(response.status).toBe(415);
   });
 });
+
+describe('画面と API を置くパス（issue #39）', () => {
+  /** basePath を /waders にしたテスト用の Web アプリケーションを組み立てる。 */
+  function createApplicationUnderWaders() {
+    return createWebApplicationTestHarness(clientBuildDirectory, { basePath: '/waders' }).application;
+  }
+
+  /** ビルド済みの画面を模したファイルに、画面の部品のファイルを1つ加える。 */
+  function writeClientBuildWithAsset(): void {
+    writeClientBuild();
+    mkdirSync(join(clientBuildDirectory, 'assets'), { recursive: true });
+    writeFileSync(join(clientBuildDirectory, 'assets', 'main.js'), 'console.log("waders");');
+  }
+
+  it('basePath が /waders の場合、/waders/api の下で API に応答する', async () => {
+    const response = await request(createApplicationUnderWaders()).get('/waders/api/health');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: 'ok' });
+  });
+
+  it('basePath が /waders の場合、/waders/api の下で商品を登録できる', async () => {
+    const response = await request(createApplicationUnderWaders())
+      .post('/waders/api/products')
+      .send({ name: 'フィギュア', releaseMonth: '2026-12' });
+
+    expect(response.status).toBe(201);
+  });
+
+  it('basePath が /waders の場合、/waders/ に index.html を返し、CSP を付ける', async () => {
+    writeClientBuild();
+
+    const response = await request(createApplicationUnderWaders()).get('/waders/');
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('<title>Waders</title>');
+    expectSelfOnlyContentSecurityPolicy(response.headers['content-security-policy']);
+  });
+
+  it('basePath が /waders の場合、画面の部品のファイルを /waders の下で返す', async () => {
+    writeClientBuildWithAsset();
+
+    const response = await request(createApplicationUnderWaders()).get('/waders/assets/main.js');
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('waders');
+  });
+
+  it('basePath が /waders の場合、画面の URL（/waders/archive など）にも index.html を返す', async () => {
+    writeClientBuild();
+
+    const response = await request(createApplicationUnderWaders()).get('/waders/archive');
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('<title>Waders</title>');
+  });
+
+  it.each(['/', '/waders'])('basePath が /waders の場合、%s を開くと /waders/ へ転送する', async (path) => {
+    writeClientBuild();
+
+    const response = await request(createApplicationUnderWaders()).get(path);
+
+    expect(response.status).toBe(302);
+    expect(response.headers['location']).toBe('/waders/');
+  });
+
+  it.each(['/api/health', '/assets/main.js', '/other'])('basePath が /waders の場合、パスの外の URL（%s）は 404 を返す', async (path) => {
+    writeClientBuildWithAsset();
+
+    const response = await request(createApplicationUnderWaders()).get(path);
+
+    expect(response.status).toBe(404);
+  });
+
+  it('basePath が /waders の場合も、許可していない名前の Host は転送せずに 403 を返す', async () => {
+    writeClientBuild();
+
+    const response = await request(createApplicationUnderWaders()).get('/').set('Host', 'attacker.example');
+
+    expect(response.status).toBe(403);
+  });
+
+  it('basePath が /waders の場合も、Content-Type が application/json でない状態を変えるリクエストは 415 を返す', async () => {
+    const response = await request(createApplicationUnderWaders()).post('/waders/api/products').type('form').send('name=x');
+
+    expect(response.status).toBe(415);
+  });
+
+  it('basePath が /apps/waders の場合、/apps/waders/api の下で API に応答し、/ を /apps/waders/ へ転送する', async () => {
+    writeClientBuild();
+    const application = createWebApplicationTestHarness(clientBuildDirectory, { basePath: '/apps/waders' }).application;
+
+    expect((await request(application).get('/apps/waders/api/health')).status).toBe(200);
+    const redirectResponse = await request(application).get('/');
+    expect(redirectResponse.status).toBe(302);
+    expect(redirectResponse.headers['location']).toBe('/apps/waders/');
+  });
+
+  it('basePath が "" の場合、今までどおり / の下で画面と API に応答し、/waders/api の下では API に応答しない', async () => {
+    writeClientBuild();
+    const application = createWebApplicationTestHarness(clientBuildDirectory, { basePath: '' }).application;
+
+    expect((await request(application).get('/api/health')).status).toBe(200);
+    expect((await request(application).get('/')).status).toBe(200);
+    expect((await request(application).get('/waders/api/health')).status).not.toBe(200);
+  });
+});

@@ -62,6 +62,8 @@ export type WebApplicationTestHarnessOptions = {
   readonly allowedHosts?: readonly string[];
   /** Host・Origin を確かめるか（設定の hostValidationEnabled）。省略すると確かめる（issue #35）。 */
   readonly hostValidationEnabled?: boolean;
+  /** 画面と API を置くパス（設定の basePath）。省略すると `""`（`/` の下。issue #39）。 */
+  readonly basePath?: string;
 };
 
 /**
@@ -113,6 +115,7 @@ export function createWebApplicationTestHarness(
       authenticationService,
       allowedHosts: options.allowedHosts ?? [],
       hostValidationEnabled: options.hostValidationEnabled ?? true,
+      basePath: options.basePath ?? '',
     }),
     database,
     productRepository,

@@ -1,5 +1,5 @@
 /**
- * サーバーの設定（ポート・データのフォルダ・認証の有効・無効・接続を受け付ける名前）の読み込みと検証。
+ * サーバーの設定（ポート・データのフォルダ・認証の有効・無効・接続を受け付ける名前・画面と API を置くパス）の読み込みと検証。
  *
  * 所属: コンポジションルートの補助（main.ts と vite.config.ts から利用）
  * 責務:
@@ -31,10 +31,22 @@ const hostNameSchema = z
   .regex(/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i, 'ホスト名を書いてください（ポートや http:// は付けない）')
   .transform((value) => value.toLowerCase());
 
+/** 画面と API を置くパスの既定（issue #39）。 */
+export const DEFAULT_BASE_PATH = '/waders';
+
+/**
+ * 画面と API を置くパス。`""`（`/` の下）か、`/` で始まる区切りの並び（英数字と `-`・`_`・`.`・`~`。`.`・`..` だけの区切りは不可）。
+ * 末尾の `/` や `/` だけの値は受け付けない（`/` の下は `""` だけで表す。issue #39）。
+ */
+const basePathSchema = z
+  .string()
+  .regex(/^(?:\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._~-]+)*$/, '"" か、/ で始まるパス（例: "/waders"）を書いてください（末尾に / は付けない）');
+
 /**
  * 設定ファイルの形式（version 1）。
  * authenticationEnabled は issue #11 で追加した。この項目がない既存の設定ファイルは、認証を有効として扱う（安全側に倒す）。
  * allowedHosts・hostValidationEnabled は issue #35 で追加した。項目がなければ、追加で許す名前はなく、Host・Origin の確認は有効とする（安全側に倒す）。
+ * basePath は issue #39 で追加した。項目がなければ /waders とする（更新するだけで新しい URL になる）。
  */
 const settingsFileSchema = z.object({
   version: z.literal(1),
@@ -42,6 +54,7 @@ const settingsFileSchema = z.object({
   authenticationEnabled: z.boolean().default(true),
   allowedHosts: z.array(hostNameSchema).default([]),
   hostValidationEnabled: z.boolean().default(true),
+  basePath: basePathSchema.default(DEFAULT_BASE_PATH),
 });
 
 /** 環境変数の認証の有効・無効。"true" か "false" だけを受け付ける（誤記で無効にならないようにする）。 */
@@ -66,6 +79,8 @@ export type ServerSettings = {
   readonly allowedHosts: readonly string[];
   /** Host・Origin を確かめるか（DNS リバインディング対策。issue #35）。環境変数では切り替えない。 */
   readonly hostValidationEnabled: boolean;
+  /** 画面と API を置くパス（`""` は `/` の下。末尾に `/` は付かない。issue #39）。環境変数では切り替えない。 */
+  readonly basePath: string;
 };
 
 /** 設定ファイルや環境変数の内容に誤りがある場合のエラー。メッセージに誤りのある場所を含める。 */
@@ -114,6 +129,7 @@ export function loadServerSettings(options: LoadServerSettingsOptions): ServerSe
     authenticationEnabled,
     allowedHosts: settingsFile.allowedHosts,
     hostValidationEnabled: settingsFile.hostValidationEnabled,
+    basePath: settingsFile.basePath,
   };
 }
 

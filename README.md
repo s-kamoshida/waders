@@ -73,7 +73,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now waders
 ```
 
-同じ LAN の PC やスマートフォンのブラウザで `http://raspberrypi.local:8080` を開きます（開けない場合は Raspberry Pi の IP アドレスで `http://<IP アドレス>:8080`）。Raspberry Pi を再起動しても自動で起動します。
+同じ LAN の PC やスマートフォンのブラウザで `http://raspberrypi.local:8080/waders/` を開きます（開けない場合は Raspberry Pi の IP アドレスで `http://<IP アドレス>:8080/waders/`）。`http://raspberrypi.local:8080` を開いても `/waders/` へ移ります。Raspberry Pi を再起動しても自動で起動します。
 
 初めて起動したときに作られる設定では、**認証は無効**です。Waders に接続できる人は誰でも、ログインなしで商品を見たり変えたりできるため、信頼できる人だけがつながる家庭の LAN の中で使ってください。ログインを必須にする場合は「[認証](#認証)」を参照して有効にしてください。
 
@@ -97,6 +97,8 @@ cd ~/waders
 PATH=/opt/homebridge/bin:$PATH npm ci --omit=dev
 sudo systemctl restart waders
 ```
+
+`basePath` のない版から更新すると、開く URL が `http://raspberrypi.local:8080/waders/` になります。今までの `http://raspberrypi.local:8080` のブックマークやホーム画面のアイコンから開いても `/waders/` へ移るので、そのまま使えます。今までどおり `/` で開きたい場合は、`settings.json` に `"basePath": ""` を書いてください。
 
 認証のない版から更新すると、設定に認証の項目がないため（安全のため）認証が有効になり、次に開いたときに「アカウントの作成」の画面が表示されます。すぐにアカウントを作ってください。認証を使わない場合は「[認証](#認証)」を参照して、`settings.json` に `"authenticationEnabled": false` を書いてください。
 
@@ -132,7 +134,8 @@ DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自�
   "port": 8080,
   "authenticationEnabled": false,
   "allowedHosts": [],
-  "hostValidationEnabled": true
+  "hostValidationEnabled": true,
+  "basePath": "/waders"
 }
 ```
 
@@ -142,6 +145,7 @@ DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自�
 | `authenticationEnabled` | ID とパスワードによる認証を使うか（`true` か `false`）。ひな形では `false`。項目がなければ安全のため `true` として扱います | `false`（ひな形） |
 | `allowedHosts` | 開くときに使う名前のうち、IP アドレス・`localhost`・`.local` で終わる名前（`raspberrypi.local` など）以外のもの（例: `["waders.home.example"]`）。ポートや `http://` は付けません。詳しくは「[接続を受け付ける名前](#接続を受け付ける名前)」 | `[]` |
 | `hostValidationEnabled` | 接続を受け付ける名前を確かめるか（`true` か `false`）。項目がなければ `true` として扱います | `true` |
+| `basePath` | 画面を開く URL のパス（`http://raspberrypi.local:8080/waders/` の `/waders`）。`/` で始め、末尾に `/` は付けません。英数字と `-`・`_`・`.`・`~` を `/` で区切って書けます（例: `"/apps/waders"`）。`""` にすると `http://raspberrypi.local:8080/` で開きます。`/` を開くと、このパスへ移ります。項目がなければ `/waders` として扱います。環境変数では変えられません | `/waders` |
 
 次の環境変数を指定すると、設定ファイルより優先されます。
 
@@ -193,9 +197,9 @@ DB（`data/waders.sqlite`）の形式が変わる更新では、起動時に自�
 
 Waders は、開くときに使う名前（URL のホスト名）が次のどれかの場合だけ応答します。悪意あるサイトを家庭の LAN の中の端末で開いたときに、そのサイトから Waders を操作されないようにするためです（DNS リバインディング対策。認証が無効なときも守ります）。
 
-- IP アドレス（例: `http://192.168.1.10:8080`）
+- IP アドレス（例: `http://192.168.1.10:8080/waders/`）
 - `localhost`
-- `.local` で終わる名前（例: `http://raspberrypi.local:8080`）
+- `.local` で終わる名前（例: `http://raspberrypi.local:8080/waders/`）
 - `settings.json` の `allowedHosts` に書いた名前
 
 自宅の DNS や VPN（Tailscale など）の名前で開く場合は、その名前を `allowedHosts` に書いて再起動してください。書いていない名前で開くと、「この名前では接続できません」と表示されます。
@@ -206,7 +210,8 @@ Waders は、開くときに使う名前（URL のホスト名）が次のどれ
   "port": 8080,
   "authenticationEnabled": false,
   "allowedHosts": ["waders.home.example"],
-  "hostValidationEnabled": true
+  "hostValidationEnabled": true,
+  "basePath": "/waders"
 }
 ```
 
@@ -272,10 +277,10 @@ Node.js 24 以上が必要です。
 
 ```sh
 npm install
-npm run dev          # 開発用に起動（画面 http://localhost:5173 、API は設定のポート）
+npm run dev          # 開発用に起動（画面 http://localhost:5173/ 、API は設定のポートの basePath の下へ転送）
 npm run check        # 型チェック・ESLint・全テスト
 npm run build        # 画面をビルド（dist/client）
-npm start            # ビルドした画面とサーバーを起動（http://localhost:8080）
+npm start            # ビルドした画面とサーバーを起動（http://localhost:8080/waders/）
 npm run reset-account  # アカウントを消す（パスワードを忘れた場合）
 ```
 

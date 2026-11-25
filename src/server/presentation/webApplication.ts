@@ -11,6 +11,8 @@
  *  - 認証が有効なときは、/api/health と /api/auth 以外の API にログインを求める（issue #11）。
  *    画面のファイルは認証なしで配信する（画面がログインの画面を表示するため。データはすべて API から取る）
  *  - ビルド済みの画面の配信（画面の URL には index.html を返す）
+ *  - 画面と API を、設定のパス（basePath。既定 /waders）の下に置く。`/` と末尾の `/` がないパスは `<basePath>/` へ転送し、
+ *    パスの外のそれ以外の URL は 404 にする（issue #39）
  *  - 想定外のエラーを 500 の応答に変え、詳細はログにだけ出す
  */
 import { existsSync } from 'node:fs';
@@ -72,6 +74,8 @@ export type WebApplicationOptions = {
   readonly allowedHosts: readonly string[];
   /** Host・Origin を確かめるか（設定の hostValidationEnabled。issue #35）。 */
   readonly hostValidationEnabled: boolean;
+  /** 画面と API を置くパス（設定の basePath。`""` は `/` の下。末尾に `/` は付かない。issue #39）。 */
+  readonly basePath: string;
 };
 
 /** 状態を変える HTTP メソッド。 */
@@ -193,8 +197,30 @@ function handleUnexpectedError(error: unknown, request: Request, response: Respo
 }
 
 /**
+ * 画面と API を置くパスの入り口（`/` と、末尾の `/` がない `<basePath>`）を開いた場合に、`<basePath>/` へ転送するミドルウェアを作る。
+ * 設定を変えたときに古い転送がブラウザに残らないよう、一時的な転送（302）にする（issue #39）。
+ * @param basePath 画面と API を置くパス（`""` 以外）
+ */
+function createBasePathRedirect(basePath: string) {
+  return function redirectToBasePath(request: Request, response: Response, next: NextFunction): void {
+    const isReadingRequest = request.method === 'GET' || request.method === 'HEAD';
+    if (!isReadingRequest || (request.path !== '/' && request.path !== basePath)) {
+      next();
+      return;
+    }
+    response.redirect(302, `${basePath}/`);
+  };
+}
+
+/**
+ * 画面の入り口（index.html）を返す URL か。API の区切り（`api`）を含む URL には画面を返さない
+ * （パスの外の API の URL を画面と取り違えないようにするため。issue #39）。
+ */
+const CLIENT_PAGE_PATH_PATTERN = /^\/(?!(?:[^/]*\/)*api(?:\/|$)).*/;
+
+/**
  * Web アプリケーションを組み立てる。
- * @param options ビルド済みの画面のフォルダ、商品・カテゴリー・認証の操作、Host・Origin の確認の設定
+ * @param options ビルド済みの画面のフォルダ、商品・カテゴリー・認証の操作、Host・Origin の確認の設定、画面と API を置くパス
  * @returns 待ち受けを開始していない Express のアプリケーション
  */
 export function createWebApplication(options: WebApplicationOptions): express.Express {
@@ -203,26 +229,32 @@ export function createWebApplication(options: WebApplicationOptions): express.Ex
   application.use(applySecurityHeaders);
   if (options.hostValidationEnabled) application.use(createHostValidation(options.allowedHosts));
 
+  const cookiePath = options.basePath === '' ? '/' : options.basePath;
+  if (options.basePath !== '') application.use(createBasePathRedirect(options.basePath));
+
   const apiRouter = express.Router();
   apiRouter.use(rejectNonJsonStateChangingRequests, express.json({ limit: '100kb' }));
   apiRouter.get('/health', (_request, response) => {
     response.json({ status: 'ok' });
   });
-  apiRouter.use('/auth', createAuthenticationRouter(options.authenticationService));
-  apiRouter.use(createAuthenticationRequirement(options.authenticationService));
+  apiRouter.use('/auth', createAuthenticationRouter(options.authenticationService, cookiePath));
+  apiRouter.use(createAuthenticationRequirement(options.authenticationService, cookiePath));
   apiRouter.use('/products', createProductRouter(options.productService));
   apiRouter.use('/categories', createCategoryRouter(options.categoryService, options.productService));
   apiRouter.use(respondApiNotFound);
   apiRouter.use(handleRequestBodyError);
-  application.use('/api', apiRouter);
 
+  // 画面と API は basePath の下に置く（issue #39）
+  const siteRouter = express.Router();
+  siteRouter.use('/api', apiRouter);
   if (existsSync(options.clientBuildDirectory)) {
-    application.use(express.static(options.clientBuildDirectory));
+    siteRouter.use(express.static(options.clientBuildDirectory));
     // 画面の URL（/archive など）を直接開いた場合も、画面の入り口を返す
-    application.get(/^\/(?!api\/).*/, (_request, response) => {
+    siteRouter.get(CLIENT_PAGE_PATH_PATTERN, (_request, response) => {
       response.sendFile(join(options.clientBuildDirectory, 'index.html'));
     });
   }
+  application.use(options.basePath === '' ? '/' : options.basePath, siteRouter);
 
   application.use(handleUnexpectedError);
   return application;

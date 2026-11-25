@@ -52,10 +52,19 @@ export function listenAuthenticationRequired(listener: () => void): () => void {
   };
 }
 
+/**
+ * API のパス（`/api/...`）を、画面を開いているパスの下のパスにする。
+ * 画面を `/waders/` や `/waders/archive` で開いていれば `/waders/api/...` になる（サーバーの設定の basePath に合わせる。issue #39）。
+ */
+function resolveApiPath(path: string): string {
+  const resolvedUrl = new URL(`.${path}`, document.baseURI);
+  return `${resolvedUrl.pathname}${resolvedUrl.search}`;
+}
+
 /** API を呼び、本文（JSON）を返す。本文がなければ undefined。 */
 async function sendApiRequest(method: string, path: string, requestBody?: unknown): Promise<unknown> {
   const isStateChanging = method !== 'GET';
-  const response = await fetch(path, {
+  const response = await fetch(resolveApiPath(path), {
     method,
     headers: isStateChanging ? { 'Content-Type': 'application/json' } : undefined,
     body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
