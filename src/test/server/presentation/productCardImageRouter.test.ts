@@ -236,7 +236,7 @@ describe('保存したときのカード画像の取得（issue #42）', () => {
     createHarness(deferred.fetchCardImage);
     const product = await createProductThroughApi();
 
-    await request(harness.application).delete(`/api/products/${product.id}`).expect(204);
+    await request(harness.application).delete(`/api/products/${product.id}`).set('Content-Type', 'application/json').expect(204);
     deferred.finish(CARD_JPEG);
     await harness.waitForCardImageFetches();
 
@@ -248,7 +248,7 @@ describe('保存したときのカード画像の取得（issue #42）', () => {
     const product = await createProductThroughApi();
     await harness.waitForCardImageFetches();
 
-    await request(harness.application).delete(`/api/products/${product.id}`).expect(204);
+    await request(harness.application).delete(`/api/products/${product.id}`).set('Content-Type', 'application/json').expect(204);
 
     expect(listStoredImageFiles()).toEqual([]);
   });
@@ -271,7 +271,7 @@ describe('表示する画像の優先順位（issue #42）', () => {
     await harness.waitForCardImageFetches();
     await request(harness.application).put(`/api/products/${product.id}/image`).send({ data: UPLOADED_JPEG.toString('base64') }).expect(200);
 
-    await request(harness.application).delete(`/api/products/${product.id}/image`).expect(204);
+    await request(harness.application).delete(`/api/products/${product.id}/image`).set('Content-Type', 'application/json').expect(204);
 
     expect((await findFirstListedProduct())?.imageUrl).not.toBeNull();
     expect(Buffer.compare((await readProductImage(product.id)) ?? Buffer.alloc(0), Buffer.from(CARD_JPEG))).toBe(0);
