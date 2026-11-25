@@ -336,7 +336,7 @@ describe('画面と API を置くパス（issue #39）', () => {
     expect(redirectResponse.headers['location']).toBe('/apps/waders/');
   });
 
-  it('basePath が "" の場合、今までどおり / の下で画面と API に応答し、/waders は画面の URL として扱う', async () => {
+  it('basePath が "" の場合、今までどおり / の下で画面と API に応答し、/waders/api の下では API に応答しない', async () => {
     writeClientBuild();
     const application = createWebApplicationTestHarness(clientBuildDirectory, { basePath: '' }).application;
 
