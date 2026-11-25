@@ -37,6 +37,7 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     createdAt: '2026-06-01T00:00:00.000Z',
     updatedAt: '2026-06-01T00:00:00.000Z',
     deliveryConfirmationPending: false,
+    cardImagePending: false,
     ...overrides,
   };
 }

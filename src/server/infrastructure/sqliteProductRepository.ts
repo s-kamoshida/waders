@@ -7,7 +7,7 @@
  *  - 商品の登録・取得・一覧・更新・削除と、ステータス・発売月の変更履歴の記録
  *  - 延期の確認を待っている商品の記録（issue #9）
  *  - カテゴリーの改名・削除に伴う、商品のカテゴリーの一括の変更（issue #10）
- *  - 商品に付けた画像のファイルの名前の記録（画像のファイルそのものは productImageStorage.ts。issue #41）
+ *  - 商品に付けた画像・取ったカード画像のファイルの名前の記録（画像のファイルそのものは productImageStorage.ts。issue #41・#42）
  * 認証のアカウントとログインした状態の表も同じ DB に置く（スキーマの移行はここに一本化。読み書きは sqliteAccountRepository.ts）。
  * 業務ルールに対応する CHECK 制約を DB にも付け、検証をすり抜けた不正な値を最後に拒否する。
  * SQLite は Node.js 標準の node:sqlite を使う（CLAUDE.md「技術スタック」）。
@@ -151,6 +151,16 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
     OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.webp'
   );
   `,
+  // 版数 8: 購入先のページから取ったカード画像のファイルの名前（issue #42）。アップロードした画像とは別に持つ
+  // （アップロードした画像を消したらカード画像を表示するため）。既存の商品はカード画像なし（NULL）になる
+  `
+  ALTER TABLE products ADD COLUMN card_image_file_name TEXT CHECK (
+    card_image_file_name IS NULL
+    OR card_image_file_name GLOB '${imageFileNameStemPattern}.jpg'
+    OR card_image_file_name GLOB '${imageFileNameStemPattern}.png'
+    OR card_image_file_name GLOB '${imageFileNameStemPattern}.webp'
+  );
+  `,
 ];
 
 /** 最新のスキーマの版数。 */
@@ -221,7 +231,19 @@ export type ProductRepository = {
   findUploadedImageFileName(productId: ProductId): string | null | undefined;
   /** 画像を付けた商品の ID と、画像のファイルの名前（issue #41）。 */
   listUploadedImageFileNames(): Map<ProductId, string>;
+  /**
+   * 商品のカード画像のファイルの名前を記録する。null なら消す。商品のほかの項目・更新日時・変更履歴は変えない（issue #42）。
+   * @returns 記録した場合は true、商品が存在しない場合は false
+   */
+  setCardImageFileName(productId: ProductId, fileName: string | null): boolean;
+  /** 商品のカード画像のファイルの名前。カード画像がなければ null、商品が存在しなければ undefined（issue #42）。 */
+  findCardImageFileName(productId: ProductId): string | null | undefined;
+  /** カード画像のある商品の ID と、カード画像のファイルの名前（issue #42）。 */
+  listCardImageFileNames(): Map<ProductId, string>;
 };
+
+/** 画像のファイルの名前を記録する列（アップロードした画像・カード画像）。 */
+type ImageFileNameColumn = 'uploaded_image_file_name' | 'card_image_file_name';
 
 const productRowSchema = z.object({
   id: z.string(),
@@ -247,7 +269,7 @@ const productRowSchema = z.object({
   updated_at: z.string(),
 });
 
-const uploadedImageRowSchema = z.object({ id: z.string(), uploaded_image_file_name: z.string().nullable() });
+const imageFileNameRowSchema = z.object({ id: z.string(), file_name: z.string().nullable() });
 
 const historyRowSchema = z.object({
   changed_at: z.string(),
@@ -369,6 +391,26 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
   const findProductById = (productId: ProductId): Product | undefined => {
     const row = database.prepare('SELECT * FROM products WHERE id = ?').get(productId);
     return row === undefined ? undefined : convertRowToProduct(row);
+  };
+
+  const setImageFileName = (column: ImageFileNameColumn, productId: ProductId, fileName: string | null): boolean => {
+    const result = database.prepare(`UPDATE products SET ${column} = ? WHERE id = ?`).run(fileName, productId);
+    return Number(result.changes) > 0;
+  };
+
+  const findImageFileName = (column: ImageFileNameColumn, productId: ProductId): string | null | undefined => {
+    const row = database.prepare(`SELECT id, ${column} AS file_name FROM products WHERE id = ?`).get(productId);
+    return row === undefined ? undefined : imageFileNameRowSchema.parse(row).file_name;
+  };
+
+  const listImageFileNames = (column: ImageFileNameColumn): Map<ProductId, string> => {
+    const rows = database.prepare(`SELECT id, ${column} AS file_name FROM products WHERE ${column} IS NOT NULL`).all();
+    return new Map(
+      rows.map((row) => {
+        const parsedRow = imageFileNameRowSchema.extend({ file_name: z.string() }).parse(row);
+        return [parsedRow.id as ProductId, parsedRow.file_name];
+      }),
+    );
   };
 
   return {
@@ -511,23 +553,27 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
     },
 
     setUploadedImageFileName(productId, fileName) {
-      const result = database.prepare('UPDATE products SET uploaded_image_file_name = ? WHERE id = ?').run(fileName, productId);
-      return Number(result.changes) > 0;
+      return setImageFileName('uploaded_image_file_name', productId, fileName);
     },
 
     findUploadedImageFileName(productId) {
-      const row = database.prepare('SELECT id, uploaded_image_file_name FROM products WHERE id = ?').get(productId);
-      return row === undefined ? undefined : uploadedImageRowSchema.parse(row).uploaded_image_file_name;
+      return findImageFileName('uploaded_image_file_name', productId);
     },
 
     listUploadedImageFileNames() {
-      const rows = database.prepare('SELECT id, uploaded_image_file_name FROM products WHERE uploaded_image_file_name IS NOT NULL').all();
-      return new Map(
-        rows.map((row) => {
-          const parsedRow = uploadedImageRowSchema.extend({ uploaded_image_file_name: z.string() }).parse(row);
-          return [parsedRow.id as ProductId, parsedRow.uploaded_image_file_name];
-        }),
-      );
+      return listImageFileNames('uploaded_image_file_name');
+    },
+
+    setCardImageFileName(productId, fileName) {
+      return setImageFileName('card_image_file_name', productId, fileName);
+    },
+
+    findCardImageFileName(productId) {
+      return findImageFileName('card_image_file_name', productId);
+    },
+
+    listCardImageFileNames() {
+      return listImageFileNames('card_image_file_name');
     },
   };
 }

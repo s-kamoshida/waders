@@ -46,6 +46,7 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     createdAt,
     updatedAt: createdAt,
     deliveryConfirmationPending: false,
+    cardImagePending: false,
     ...overrides,
   };
 }

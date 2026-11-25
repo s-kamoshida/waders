@@ -54,7 +54,12 @@ export type WebApplicationTestHarness = {
   writeCategoryDefinition(content: unknown): void;
   /** 現在時刻を進める。 */
   setCurrentTime(currentTime: Date): void;
+  /** 裏で取りに行っているカード画像の取得が、すべて終わるのを待つ（issue #42）。 */
+  waitForCardImageFetches(): Promise<void>;
 };
+
+/** カード画像を取りに行く関数（テストでは偽物に差し替える。issue #42）。 */
+export type TestCardImageFetch = (pageUrl: string) => Promise<{ readonly bytes: Uint8Array; readonly format: 'jpeg' | 'png' | 'webp' } | null>;
 
 /** createWebApplicationTestHarness の追加の引数。 */
 export type WebApplicationTestHarnessOptions = {
@@ -66,6 +71,8 @@ export type WebApplicationTestHarnessOptions = {
   readonly hostValidationEnabled?: boolean;
   /** 画面と API を置くパス（設定の basePath）。省略すると `""`（`/` の下。issue #39）。 */
   readonly basePath?: string;
+  /** カード画像を取りに行く関数。省略すると、どの URL でも取れない（null を返す。外へ接続しない。issue #42）。 */
+  readonly fetchCardImage?: TestCardImageFetch;
 };
 
 /**
@@ -101,6 +108,7 @@ export function createWebApplicationTestHarness(
     clock: { now: () => currentTime },
     categoryDefinition,
     productImageDirectory,
+    fetchCardImage: options.fetchCardImage ?? (async () => null),
     generateProductId: () => {
       issuedIdCount += 1;
       return `product-${issuedIdCount}` as ProductId;
@@ -130,6 +138,9 @@ export function createWebApplicationTestHarness(
     writeCategoryDefinition,
     setCurrentTime(nextTime) {
       currentTime = nextTime;
+    },
+    waitForCardImageFetches() {
+      return productService.waitForPendingCardImageFetches();
     },
   };
 }

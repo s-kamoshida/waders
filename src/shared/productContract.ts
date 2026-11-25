@@ -208,8 +208,12 @@ export type ProductResponse = z.infer<typeof productSchema>;
 /**
  * 一覧（GET /api/products）の商品のスキーマ。
  * deliveryConfirmationPending は、予約済から自動で購入済になり、延期の確認（届いたかどうか）を待っているか（issue #9）。
+ * cardImagePending は、購入先のページのカード画像を取りに行っている途中か（画面は取り終わるまで読み直す。issue #42）。
  */
-export const productListItemSchema = productSchema.extend({ deliveryConfirmationPending: z.boolean().default(false) });
+export const productListItemSchema = productSchema.extend({
+  deliveryConfirmationPending: z.boolean().default(false),
+  cardImagePending: z.boolean().default(false),
+});
 
 /** 一覧の商品。 */
 export type ProductListItem = z.infer<typeof productListItemSchema>;

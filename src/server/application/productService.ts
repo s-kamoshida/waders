@@ -10,6 +10,10 @@
  * 商品の更新を先に行い、定義のファイルの書き込みをトランザクションの最後に行う（書き込みに失敗したら商品の更新を取り消す）。
  * 商品の画像（issue #41）は、大きさと中身の形式を確かめてからファイルに保存し、ファイルの名前を DB に記録する。
  * 画像を付ける・消すことは商品の更新ではないため、更新日時と変更履歴は変えない。差し替え・削除・商品の削除では前のファイルを消す。
+ * カード画像（issue #42）は、購入先の URL がある商品を保存したときに裏で取りに行き（保存の応答は待たせない）、
+ * アップロードした画像とは別に保存する。表示する画像は、アップロードした画像があればそれ、なければカード画像。
+ * 取りに行くのは URL を入れた・変えたときと、まだカード画像がないとき。URL を消した・変えたときは前のカード画像を消す。
+ * 取りに行っている間に URL が変わった・商品が消えた・新しく取りに行った場合は、前の結果を使わない。
  */
 import {
   CategoryAlreadyDefinedError,
@@ -48,8 +52,8 @@ import type { DeliveryConfirmationRequest, ProductInput } from '../../shared/pro
 /** 現在時刻を返す（テストで時刻を固定するため、直接 new Date() を呼ばない）。 */
 export type Clock = { now(): Date };
 
-/** 一覧の商品。延期の確認を待っているかを含む。 */
-export type ListedProduct = Product & { readonly deliveryConfirmationPending: boolean };
+/** 一覧の商品。延期の確認を待っているか、カード画像を取りに行っているか（issue #42）を含む。 */
+export type ListedProduct = Product & { readonly deliveryConfirmationPending: boolean; readonly cardImagePending: boolean };
 
 /** 商品の画像の中身と形式（issue #41）。 */
 export type ProductImage = { readonly bytes: Uint8Array; readonly format: ProductImageFormat };
@@ -99,12 +103,14 @@ export type ProductService = {
    * @throws {ProductNotFoundError} 商品が存在しない場合
    */
   deleteProductImage(productId: ProductId): void;
-  /** 商品の画像を読む。商品か画像がなければ undefined（issue #41）。 */
+  /** 表示する画像（アップロードした画像、なければカード画像）を読む。商品か画像がなければ undefined（issue #41・#42）。 */
   readProductImage(productId: ProductId): ProductImage | undefined;
-  /** 商品の画像の版（画像を付け直すたびに変わる値）。画像がなければ null（issue #41）。 */
+  /** 表示する画像の版（画像が変わるたびに変わる値）。画像がなければ null（issue #41・#42）。 */
   findProductImageVersion(productId: ProductId): string | null;
-  /** 画像を付けた商品の ID と、その画像の版（issue #41）。 */
+  /** 表示する画像のある商品の ID と、その画像の版（issue #41・#42）。 */
   listProductImageVersions(): Map<ProductId, string>;
+  /** 裏で取りに行っているカード画像の取得が、すべて終わるのを待つ（テスト・終了の前に使う。issue #42）。 */
+  waitForPendingCardImageFetches(): Promise<void>;
   /**
    * アーカイブされた商品をリストに戻す。ステータスは自動遷移の前に戻し、発売月を新しい月にし、延期の確認待ちを外す。
    * @param releaseMonth 新しい発売月（当月以降）
@@ -172,6 +178,10 @@ export type ProductServiceDependencies = {
   readonly categoryDefinition: CategoryDefinition;
   /** 商品の画像を保存するフォルダ（なければ最初の保存のときに作る。issue #41）。 */
   readonly productImageDirectory: string;
+  /** 購入先のページのカード画像を取りに行く。取れなければ null（issue #42）。 */
+  readonly fetchCardImage: (pageUrl: string) => Promise<ProductImage | null>;
+  /** カード画像の保存などで想定外のエラーが起きたときに知らせる（ログに出す）。省略すると何もしない（issue #42）。 */
+  readonly reportCardImageError?: (error: unknown) => void;
 };
 
 /** 画像のファイルの名前から、画像の版（拡張子を除いた乱数の部分）を求める。 */
@@ -183,6 +193,67 @@ function toImageVersion(fileName: string): string {
 export function createProductService(dependencies: ProductServiceDependencies): ProductService {
   const { productRepository, clock, generateProductId, categoryDefinition } = dependencies;
   const productImageStorage = createProductImageStorage({ directory: dependencies.productImageDirectory });
+
+  /** 取りに行っているカード画像の、商品ごとの取得の番号（新しく取りに行ったら、前の取得の結果は使わない。issue #42）。 */
+  const cardImageFetchNumbers = new Map<ProductId, number>();
+  let lastCardImageFetchNumber = 0;
+  const runningCardImageFetches = new Set<Promise<void>>();
+
+  /** 表示する画像のファイルの名前（アップロードした画像、なければカード画像）。 */
+  const findDisplayedImageFileName = (productId: ProductId): string | null => {
+    return productRepository.findUploadedImageFileName(productId) ?? productRepository.findCardImageFileName(productId) ?? null;
+  };
+
+  /** カード画像を消し、取りに行っている結果も使わないようにする。 */
+  const deleteCardImage = (productId: ProductId): void => {
+    cardImageFetchNumbers.delete(productId);
+    const fileName = productRepository.findCardImageFileName(productId);
+    if (fileName === null || fileName === undefined) return;
+    productRepository.setCardImageFileName(productId, null);
+    productImageStorage.deleteImage(fileName);
+  };
+
+  /** 取ったカード画像を保存する。新しく取りに行った・URL が変わった・商品が消えた場合や、上限・形式に合わない場合は保存しない。 */
+  const storeCardImage = (productId: ProductId, pageUrl: string, fetchNumber: number, cardImage: ProductImage | null): void => {
+    if (cardImageFetchNumbers.get(productId) !== fetchNumber) return;
+    cardImageFetchNumbers.delete(productId);
+    if (cardImage === null || cardImage.bytes.byteLength > MAXIMUM_PRODUCT_IMAGE_BYTES) return;
+    const format = detectProductImageFormat(cardImage.bytes);
+    if (format === null || productRepository.findProductById(productId)?.url !== pageUrl) return;
+    const previousFileName = productRepository.findCardImageFileName(productId);
+    const fileName = productImageStorage.saveImage(cardImage.bytes, format);
+    productRepository.setCardImageFileName(productId, fileName);
+    if (previousFileName !== null && previousFileName !== undefined) productImageStorage.deleteImage(previousFileName);
+  };
+
+  /** カード画像を裏で取りに行く。取れなかった・失敗した場合も、商品の保存には影響させない。 */
+  const startCardImageFetch = (productId: ProductId, pageUrl: string): void => {
+    lastCardImageFetchNumber += 1;
+    const fetchNumber = lastCardImageFetchNumber;
+    cardImageFetchNumbers.set(productId, fetchNumber);
+    const running = Promise.resolve()
+      .then(() => dependencies.fetchCardImage(pageUrl))
+      .catch(() => null)
+      .then((cardImage) => storeCardImage(productId, pageUrl, fetchNumber, cardImage))
+      .catch((error: unknown) => {
+        if (cardImageFetchNumbers.get(productId) === fetchNumber) cardImageFetchNumbers.delete(productId);
+        dependencies.reportCardImageError?.(error);
+      })
+      .finally(() => runningCardImageFetches.delete(running));
+    runningCardImageFetches.add(running);
+  };
+
+  /**
+   * 保存した商品の URL に合わせて、カード画像を取りに行く・消す。
+   * @param previousUrl 保存する前の URL（登録では null）
+   */
+  const refreshCardImage = (productId: ProductId, previousUrl: string | null, currentUrl: string | null): void => {
+    if (currentUrl === null || currentUrl !== previousUrl) deleteCardImage(productId);
+    if (currentUrl === null) return;
+    const hasCardImageOrFetch = cardImageFetchNumbers.has(productId) || productRepository.findCardImageFileName(productId) !== null;
+    if (currentUrl === previousUrl && hasCardImageOrFetch) return;
+    startCardImageFetch(productId, currentUrl);
+  };
 
   /**
    * 入力のカテゴリーの ID から、保存するカテゴリー（ID と名前）を求める。
@@ -270,6 +341,7 @@ export function createProductService(dependencies: ProductServiceDependencies): 
         ...product,
         categoryName: product.categoryId === null ? null : (categoryNames.get(product.categoryId) ?? product.categoryName),
         deliveryConfirmationPending: pendingProductIds.has(product.id),
+        cardImagePending: cardImageFetchNumbers.has(product.id),
       }));
     },
 
@@ -279,6 +351,7 @@ export function createProductService(dependencies: ProductServiceDependencies): 
       const now = clock.now().toISOString();
       const product: Product = { id: generateProductId(), ...input, ...resolveCategory(input.categoryId), createdAt: now, updatedAt: now };
       productRepository.insertProduct(product);
+      refreshCardImage(product.id, null, product.url);
       return product;
     },
 
@@ -289,16 +362,21 @@ export function createProductService(dependencies: ProductServiceDependencies): 
         throw new ArchivedReleaseMonthChangeError(productId);
       }
       const category = resolveCategory(input.categoryId, current);
-      return productRepository.runInTransaction(() => {
+      const updated = productRepository.runInTransaction(() => {
         if (input.status !== current.status) productRepository.clearDeliveryConfirmationPending(productId);
         return updateByUser(current, { ...input, ...category }, currentTime);
       });
+      refreshCardImage(productId, current.url, updated.url);
+      return updated;
     },
 
     deleteProduct(productId) {
-      const imageFileName = productRepository.findUploadedImageFileName(productId);
+      const imageFileNames = [productRepository.findUploadedImageFileName(productId), productRepository.findCardImageFileName(productId)];
       if (!productRepository.deleteProduct(productId)) throw new ProductNotFoundError(productId);
-      if (imageFileName !== null && imageFileName !== undefined) productImageStorage.deleteImage(imageFileName);
+      cardImageFetchNumbers.delete(productId);
+      for (const fileName of imageFileNames) {
+        if (fileName !== null && fileName !== undefined) productImageStorage.deleteImage(fileName);
+      }
     },
 
     saveProductImage(productId, bytes) {
@@ -326,20 +404,23 @@ export function createProductService(dependencies: ProductServiceDependencies): 
     },
 
     readProductImage(productId) {
-      const fileName = productRepository.findUploadedImageFileName(productId);
-      if (fileName === null || fileName === undefined) return undefined;
-      return productImageStorage.readImage(fileName);
+      const fileName = findDisplayedImageFileName(productId);
+      return fileName === null ? undefined : productImageStorage.readImage(fileName);
     },
 
     findProductImageVersion(productId) {
-      const fileName = productRepository.findUploadedImageFileName(productId);
-      return fileName === null || fileName === undefined ? null : toImageVersion(fileName);
+      const fileName = findDisplayedImageFileName(productId);
+      return fileName === null ? null : toImageVersion(fileName);
     },
 
     listProductImageVersions() {
-      const versions = new Map<ProductId, string>();
-      for (const [productId, fileName] of productRepository.listUploadedImageFileNames()) versions.set(productId, toImageVersion(fileName));
-      return versions;
+      // カード画像を先に入れ、アップロードした画像で上書きする（アップロードした画像を優先する）
+      const fileNames = new Map([...productRepository.listCardImageFileNames(), ...productRepository.listUploadedImageFileNames()]);
+      return new Map([...fileNames].map(([productId, fileName]) => [productId, toImageVersion(fileName)]));
+    },
+
+    async waitForPendingCardImageFetches() {
+      while (runningCardImageFetches.size > 0) await Promise.all(runningCardImageFetches);
     },
 
     restoreProduct(productId, releaseMonth) {

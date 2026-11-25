@@ -10,8 +10,9 @@
  *  - 「保存して続けて追加」で保存した場合は、モーダルを開いたまま読み込み直す（issue #16）
  *  - カテゴリーで絞り込む（選択は端末ごとに覚え、見出しの集計も絞り込んだ商品で数える。issue #10）
  *  - ドラッグアンドドロップで発売月を移動し、知らせ（「元に戻す」付き）を出す。ほかの操作を始めたら知らせを閉じる（issue #13）
+ *  - カード画像を取りに行っている商品があれば、2 秒ごとに読み直す。なくなったら止め、取れないままでも 30 秒であきらめる（issue #42）
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ProductListItem, ProductResponse } from '../../shared/productContract.ts';
 import { CategoryFilterMenu, useCategoryFilter } from '../components/CategoryFilterMenu.tsx';
 import { ProductEditorDialog, type ProductEditorMode, type ProductSavedResult } from '../components/ProductEditorDialog.tsx';
@@ -52,6 +53,11 @@ function storeYearMode(yearMode: YearMode): void {
   }
 }
 
+/** カード画像を取りに行っている間に一覧を読み直す間隔（ミリ秒。issue #42）。 */
+const CARD_IMAGE_POLL_INTERVAL_MILLISECONDS = 2000;
+/** カード画像を待って読み直す回数の上限（2 秒ごとに 30 秒まで）。 */
+const MAXIMUM_CARD_IMAGE_POLL_COUNT = 15;
+
 /** ProductListPage の引数。 */
 export type ProductListPageProps = {
   /** 現在時刻。日本時間の当月・今日の判定に使う。 */
@@ -67,6 +73,8 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
   const [yearMode, setYearMode] = useState<YearMode>(readStoredYearMode);
   const [editorMode, setEditorMode] = useState<ProductEditorMode | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  /** カード画像を待って読み直した回数（取りに行っている商品がなくなる・保存すると数え直す）。 */
+  const cardImagePollCountRef = useRef(0);
 
   const today = formatDateInJapan(currentTime);
   const currentMonth = formatMonthInJapan(currentTime);
@@ -85,6 +93,26 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
   useEffect(() => {
     void loadProducts();
   }, [loadProducts]);
+
+  const hasPendingCardImage = products?.some((product) => product.cardImagePending) ?? false;
+  useEffect(() => {
+    if (!hasPendingCardImage) {
+      cardImagePollCountRef.current = 0;
+      return;
+    }
+    if (cardImagePollCountRef.current >= MAXIMUM_CARD_IMAGE_POLL_COUNT) return;
+    const timer = setTimeout(() => {
+      cardImagePollCountRef.current += 1;
+      void loadProducts();
+    }, CARD_IMAGE_POLL_INTERVAL_MILLISECONDS);
+    return () => clearTimeout(timer);
+  }, [products, hasPendingCardImage, loadProducts]);
+
+  /** 保存した後に読み込み直す。新しくカード画像を取りに行くかもしれないため、待つ回数を数え直す（issue #42）。 */
+  const reloadAfterSave = () => {
+    cardImagePollCountRef.current = 0;
+    void loadProducts();
+  };
 
   const categoryFilter = useCategoryFilter(products ?? []);
   const yearGroups = useMemo(
@@ -140,7 +168,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
   const handleSaved = (result?: ProductSavedResult) => {
     setEditorMode(null);
     if (result?.imageSaveFailed === true) setNotice({ kind: 'success', message: SCREEN_MESSAGES.productImageSaveFailed });
-    void loadProducts();
+    reloadAfterSave();
   };
 
   return (
@@ -216,7 +244,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           mode={editorMode}
           onClose={() => setEditorMode(null)}
           onSaved={handleSaved}
-          onSavedAndContinued={() => void loadProducts()}
+          onSavedAndContinued={reloadAfterSave}
           makerSuggestions={makerSuggestions}
           categories={categoryFilter.categories === undefined ? [] : categoryFilter.categories}
         />
