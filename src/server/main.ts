@@ -9,7 +9,7 @@
  *  - 各層の組み立て（依存の注入）と、HTTP サーバーの起動
  *  - 認証の有効・無効を設定から受け取り、ログに出す（issue #11）
  *  - Host・Origin の確認の有効・無効と、追加で許す名前を設定から受け取り、ログに出す（issue #35）
- *  - 商品の画像を保存するフォルダ（データのフォルダの images）を商品の操作に渡す（issue #41）
+ *  - 商品の画像を保存するフォルダ（データのフォルダの images）と、カード画像の取得を商品の操作に渡す（issue #41・#42）
  *  - 終了シグナルを受けたときの後始末
  * 実行: `node src/server/main.ts`（Node.js 24 の型除去機能で TypeScript を直接実行する）
  */
@@ -20,6 +20,7 @@ import { createCategoryService } from './application/categoryService.ts';
 import { createProductService } from './application/productService.ts';
 import { CategoryDefinitionError, type CategoryId } from './domain/category.ts';
 import type { ProductId } from './domain/product.ts';
+import { createCardImageFetcher } from './infrastructure/cardImageFetcher.ts';
 import { createSqliteAccountRepository } from './infrastructure/sqliteAccountRepository.ts';
 import { CATEGORY_TEMPLATE_FILE_PATH, createCategoryDefinitionFile } from './infrastructure/categoryDefinitionFile.ts';
 import { createSqliteProductRepository, openProductDatabase } from './infrastructure/sqliteProductRepository.ts';
@@ -81,6 +82,10 @@ function startServer(): void {
     generateProductId: () => randomUUID() as ProductId,
     categoryDefinition,
     productImageDirectory: join(settings.dataDirectory, PRODUCT_IMAGE_DIRECTORY_NAME),
+    fetchCardImage: createCardImageFetcher().fetchCardImage,
+    reportCardImageError: (error) => {
+      writeStructuredLog('error', 'カード画像を保存できませんでした', { error: error instanceof Error ? (error.stack ?? error.message) : String(error) });
+    },
   });
   // 停止中に発売月や受注期限を超過した商品を、起動時に自動遷移させる（issue #9）
   const transitionedCount = productService.applyAutomaticTransitions();
@@ -118,8 +123,11 @@ function startServer(): void {
   const shutdown = (signal: string): void => {
     writeStructuredLog('info', 'サーバーを停止します', { signal });
     server.close(() => {
-      database.close();
-      process.exit(0);
+      // 裏で取りに行っているカード画像（長くても 10 秒）を待ってから DB を閉じる（issue #42）
+      void productService.waitForPendingCardImageFetches().finally(() => {
+        database.close();
+        process.exit(0);
+      });
     });
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
