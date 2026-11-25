@@ -6,6 +6,12 @@ import { CATEGORY_FILTER_STORAGE_KEY, ProductListPage, YEAR_MODE_STORAGE_KEY } f
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
+// 画像の縮小（canvas）は jsdom では動かないため、縮小した結果を決まった値にする（issue #41）
+vi.mock('../../../client/productImagePreparation.ts', () => ({
+  prepareProductImage: vi.fn(async () => ({ data: 'PREPARED', width: 800, height: 600 })),
+  drawProductImagePreview: vi.fn(),
+}));
+
 /** 日本時間 2026-11-17 12:00。 */
 const currentTime = new Date('2026-11-17T03:00:00.000Z');
 
@@ -35,6 +41,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    imageUrl: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
@@ -1114,5 +1121,32 @@ describe('開催日時と開催期間の表示（PR #30 のレビュー）', () 
     const item = (await screen.findByText('ライブ 東京公演')).closest('article');
     expect(within(item as HTMLElement).getByText('開催 約3時間')).toBeInTheDocument();
     expect(within(item as HTMLElement).queryByText(/18:00/)).not.toBeInTheDocument();
+  });
+});
+
+describe('商品の画像を保存できなかった場合（issue #41）', () => {
+  it('商品を保存できて画像を保存できなかった場合、モーダルを閉じて一覧を読み込み直し、画像を保存できなかったことを知らせる', async () => {
+    let products = [createProduct({ name: '既存の商品' })];
+    const added = createProduct({ name: '追加した商品' });
+    stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'POST /api/products': () => {
+        products = [...products, added];
+        return { status: 201, body: added };
+      },
+      [`PUT /api/products/${added.id}/image`]: () => ({ status: 500, body: { error: { code: 'INTERNAL_ERROR', message: 'error' } } }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('既存の商品');
+
+    await userEvent.click(screen.getByRole('button', { name: '商品を追加' }));
+    await userEvent.type(screen.getByLabelText('商品名'), '追加した商品');
+    await userEvent.upload(screen.getByLabelText('画像'), new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
+    await screen.findByRole('img', { name: '選んだ画像' });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(await screen.findByText('追加した商品')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent('商品は保存しましたが、画像を保存できませんでした。');
   });
 });

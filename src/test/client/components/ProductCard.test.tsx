@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProductCard } from '../../../client/components/ProductCard.tsx';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import type { CategoryResponse } from '../../../shared/categoryContract.ts';
@@ -30,6 +30,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    imageUrl: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,
@@ -272,5 +273,63 @@ describe('開催日時と終了日時（PR #30 のレビュー）', () => {
     render(<ProductCard product={createProduct()} today={today} onSelect={vi.fn()} />);
 
     expect(screen.queryByText(/^開催 /)).not.toBeInTheDocument();
+  });
+});
+
+describe('商品の画像（issue #41）', () => {
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('画像がある場合、画像を表示し、共通のアイコンは表示しない', () => {
+    const { container } = render(
+      <ProductCard product={createProduct({ imageUrl: '/api/products/product-1/image?v=abc' })} today={today} onSelect={vi.fn()} />,
+    );
+
+    const image = container.querySelector('.product-card-thumbnail img');
+    expect(image).not.toBeNull();
+    expect(image).toHaveAttribute('src', '/api/products/product-1/image?v=abc');
+    expect(container.querySelector('.product-card-placeholder')).toBeNull();
+  });
+
+  it('画像は、切らずに枠の中に収める表示のクラスを付ける', () => {
+    const { container } = render(
+      <ProductCard product={createProduct({ imageUrl: '/api/products/product-1/image?v=abc' })} today={today} onSelect={vi.fn()} />,
+    );
+
+    expect(container.querySelector('.product-card-thumbnail img')).toHaveClass('product-card-image');
+  });
+
+  it('画像があっても、ステータスを表示する', () => {
+    render(<ProductCard product={createProduct({ imageUrl: '/api/products/product-1/image?v=abc' })} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.getByText('予約済')).toBeInTheDocument();
+  });
+
+  it('画像がない場合、共通のアイコンを表示する', () => {
+    const { container } = render(<ProductCard product={createProduct({ imageUrl: null })} today={today} onSelect={vi.fn()} />);
+
+    expect(container.querySelector('.product-card-thumbnail img')).toBeNull();
+    expect(container.querySelector('.product-card-placeholder')).not.toBeNull();
+  });
+
+  it('画像を読み込めなかった場合、共通のアイコンに切り替える', () => {
+    const { container } = render(
+      <ProductCard product={createProduct({ imageUrl: '/api/products/product-1/image?v=abc' })} today={today} onSelect={vi.fn()} />,
+    );
+
+    fireEvent.error(container.querySelector('.product-card-thumbnail img') as HTMLImageElement);
+
+    expect(container.querySelector('.product-card-thumbnail img')).toBeNull();
+    expect(container.querySelector('.product-card-placeholder')).not.toBeNull();
+  });
+
+  it('画面を /waders/ で開いている場合、画像は /waders の下の API から読む（issue #39）', () => {
+    window.history.replaceState(null, '', '/waders/');
+    const { container } = render(
+      <ProductCard product={createProduct({ imageUrl: '/api/products/product-1/image?v=abc' })} today={today} onSelect={vi.fn()} />,
+    );
+
+    expect(container.querySelector('.product-card-thumbnail img')).toHaveAttribute('src', '/waders/api/products/product-1/image?v=abc');
   });
 });
