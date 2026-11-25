@@ -8,11 +8,13 @@
  *  - 商品を押して編集のモーダルを開く（発売月は変更できない）。「リストに戻す」で新しい発売月を指定してリストに戻す
  *  - 保存・リストに戻した後に読み込み直す
  *  - リストと同じカテゴリーの選択で絞り込み、見出しの集計も絞り込んだ商品で数える（issue #10）
+ *  - 商品を保存できて画像を保存できなかった場合は、画面の下端の知らせで伝える（issue #41）
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ProductListItem, ProductResponse } from '../../shared/productContract.ts';
 import { CategoryFilterMenu, useCategoryFilter } from '../components/CategoryFilterMenu.tsx';
-import { ProductEditorDialog } from '../components/ProductEditorDialog.tsx';
+import { NoticeToast, type Notice } from '../components/NoticeToast.tsx';
+import { ProductEditorDialog, type ProductSavedResult } from '../components/ProductEditorDialog.tsx';
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { RestoreDialog } from '../components/RestoreDialog.tsx';
 import { fetchProducts } from '../productApiClient.ts';
@@ -36,6 +38,7 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
   const [hasLoadError, setHasLoadError] = useState(false);
   const [yearMode] = useState(readStoredYearMode);
   const [openDialog, setOpenDialog] = useState<OpenDialog | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   const today = formatDateInJapan(currentTime);
   const currentMonth = formatMonthInJapan(currentTime);
@@ -67,6 +70,16 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
     void loadProducts();
   };
 
+  /** 編集を保存した後にモーダルを閉じて読み込み直す。画像を保存できなかった場合は知らせる（issue #41）。 */
+  const handleSaved = (result?: ProductSavedResult) => {
+    if (result?.imageSaveFailed === true) setNotice({ kind: 'success', message: SCREEN_MESSAGES.productImageSaveFailed });
+    closeAndReload();
+  };
+
+  const expireNotice = useCallback((expired: Notice) => {
+    setNotice((current) => (current === expired ? null : current));
+  }, []);
+
   return (
     <div className="archive-page">
       <div className="toolbar">
@@ -95,7 +108,10 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
           yearGroups={yearGroups}
           formatSummary={formatArchiveSummary}
           today={today}
-          onSelect={(selected) => setOpenDialog({ kind: 'edit', product: selected })}
+          onSelect={(selected) => {
+            setNotice(null);
+            setOpenDialog({ kind: 'edit', product: selected });
+          }}
           categories={categoryFilter.categories ?? null}
         />
       )}
@@ -105,7 +121,7 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
           key={openDialog.product.id}
           mode={{ kind: 'edit', product: openDialog.product }}
           onClose={() => setOpenDialog(null)}
-          onSaved={closeAndReload}
+          onSaved={handleSaved}
           onRestoreRequested={() => setOpenDialog({ kind: 'restore', product: openDialog.product })}
           makerSuggestions={makerSuggestions}
           categories={categoryFilter.categories === undefined ? [] : categoryFilter.categories}
@@ -115,6 +131,8 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
       {openDialog?.kind === 'restore' && (
         <RestoreDialog product={openDialog.product} currentMonth={currentMonth} onClose={() => setOpenDialog(null)} onRestored={closeAndReload} />
       )}
+
+      <NoticeToast notice={notice} onExpire={expireNotice} />
     </div>
   );
 }

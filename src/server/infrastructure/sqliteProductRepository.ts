@@ -7,6 +7,7 @@
  *  - 商品の登録・取得・一覧・更新・削除と、ステータス・発売月の変更履歴の記録
  *  - 延期の確認を待っている商品の記録（issue #9）
  *  - カテゴリーの改名・削除に伴う、商品のカテゴリーの一括の変更（issue #10）
+ *  - 商品に付けた画像のファイルの名前の記録（画像のファイルそのものは productImageStorage.ts。issue #41）
  * 認証のアカウントとログインした状態の表も同じ DB に置く（スキーマの移行はここに一本化。読み書きは sqliteAccountRepository.ts）。
  * 業務ルールに対応する CHECK 制約を DB にも付け、検証をすり抜けた不正な値を最後に拒否する。
  * SQLite は Node.js 標準の node:sqlite を使う（CLAUDE.md「技術スタック」）。
@@ -35,6 +36,11 @@ import type {
 } from '../domain/product.ts';
 
 const statusList = PRODUCT_STATUSES.map((status) => `'${status}'`).join(', ');
+
+/** 画像のファイルの名前（乱数の UUID と拡張子。productImageStorage.ts で作る）にあてはまる GLOB の型。拡張子は付けない。 */
+const imageFileNameStemPattern =
+  '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]'
+  + '-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]';
 
 /** UTC の ISO 8601 の日時（toISOString の形。例: 2026-11-20T09:00:00.000Z）にあてはまる GLOB の型。 */
 const utcDateTimePattern = '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9].[0-9][0-9][0-9]Z';
@@ -135,6 +141,16 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
     OR (event_ends_at GLOB '${utcDateTimePattern}' AND (event_starts_at IS NULL OR event_ends_at >= event_starts_at))
   );
   `,
+  // 版数 7: 商品に付けた画像のファイルの名前（issue #41）。既存の商品は画像なし（NULL）になる。
+  // フォルダの外を指す名前を記録しないよう、保存した形（UUID と拡張子）の名前だけを許す
+  `
+  ALTER TABLE products ADD COLUMN uploaded_image_file_name TEXT CHECK (
+    uploaded_image_file_name IS NULL
+    OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.jpg'
+    OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.png'
+    OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.webp'
+  );
+  `,
 ];
 
 /** 最新のスキーマの版数。 */
@@ -196,6 +212,15 @@ export type ProductRepository = {
   ): number;
   /** そのカテゴリーの商品に保存しているカテゴリー名（最後に更新した商品のもの）。商品がなければ undefined（issue #10）。 */
   findCategoryNameOfProducts(categoryId: string): string | undefined;
+  /**
+   * 商品に付けた画像のファイルの名前を記録する。null なら消す。商品のほかの項目・更新日時・変更履歴は変えない（issue #41）。
+   * @returns 記録した場合は true、商品が存在しない場合は false
+   */
+  setUploadedImageFileName(productId: ProductId, fileName: string | null): boolean;
+  /** 商品に付けた画像のファイルの名前。画像がなければ null、商品が存在しなければ undefined（issue #41）。 */
+  findUploadedImageFileName(productId: ProductId): string | null | undefined;
+  /** 画像を付けた商品の ID と、画像のファイルの名前（issue #41）。 */
+  listUploadedImageFileNames(): Map<ProductId, string>;
 };
 
 const productRowSchema = z.object({
@@ -221,6 +246,8 @@ const productRowSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 });
+
+const uploadedImageRowSchema = z.object({ id: z.string(), uploaded_image_file_name: z.string().nullable() });
 
 const historyRowSchema = z.object({
   changed_at: z.string(),
@@ -481,6 +508,26 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
         .prepare('SELECT category FROM products WHERE category_id = ? ORDER BY updated_at DESC, rowid DESC LIMIT 1')
         .get(categoryId);
       return row === undefined ? undefined : z.object({ category: z.string() }).parse(row).category;
+    },
+
+    setUploadedImageFileName(productId, fileName) {
+      const result = database.prepare('UPDATE products SET uploaded_image_file_name = ? WHERE id = ?').run(fileName, productId);
+      return Number(result.changes) > 0;
+    },
+
+    findUploadedImageFileName(productId) {
+      const row = database.prepare('SELECT id, uploaded_image_file_name FROM products WHERE id = ?').get(productId);
+      return row === undefined ? undefined : uploadedImageRowSchema.parse(row).uploaded_image_file_name;
+    },
+
+    listUploadedImageFileNames() {
+      const rows = database.prepare('SELECT id, uploaded_image_file_name FROM products WHERE uploaded_image_file_name IS NOT NULL').all();
+      return new Map(
+        rows.map((row) => {
+          const parsedRow = uploadedImageRowSchema.extend({ uploaded_image_file_name: z.string() }).parse(row);
+          return [parsedRow.id as ProductId, parsedRow.uploaded_image_file_name];
+        }),
+      );
     },
   };
 }

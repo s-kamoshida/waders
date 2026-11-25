@@ -368,8 +368,8 @@ describe('スキーマの移行（版数 1 から）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('最新のスキーマの版数は 6 である（issue #26）', () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(6);
+  it('最新のスキーマの版数は 7 である（issue #41）', () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(7);
   });
 
   it('版数 1 の DB を開いた場合、最新の版数に移行し、既存の商品と履歴を保ち、確認待ちは空、メーカーと備考は未入力になる', () => {
@@ -541,7 +541,7 @@ describe('スキーマの移行（版数 5 → 6。issue #26）', () => {
     const migratedRepository = createSqliteProductRepository(migratedDatabase);
 
     const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
-    expect(version.user_version).toBe(6);
+    expect(version.user_version).toBe(LATEST_SCHEMA_VERSION);
     expect(migratedRepository.findProductById(product.id)).toEqual(product);
     expect(migratedRepository.listProductHistory(product.id)).toHaveLength(2);
     expect(migratedDatabase.prepare('SELECT login_id FROM account').get()).toEqual({ login_id: 'owner' });
@@ -645,3 +645,102 @@ function createSqliteProductRepositoryForVersionOne(versionOneDatabase: Database
   insertHistory.run(product.id, product.createdAt, 'status', product.status);
   insertHistory.run(product.id, product.createdAt, 'release_month', product.releaseMonth);
 }
+
+describe('商品の画像のファイルの名前（issue #41）', () => {
+  const imageFileName = '0b6c2d0e-3f0a-4c55-9a8e-2f1d6c7b8a90.jpg';
+
+  it('画像を付けていない商品の場合、画像のファイルの名前は null', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+
+    expect(repository.findUploadedImageFileName(product.id)).toBeNull();
+    expect(repository.listUploadedImageFileNames().size).toBe(0);
+  });
+
+  it('画像のファイルの名前を記録した場合、取得でき、一覧にも含まれる', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+
+    expect(repository.setUploadedImageFileName(product.id, imageFileName)).toBe(true);
+
+    expect(repository.findUploadedImageFileName(product.id)).toBe(imageFileName);
+    expect(repository.listUploadedImageFileNames()).toEqual(new Map([[product.id, imageFileName]]));
+  });
+
+  it('null を記録した場合、画像のファイルの名前を消す', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+    repository.setUploadedImageFileName(product.id, imageFileName);
+
+    repository.setUploadedImageFileName(product.id, null);
+
+    expect(repository.findUploadedImageFileName(product.id)).toBeNull();
+  });
+
+  it('画像のファイルの名前を記録しても、商品のほかの項目・更新日時・変更履歴は変えない', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+
+    repository.setUploadedImageFileName(product.id, imageFileName);
+
+    expect(repository.findProductById(product.id)).toEqual(product);
+    expect(listChangesAfterRegistration(product.id)).toEqual([]);
+  });
+
+  it('商品を更新しても、画像のファイルの名前は残る', () => {
+    const product = createProduct();
+    repository.insertProduct(product);
+    repository.setUploadedImageFileName(product.id, imageFileName);
+
+    repository.updateProduct({ ...product, name: '名前を直した' }, { changedAt: '2026-11-18T00:00:00.000Z', changeKind: 'user' });
+
+    expect(repository.findUploadedImageFileName(product.id)).toBe(imageFileName);
+  });
+
+  it('商品が存在しない場合、記録せずに false を返し、取得は undefined を返す', () => {
+    expect(repository.setUploadedImageFileName('missing' as ProductId, imageFileName)).toBe(false);
+    expect(repository.findUploadedImageFileName('missing' as ProductId)).toBeUndefined();
+  });
+
+  it.each(['../settings.json', 'images/a.jpg', '', 'a'.repeat(101)])(
+    '保存した形でない名前（"%s"）は、DB の制約で拒否する',
+    (fileName) => {
+      const product = createProduct();
+      repository.insertProduct(product);
+
+      expect(() => repository.setUploadedImageFileName(product.id, fileName)).toThrow(/CHECK constraint failed/);
+    },
+  );
+});
+
+describe('スキーマの移行（版数 6 → 7。issue #41）', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), 'waders-migration-'));
+  });
+
+  afterEach(() => {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  it('版数 6 の DB を開いた場合、版数 7 に移行し、既存の商品のすべての項目を保ち、画像のファイルの名前は null になる', () => {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
+    const versionSixDatabase = new DatabaseSync(databaseFilePath);
+    versionSixDatabase.exec('PRAGMA foreign_keys = ON');
+    for (const migration of SCHEMA_MIGRATIONS.slice(0, 6)) versionSixDatabase.exec(migration);
+    versionSixDatabase.exec('PRAGMA user_version = 6');
+    insertProductForVersionFour(versionSixDatabase, product);
+    versionSixDatabase.close();
+
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
+    expect(version.user_version).toBe(7);
+    expect(migratedRepository.findProductById(product.id)).toEqual(product);
+    expect(migratedRepository.findUploadedImageFileName(product.id)).toBeNull();
+    migratedDatabase.close();
+  });
+});

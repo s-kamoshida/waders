@@ -13,6 +13,11 @@ export const SCREEN_MESSAGES = {
   deleteConfirmationNote: '削除した商品は元に戻せません。',
   /** 「保存して続けて追加」で保存した場合の文言（issue #16）。 */
   productAddedAndContinue: (productName: string) => `「${productName}」を追加しました。`,
+  /** 商品の画像（issue #41）。 */
+  productImageLoadFailed: '画像を読み込めませんでした。別の画像を選んでください。',
+  productImageSaveFailed: '商品は保存しましたが、画像を保存できませんでした。',
+  /** 「保存して続けて追加」で保存し、画像を保存できなかった場合。 */
+  productAddedWithoutImage: (productName: string) => `「${productName}」を追加しましたが、画像を保存できませんでした。`,
   /** カテゴリーの定義を読み込めなかった場合（サーバーの理由がない場合）（issue #10）。 */
   categoryDefinitionLoadFailed: 'カテゴリーの定義を読み込めませんでした。時間をおいて、ページを読み込み直してください。',
   /** カテゴリーの定義に誤りがある場合の補足。 */

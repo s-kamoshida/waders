@@ -2,14 +2,14 @@
  * 商品のカード。
  *
  * 所属: クライアント（画面の部品）
- * 責務: 1 件の商品を、画像（共通のアイコン）・ステータス・メーカー・商品名・場所・金額・送料・費用・備考の印・開催日時・受注期限・
+ * 責務: 1 件の商品を、画像（画像がない・読み込めない場合は共通のアイコン。issue #41）・ステータス・メーカー・商品名・場所・金額・送料・費用・備考の印・開催日時・受注期限・
  * 購入先のリンクとして表示する。
  *  - 費用（手数料・交通費（見込）・その他費用）は値があるものだけを示し、その他費用はカテゴリーの名前で示す（issue #26・#27）
  *  - 「送料無料」は、送料が有効なカテゴリーの商品（未設定・定義にないカテゴリーを含む）にだけ示す（issue #27）
  *  - 開催日時と終了日時は両方あるときだけ、並べる形式では日時、リスト形式では開催期間を示す（PR #30 のレビュー）
  * カードを押すと onSelect で選択を知らせる。購入先のリンクは別のタブで開き、選択はしない。
  */
-import type { HTMLAttributes } from 'react';
+import { useState, type HTMLAttributes } from 'react';
 import type { CategoryResponse } from '../../shared/categoryContract.ts';
 import type { ProductResponse } from '../../shared/productContract.ts';
 import {
@@ -25,6 +25,7 @@ import {
   isOrderDeadlineApproaching,
   resolveOtherExpenseLabel,
 } from '../productDisplay.ts';
+import { resolveApiPath } from '../productApiClient.ts';
 
 /** ProductCard の引数。 */
 export type ProductCardProps = {
@@ -87,12 +88,19 @@ export function ProductCard({ product, today, onSelect, dragHandlers, isGrabbed 
   const showsShipping = determineVisibleCategoryFields(categories, product.categoryId, product).has('shippingFee');
   const additionalCostLabels = listAdditionalCostLabels(product, resolveOtherExpenseLabel(categories, product.categoryId));
   const eventLabel = formatEventLabel(product, layout);
+  // 読み込めなかった画像の URL。画像を付け直すと URL（版）が変わるため、新しい画像は読み込み直す
+  const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
+  const imageUrl = product.imageUrl !== null && product.imageUrl !== failedImageUrl ? product.imageUrl : null;
 
   return (
     <article className={`product-card ${selectStatusClassName(product)}${isGrabbed ? ' product-card--grabbed' : ''}`} {...dragHandlers}>
       <button type="button" className="product-card-main" onClick={() => onSelect(product)}>
         <span className="product-card-thumbnail">
-          <ProductPlaceholderIcon />
+          {imageUrl === null ? (
+            <ProductPlaceholderIcon />
+          ) : (
+            <img className="product-card-image" src={resolveApiPath(imageUrl)} alt="" onError={() => setFailedImageUrl(imageUrl)} />
+          )}
           <span className="product-card-status">{getStatusLabel(product.status, product.cancelable)}</span>
         </span>
         <span className="product-card-body">

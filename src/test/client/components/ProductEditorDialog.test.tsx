@@ -7,6 +7,15 @@ import type { CategoryResponse } from '../../../shared/categoryContract.ts';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
+// 画像の縮小（canvas）は jsdom では動かないため、縮小した結果を決まった値にする（issue #41）
+vi.mock('../../../client/productImagePreparation.ts', () => ({
+  prepareProductImage: vi.fn(async (file: File) => {
+    if (file.name === 'broken.jpg') throw new Error('画像として読めない');
+    return { data: `PREPARED-${file.name}`, width: 800, height: 600 };
+  }),
+  drawProductImagePreview: vi.fn(),
+}));
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -43,6 +52,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    imageUrl: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,
@@ -1171,5 +1181,271 @@ describe('開催日時と終了日時（PR #30 のレビュー）', () => {
 
     expect(screen.getByLabelText('開催日時')).toHaveValue('');
     expect(screen.getByLabelText('終了日時')).toHaveValue('');
+  });
+});
+
+describe('商品の画像（issue #41）', () => {
+  const photo = new File(['photo'], 'photo.jpg', { type: 'image/jpeg' });
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('画像の欄は、画像のファイルだけを選べる', () => {
+    stubFetchRoutes({});
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    expect(screen.getByLabelText('画像')).toHaveAttribute('accept', 'image/*');
+  });
+
+  it('画像を選んだ場合、縮小した画像のプレビューを表示し、「画像を消す」ボタンを表示する', async () => {
+    stubFetchRoutes({});
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    await userEvent.upload(screen.getByLabelText('画像'), photo);
+
+    expect(await screen.findByRole('img', { name: '選んだ画像' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '画像を消す' })).toBeInTheDocument();
+  });
+
+  it('追加で画像を選んで保存した場合、商品を登録してから、縮小した画像を PUT /api/products/:productId/image に JSON で送り、onSaved を呼ぶ', async () => {
+    const { requests } = stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+      'PUT /api/products/product-1/image': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=new' }) }),
+    });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.upload(screen.getByLabelText('画像'), photo);
+    await screen.findByRole('img', { name: '選んだ画像' });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual(['POST /api/products', 'PUT /api/products/product-1/image']);
+    expect(requests[1]?.contentType).toBe('application/json');
+    expect(requests[1]?.body).toEqual({ data: 'PREPARED-photo.jpg' });
+    expect(onSaved).not.toHaveBeenCalledWith({ imageSaveFailed: true });
+  });
+
+  it('画像を選ばずに保存した場合、画像は送らない', async () => {
+    const { requests } = stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+    });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual(['POST /api/products']);
+  });
+
+  it('画像を選んでから「画像を消す」を押して保存した場合、画像は送らない', async () => {
+    const { requests } = stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+    });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.upload(screen.getByLabelText('画像'), photo);
+    await screen.findByRole('img', { name: '選んだ画像' });
+    await userEvent.click(screen.getByRole('button', { name: '画像を消す' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    expect(screen.queryByRole('img', { name: '選んだ画像' })).not.toBeInTheDocument();
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual(['POST /api/products']);
+  });
+
+  it('画像を選んで保存せずに閉じた場合、何も送らない', async () => {
+    const { requests } = stubFetchRoutes({});
+    const onClose = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={onClose} onSaved={vi.fn()} />);
+
+    await userEvent.upload(screen.getByLabelText('画像'), photo);
+    await screen.findByRole('img', { name: '選んだ画像' });
+    await userEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(requests).toEqual([]);
+  });
+
+  it('画像として読めないファイルを選んだ場合、読めなかったことを表示し、プレビューを表示しない', async () => {
+    stubFetchRoutes({});
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    await userEvent.upload(screen.getByLabelText('画像'), new File(['x'], 'broken.jpg', { type: 'image/jpeg' }));
+
+    expect(await screen.findByText('画像を読み込めませんでした。別の画像を選んでください。')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: '選んだ画像' })).not.toBeInTheDocument();
+  });
+
+  it('編集で画像がある商品の場合、今の画像を表示する', () => {
+    stubFetchRoutes({});
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: '今の画像' })).toHaveAttribute('src', '/api/products/product-1/image?v=old');
+    expect(screen.getByRole('button', { name: '画像を消す' })).toBeInTheDocument();
+  });
+
+  it('画面を /waders/ で開いている場合、今の画像は /waders の下の API から読む（issue #39）', () => {
+    window.history.replaceState(null, '', '/waders/');
+    stubFetchRoutes({});
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: '今の画像' })).toHaveAttribute('src', '/waders/api/products/product-1/image?v=old');
+  });
+
+  it('編集で画像がない商品の場合、「画像を消す」ボタンを表示しない', () => {
+    stubFetchRoutes({});
+    render(<ProductEditorDialog mode={{ kind: 'edit', product: createProduct({ imageUrl: null }) }} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    expect(screen.queryByRole('img', { name: '今の画像' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '画像を消す' })).not.toBeInTheDocument();
+  });
+
+  it('編集で画像を差し替えて保存した場合、商品を更新してから、新しい画像を送る', async () => {
+    const { requests } = stubFetchRoutes({
+      'PUT /api/products/product-1': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }),
+      'PUT /api/products/product-1/image': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=new' }) }),
+    });
+    const onSaved = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    );
+
+    await userEvent.upload(screen.getByLabelText('画像'), photo);
+    await screen.findByRole('img', { name: '選んだ画像' });
+    expect(screen.queryByRole('img', { name: '今の画像' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual(['PUT /api/products/product-1', 'PUT /api/products/product-1/image']);
+    expect(requests[1]?.body).toEqual({ data: 'PREPARED-photo.jpg' });
+  });
+
+  it('編集で「画像を消す」を押して保存した場合、商品を更新してから、DELETE /api/products/:productId/image を送る', async () => {
+    const { requests } = stubFetchRoutes({
+      'PUT /api/products/product-1': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }),
+      'DELETE /api/products/product-1/image': () => ({ status: 204 }),
+    });
+    const onSaved = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '画像を消す' }));
+    expect(screen.queryByRole('img', { name: '今の画像' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual([
+      'PUT /api/products/product-1',
+      'DELETE /api/products/product-1/image',
+    ]);
+  });
+
+  it('編集で画像に触れずに保存した場合、画像の API は呼ばない', async () => {
+    const { requests } = stubFetchRoutes({
+      'PUT /api/products/product-1': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }),
+    });
+    const onSaved = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual(['PUT /api/products/product-1']);
+  });
+
+  it('商品を保存できて画像を保存できなかった場合、画像を保存できなかったことを onSaved に伝える', async () => {
+    stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+      'PUT /api/products/product-1/image': () => ({ status: 500, body: { error: { code: 'INTERNAL_ERROR', message: 'error' } } }),
+    });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.upload(screen.getByLabelText('画像'), photo);
+    await screen.findByRole('img', { name: '選んだ画像' });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ imageSaveFailed: true }));
+  });
+
+  it('商品を保存できなかった場合、画像は送らない', async () => {
+    const { requests } = stubFetchRoutes({
+      'POST /api/products': () => ({ status: 500, body: { error: { code: 'INTERNAL_ERROR', message: 'error' } } }),
+    });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.upload(screen.getByLabelText('画像'), photo);
+    await screen.findByRole('img', { name: '選んだ画像' });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(await screen.findByText('保存できませんでした。時間をおいて、もう一度お試しください。')).toBeInTheDocument();
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual(['POST /api/products']);
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('「保存して続けて追加」で保存した場合、画像を送ったうえで、画像の欄を空に戻す', async () => {
+    const { requests } = stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+      'PUT /api/products/product-1/image': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=new' }) }),
+    });
+    const onSavedAndContinued = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        onSavedAndContinued={onSavedAndContinued}
+      />,
+    );
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.upload(screen.getByLabelText('画像'), photo);
+    await screen.findByRole('img', { name: '選んだ画像' });
+    await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+    await userEvent.click(screen.getByRole('menuitemradio', { name: '保存して続けて追加' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
+    await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
+
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual(['POST /api/products', 'PUT /api/products/product-1/image']);
+    expect(screen.queryByRole('img', { name: '選んだ画像' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '画像を消す' })).not.toBeInTheDocument();
+    expect((screen.getByLabelText('画像') as HTMLInputElement).files).toHaveLength(0);
   });
 });

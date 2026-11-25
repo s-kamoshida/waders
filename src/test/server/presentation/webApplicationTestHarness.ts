@@ -48,6 +48,8 @@ export type WebApplicationTestHarness = {
   readonly authenticationService: AuthenticationService;
   /** カテゴリーの定義のファイルの場所（一時フォルダ）。 */
   readonly categoryDefinitionFilePath: string;
+  /** 商品の画像を保存するフォルダ（一時フォルダの中。まだ作られていない。issue #41）。 */
+  readonly productImageDirectory: string;
   /** カテゴリーの定義のファイルを書き換える（手で編集した場合を再現する）。文字列はそのまま書く。 */
   writeCategoryDefinition(content: unknown): void;
   /** 現在時刻を進める。 */
@@ -91,12 +93,14 @@ export function createWebApplicationTestHarness(
     },
   });
   const productRepository = createSqliteProductRepository(database);
+  const productImageDirectory = join(mkdtempSync(join(tmpdir(), 'waders-test-images-')), 'images');
   let currentTime = TEST_CURRENT_TIME;
   let issuedIdCount = 0;
   const productService = createProductService({
     productRepository,
     clock: { now: () => currentTime },
     categoryDefinition,
+    productImageDirectory,
     generateProductId: () => {
       issuedIdCount += 1;
       return `product-${issuedIdCount}` as ProductId;
@@ -122,6 +126,7 @@ export function createWebApplicationTestHarness(
     productService,
     authenticationService,
     categoryDefinitionFilePath,
+    productImageDirectory,
     writeCategoryDefinition,
     setCurrentTime(nextTime) {
       currentTime = nextTime;
