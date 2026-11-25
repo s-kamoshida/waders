@@ -215,7 +215,7 @@ describe('DELETE /api/products/:productId/image（issue #41）', () => {
     const product = await createProductThroughApi();
     await uploadImage(product.id, createImageBytes(JPEG_HEADER)).expect(200);
 
-    const response = await request(harness.application).delete(`/api/products/${product.id}/image`);
+    const response = await request(harness.application).delete(`/api/products/${product.id}/image`).set('Content-Type', 'application/json');
 
     expect(response.status).toBe(204);
     const listResponse = await request(harness.application).get('/api/products').expect(200);
@@ -227,13 +227,13 @@ describe('DELETE /api/products/:productId/image（issue #41）', () => {
     createHarness();
     const product = await createProductThroughApi();
 
-    expect((await request(harness.application).delete(`/api/products/${product.id}/image`)).status).toBe(204);
+    expect((await request(harness.application).delete(`/api/products/${product.id}/image`).set('Content-Type', 'application/json')).status).toBe(204);
   });
 
   it('商品が存在しない場合、404 を返す', async () => {
     createHarness();
 
-    const response = await request(harness.application).delete('/api/products/missing/image');
+    const response = await request(harness.application).delete('/api/products/missing/image').set('Content-Type', 'application/json');
 
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe('PRODUCT_NOT_FOUND');
@@ -294,7 +294,7 @@ describe('商品の削除と画像（issue #41）', () => {
     const product = await createProductThroughApi();
     await uploadImage(product.id, createImageBytes(JPEG_HEADER)).expect(200);
 
-    await request(harness.application).delete(`/api/products/${product.id}`).expect(204);
+    await request(harness.application).delete(`/api/products/${product.id}`).set('Content-Type', 'application/json').expect(204);
 
     expect(listStoredImageFiles()).toEqual([]);
   });
@@ -306,7 +306,7 @@ describe('商品の削除と画像（issue #41）', () => {
     await uploadImage(first.id, createImageBytes(JPEG_HEADER)).expect(200);
     await uploadImage(second.id, createImageBytes(PNG_HEADER)).expect(200);
 
-    await request(harness.application).delete(`/api/products/${first.id}`).expect(204);
+    await request(harness.application).delete(`/api/products/${first.id}`).set('Content-Type', 'application/json').expect(204);
 
     expect(listStoredImageFiles()).toHaveLength(1);
     expect((await request(harness.application).get(`/api/products/${second.id}/image`)).status).toBe(200);
