@@ -231,3 +231,61 @@ describe('Host・Origin の確認の有効・無効（issue #35。PR #37 のレ�
     expect(loadWithEnvironment({ WADERS_HOST_VALIDATION_ENABLED: 'false' }).hostValidationEnabled).toBe(true);
   });
 });
+
+describe('画面と API を置くパス（issue #39）', () => {
+  it('ひな形から設定ファイルを作成した場合、/waders にする', () => {
+    expect(loadWithEnvironment().basePath).toBe('/waders');
+  });
+
+  it('既存の設定ファイルに basePath がない場合、/waders として扱う', () => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090 }));
+
+    expect(loadWithEnvironment().basePath).toBe('/waders');
+  });
+
+  it.each([
+    ['/waders', '/waders'],
+    ['/apps/waders', '/apps/waders'],
+    ['/my-app_v1.0~test', '/my-app_v1.0~test'],
+    ['空文字（/ の下）', ''],
+  ])('設定ファイルの basePath（%s）を使う', (_label, basePath) => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, basePath }));
+
+    expect(loadWithEnvironment().basePath).toBe(basePath);
+  });
+
+  it.each([
+    ['/ で始まらない', 'waders'],
+    ['末尾が /', '/waders/'],
+    ['/ だけ', '/'],
+    ['/ が続く', '//waders'],
+    ['空白を含む', '/wa ders'],
+    ['? を含む', '/waders?x=1'],
+    ['# を含む', '/waders#top'],
+    ['URL', 'http://raspberrypi.local/waders'],
+    ['.. の区切り', '/waders/..'],
+    ['. の区切り', '/./waders'],
+    ['日本語', '/ウェーダーズ'],
+    ['% を含む', '/wa%20ders'],
+  ])('basePath に誤った値（%s）がある場合、エラーにする', (_label, basePath) => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, basePath }));
+
+    expect(() => loadWithEnvironment()).toThrow(ServerSettingsError);
+  });
+
+  it.each([
+    ['数値', 1],
+    ['null', null],
+    ['配列', ['/waders']],
+  ])('basePath が文字列でない（%s）場合、エラーにする', (_label, basePath) => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, basePath }));
+
+    expect(() => loadWithEnvironment()).toThrow(ServerSettingsError);
+  });
+
+  it('環境変数では切り替えない', () => {
+    writeSettingsFile(JSON.stringify({ version: 1, port: 9090, basePath: '/waders' }));
+
+    expect(loadWithEnvironment({ WADERS_BASE_PATH: '/other' }).basePath).toBe('/waders');
+  });
+});

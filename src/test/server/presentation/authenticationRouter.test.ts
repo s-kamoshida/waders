@@ -419,3 +419,39 @@ describe('ログインの失敗の制限を接続元ごとに数える（issue #
     expect((await logIn(LOGIN_ID, PASSWORD)).status).toBe(429);
   });
 });
+
+describe('画面と API を置くパスの下での Cookie（issue #39）', () => {
+  it('basePath が /waders の場合、ログインした状態の Cookie の Path を /waders にする', async () => {
+    harness = createWebApplicationTestHarness(join(temporaryDirectory, 'client'), { authenticationEnabled: true, basePath: '/waders' });
+
+    const response = await request(harness.application).post('/waders/api/auth/setup').send({ loginId: LOGIN_ID, password: PASSWORD });
+
+    expect(response.status).toBe(201);
+    const setCookie = readSetCookieHeaders(response)[0] ?? '';
+    expect(setCookie).toMatch(/Path=\/waders(;|$)/i);
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).toMatch(/SameSite=Strict/i);
+  });
+
+  it('basePath が /waders の場合、作った Cookie で /waders/api の商品の一覧を取得できる', async () => {
+    harness = createWebApplicationTestHarness(join(temporaryDirectory, 'client'), { authenticationEnabled: true, basePath: '/waders' });
+    const setupResponse = await request(harness.application).post('/waders/api/auth/setup').send({ loginId: LOGIN_ID, password: PASSWORD });
+    const cookie = extractCookie(setupResponse);
+
+    const response = await request(harness.application).get('/waders/api/products').set('Cookie', cookie);
+
+    expect(response.status).toBe(200);
+  });
+
+  it('basePath が /waders の場合、ログアウトで Cookie を消すときも Path を /waders にする', async () => {
+    harness = createWebApplicationTestHarness(join(temporaryDirectory, 'client'), { authenticationEnabled: true, basePath: '/waders' });
+    const setupResponse = await request(harness.application).post('/waders/api/auth/setup').send({ loginId: LOGIN_ID, password: PASSWORD });
+    const cookie = extractCookie(setupResponse);
+
+    const response = await request(harness.application).post('/waders/api/auth/logout').set('Content-Type', 'application/json').set('Cookie', cookie);
+
+    expect(response.status).toBe(204);
+    const clearCookie = readSetCookieHeaders(response)[0] ?? '';
+    expect(clearCookie).toMatch(/Path=\/waders(;|$)/i);
+  });
+});
