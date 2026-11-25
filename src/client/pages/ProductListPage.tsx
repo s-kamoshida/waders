@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ProductListItem, ProductResponse } from '../../shared/productContract.ts';
 import { CategoryFilterMenu, useCategoryFilter } from '../components/CategoryFilterMenu.tsx';
-import { ProductEditorDialog, type ProductEditorMode } from '../components/ProductEditorDialog.tsx';
+import { ProductEditorDialog, type ProductEditorMode, type ProductSavedResult } from '../components/ProductEditorDialog.tsx';
 import { NoticeToast, type Notice } from '../components/NoticeToast.tsx';
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { fetchProducts, moveProductToReleaseMonth } from '../productApiClient.ts';
@@ -136,8 +136,10 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
     [loadProducts],
   );
 
-  const handleSaved = () => {
+  /** 保存した後にモーダルを閉じて読み込み直す。画像を保存できなかった場合は知らせる（issue #41）。 */
+  const handleSaved = (result?: ProductSavedResult) => {
     setEditorMode(null);
+    if (result?.imageSaveFailed === true) setNotice({ kind: 'success', message: SCREEN_MESSAGES.productImageSaveFailed });
     void loadProducts();
   };
 

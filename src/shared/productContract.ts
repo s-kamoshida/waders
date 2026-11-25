@@ -193,6 +193,11 @@ export const productSchema = z.object({
   otherExpense: z.number().int().nullable(),
   eventStartsAt: z.string().nullable(),
   eventEndsAt: z.string().nullable(),
+  /**
+   * 商品の画像の URL（API のパス。画像を付け直すたびに変わる版を含む）。画像がなければ null（issue #41）。
+   * 画面と API を置くパス（basePath）は含まないため、画面では resolveApiPath で解決して使う。
+   */
+  imageUrl: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -211,6 +216,14 @@ export type ProductListItem = z.infer<typeof productListItemSchema>;
 
 /** 商品の一覧（GET /api/products）の応答のスキーマ。 */
 export const productListResponseSchema = z.object({ products: z.array(productListItemSchema) });
+
+/** 画像を付ける（PUT /api/products/:productId/image）の本文のスキーマ。data は画像の中身を base64 にしたもの（issue #41）。 */
+export const productImageUploadRequestSchema = z.object({
+  data: z.base64({ message: '画像の中身を読めません。' }).min(1, { message: '画像を選んでください。' }),
+});
+
+/** 画像を付けるの本文。 */
+export type ProductImageUploadRequest = z.infer<typeof productImageUploadRequestSchema>;
 
 /** リストに戻す（POST /api/products/:productId/restore）の本文のスキーマ。当月以降かはサーバーが現在時刻で確かめる。 */
 export const restoreRequestSchema = z.object({ releaseMonth: releaseMonthSchema });

@@ -15,7 +15,9 @@
  *  - アーカイブされた商品の編集では、発売月を変更できなくし、「リストに戻す」ボタンを表示する（issue #9）
  *  - 追加では、保存ボタンの横のプルダウンで保存の方法（「保存」「保存して続けて追加」）を選べる。選んだ方法はモーダルを
  *    開いている間保つ。「保存して続けて追加」では、保存した後もモーダルを開いたまま次の商品を入力できる（issue #16）
+ *  - 画像を選び・差し替え・消せる。画像は商品を保存した後に送る（商品を保存できなければ送らない。issue #41）
  * 保存・削除に成功したら onSaved を、「保存して続けて追加」で保存したら onSavedAndContinued を呼ぶ。
+ * 商品を保存できて画像を保存できなかった場合は、onSaved に { imageSaveFailed: true } を渡す（issue #41）。
  */
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
@@ -25,7 +27,14 @@ import {
   type ProductResponse,
   type ProductStatus,
 } from '../../shared/productContract.ts';
-import { ApiRequestError, createProduct, deleteProduct, updateProduct } from '../productApiClient.ts';
+import {
+  ApiRequestError,
+  createProduct,
+  deleteProduct,
+  deleteProductImage,
+  updateProduct,
+  uploadProductImage,
+} from '../productApiClient.ts';
 import type { CategoryControlledField, CategoryResponse } from '../../shared/categoryContract.ts';
 import {
   convertJapanDateTimeInputToUtc,
@@ -36,17 +45,22 @@ import {
 } from '../productDisplay.ts';
 import { formatUndefinedCategoryLabel } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
+import { ProductImageField, type ProductImageChoice } from './ProductImageField.tsx';
 
 /** モーダルの用途。追加の場合は発売月の既定値を、編集の場合は対象の商品を持つ。 */
 export type ProductEditorMode =
   | { readonly kind: 'create'; readonly defaultReleaseMonth: string }
   | { readonly kind: 'edit'; readonly product: ProductResponse };
 
+/** 保存の結果。imageSaveFailed は、商品を保存できて画像を保存できなかった場合に true（issue #41）。 */
+export type ProductSavedResult = { readonly imageSaveFailed: boolean };
+
 /** ProductEditorDialog の引数。 */
 export type ProductEditorDialogProps = {
   readonly mode: ProductEditorMode;
   readonly onClose: () => void;
-  readonly onSaved: () => void;
+  /** 保存・削除に成功したときに呼ぶ。画像を保存できなかった場合だけ、結果を渡す（issue #41）。 */
+  readonly onSaved: (result?: ProductSavedResult) => void;
   /**
    * アーカイブされた商品を編集する場合に渡す。「リストに戻す」を押したときに呼ぶ。
    * 渡した場合、発売月は変更できない（発売月は「リストに戻す」で変える）。
@@ -54,7 +68,7 @@ export type ProductEditorDialogProps = {
   readonly onRestoreRequested?: () => void;
   /**
    * 追加の場合に渡すと、保存ボタンの横に保存の方法のプルダウンを表示する。「保存して続けて追加」で保存したときに呼ぶ（モーダルは閉じない）。
-   * 次の入力では、商品名・金額・送料・URL・メーカー・備考・場所・費用・開催日時・終了日時を空に戻し、
+   * 次の入力では、商品名・金額・送料・URL・メーカー・備考・場所・費用・開催日時・終了日時・画像を空に戻し、
    * 発売月・ステータス・キャンセル可・受注期限・カテゴリーを残す。
    */
   readonly onSavedAndContinued?: () => void;
@@ -214,6 +228,8 @@ export function ProductEditorDialog({
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [saveMethod, setSaveMethod] = useState<SaveMethod>('save');
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
+  const [imageChoice, setImageChoice] = useState<ProductImageChoice>({ kind: 'unchanged' });
+  const [isPreparingImage, setIsPreparingImage] = useState(false);
   const saveMenuToggleRef = useRef<HTMLButtonElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const idPrefix = useId();
@@ -234,12 +250,29 @@ export function ProductEditorDialog({
   };
 
   /** 「保存して続けて追加」で保存した後、次の商品の入力に備える。 */
-  const prepareNextProduct = (savedName: string) => {
+  const prepareNextProduct = (savedName: string, imageSaveFailed: boolean) => {
     setValues((current) => ({ ...current, ...CLEARED_FOR_NEXT_PRODUCT }));
-    setSavedNotice(SCREEN_MESSAGES.productAddedAndContinue(savedName));
+    setImageChoice({ kind: 'unchanged' });
+    setSavedNotice(
+      imageSaveFailed ? SCREEN_MESSAGES.productAddedWithoutImage(savedName) : SCREEN_MESSAGES.productAddedAndContinue(savedName),
+    );
     setIsSubmitting(false);
     nameInputRef.current?.focus();
     onSavedAndContinued?.();
+  };
+
+  /**
+   * 保存した商品に、選んだ画像を送る・今の画像を消す（触れていなければ何もしない。issue #41）。
+   * @returns 画像を保存できなかった場合は false
+   */
+  const saveImageChoice = async (productId: string): Promise<boolean> => {
+    try {
+      if (imageChoice.kind === 'selected') await uploadProductImage(productId, imageChoice.prepared.data);
+      if (imageChoice.kind === 'removed') await deleteProductImage(productId);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   /**
@@ -257,17 +290,21 @@ export function ProductEditorDialog({
     setFieldErrors({});
     setGeneralError(null);
     setIsSubmitting(true);
+    let savedProductId: string;
     try {
-      if (mode.kind === 'create') await createProduct(parsed.data);
-      else await updateProduct(mode.product.id, parsed.data);
-      if (continuesAdding) prepareNextProduct(parsed.data.name);
-      else onSaved();
+      const saved = mode.kind === 'create' ? await createProduct(parsed.data) : await updateProduct(mode.product.id, parsed.data);
+      savedProductId = saved.id;
     } catch (error) {
       const serverFieldErrors = error instanceof ApiRequestError ? error.fieldErrors : {};
       if (Object.keys(serverFieldErrors).length > 0) setFieldErrors(serverFieldErrors);
       else setGeneralError(SCREEN_MESSAGES.productSaveFailed);
       setIsSubmitting(false);
+      return;
     }
+    const imageSaveFailed = !(await saveImageChoice(savedProductId));
+    if (continuesAdding) prepareNextProduct(parsed.data.name, imageSaveFailed);
+    else if (imageSaveFailed) onSaved({ imageSaveFailed });
+    else onSaved();
   };
 
   const confirmDelete = async () => {
@@ -552,6 +589,16 @@ export function ProductEditorDialog({
               />
               {renderFieldError('url')}
             </div>
+            <ProductImageField
+              inputId={fieldId('image')}
+              currentImageUrl={mode.kind === 'edit' ? mode.product.imageUrl : null}
+              choice={imageChoice}
+              onChoiceChange={(choice) => {
+                setImageChoice(choice);
+                setSavedNotice(null);
+              }}
+              onPreparingChange={setIsPreparingImage}
+            />
             <div className="field">
               <label htmlFor={fieldId('note')}>備考</label>
               <textarea
@@ -581,13 +628,13 @@ export function ProductEditorDialog({
               キャンセル
             </button>
             {!canChooseSaveMethod && (
-              <button type="submit" className="button button--primary" disabled={isSubmitting}>
+              <button type="submit" className="button button--primary" disabled={isSubmitting || isPreparingImage}>
                 保存
               </button>
             )}
             {canChooseSaveMethod && (
               <div className="split-button" onKeyDown={handleSaveMenuKeyDown}>
-                <button type="submit" className="button button--primary split-button-main" disabled={isSubmitting}>
+                <button type="submit" className="button button--primary split-button-main" disabled={isSubmitting || isPreparingImage}>
                   {SAVE_METHOD_LABELS[saveMethod]}
                 </button>
                 <button

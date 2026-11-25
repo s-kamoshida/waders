@@ -8,6 +8,7 @@
  *    許す名前は IP アドレス・localhost・*.local と、設定の allowedHosts。設定（hostValidationEnabled）で無効にできる
  *  - API のミドルウェアとルーティングの順序（Content-Type の確認 → JSON の解析 → 動作確認・認証 → ログインの確認 → 各 API → 404）
  *  - 状態を変えるリクエストに Content-Type: application/json を必須にする（CSRF 対策）
+ *  - 本文の大きさの上限は 100kb。画像を付ける API だけは、2MB の画像を base64 にした本文が入る 3MB にする（issue #41）
  *  - 認証が有効なときは、/api/health と /api/auth 以外の API にログインを求める（issue #11）。
  *    画面のファイルは認証なしで配信する（画面がログインの画面を表示するため。データはすべて API から取る）
  *  - ビルド済みの画面の配信（画面の URL には index.html を返す）
@@ -212,6 +213,19 @@ function createBasePathRedirect(basePath: string) {
   };
 }
 
+/** 画像を付ける API（PUT /api/products/:productId/image）のパス（API の中の相対。issue #41）。 */
+const PRODUCT_IMAGE_UPLOAD_PATH_PATTERN = /^\/products\/[^/]+\/image$/;
+
+/** 本文の JSON を解析するミドルウェアを作る。画像を付ける API だけ、大きさの上限を広げる（issue #41）。 */
+function createJsonBodyParser() {
+  const parseJsonBody = express.json({ limit: '100kb' });
+  const parseImageJsonBody = express.json({ limit: '3mb' });
+  return function parseJsonBodyByPath(request: Request, response: Response, next: NextFunction): void {
+    const isImageUpload = request.method === 'PUT' && PRODUCT_IMAGE_UPLOAD_PATH_PATTERN.test(request.path);
+    (isImageUpload ? parseImageJsonBody : parseJsonBody)(request, response, next);
+  };
+}
+
 /**
  * 画面の入り口（index.html）を返す URL か。API の区切り（`api`）を含む URL には画面を返さない
  * （パスの外の API の URL を画面と取り違えないようにするため。issue #39）。
@@ -233,7 +247,7 @@ export function createWebApplication(options: WebApplicationOptions): express.Ex
   if (options.basePath !== '') application.use(createBasePathRedirect(options.basePath));
 
   const apiRouter = express.Router();
-  apiRouter.use(rejectNonJsonStateChangingRequests, express.json({ limit: '100kb' }));
+  apiRouter.use(rejectNonJsonStateChangingRequests, createJsonBodyParser());
   apiRouter.get('/health', (_request, response) => {
     response.json({ status: 'ok' });
   });

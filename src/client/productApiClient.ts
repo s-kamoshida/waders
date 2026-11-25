@@ -5,6 +5,7 @@
  * 責務: /api/products・/api/categories・/api/auth を呼び、応答を検証して返す。失敗した場合は ApiRequestError にする。
  * ログインが必要（401 AUTHENTICATION_REQUIRED）と返された場合は、登録された関数で画面に知らせる（issue #11）。
  * 状態を変える要求には、本文がなくても Content-Type: application/json を付ける（サーバーの CSRF 対策の条件）。
+ * 商品の画像の URL（imageUrl）など、API のパスを画面を開いているパスの下に解決する関数（resolveApiPath）も提供する。
  */
 import {
   apiErrorResponseSchema,
@@ -56,7 +57,7 @@ export function listenAuthenticationRequired(listener: () => void): () => void {
  * API のパス（`/api/...`）を、画面を開いているパスの下のパスにする。
  * 画面を `/waders/` や `/waders/archive` で開いていれば `/waders/api/...` になる（サーバーの設定の basePath に合わせる。issue #39）。
  */
-function resolveApiPath(path: string): string {
+export function resolveApiPath(path: string): string {
   const resolvedUrl = new URL(`.${path}`, document.baseURI);
   return `${resolvedUrl.pathname}${resolvedUrl.search}`;
 }
@@ -98,6 +99,16 @@ export async function updateProduct(productId: string, input: ProductInput): Pro
 /** 商品を削除する。 */
 export async function deleteProduct(productId: string): Promise<void> {
   await sendApiRequest('DELETE', `/api/products/${encodeURIComponent(productId)}`);
+}
+
+/** 商品に画像を付ける（差し替える）。data は画像の中身の base64（issue #41）。 */
+export async function uploadProductImage(productId: string, data: string): Promise<ProductResponse> {
+  return productSchema.parse(await sendApiRequest('PUT', `/api/products/${encodeURIComponent(productId)}/image`, { data }));
+}
+
+/** 商品の画像を消す（issue #41）。 */
+export async function deleteProductImage(productId: string): Promise<void> {
+  await sendApiRequest('DELETE', `/api/products/${encodeURIComponent(productId)}/image`);
 }
 
 /** アーカイブされた商品を、新しい発売月でリストに戻す（issue #9）。 */

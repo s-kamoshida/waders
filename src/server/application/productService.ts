@@ -8,6 +8,8 @@
  * カテゴリーは ID で持ち、設定したときの名前も保存する。指定した ID は定義のファイルで確かめる（issue #10）。
  * カテゴリーの改名・削除・定義にないカテゴリーの扱い（定義に戻す・付け替える）も、商品の更新を伴うためここで行う（issue #10）。
  * 商品の更新を先に行い、定義のファイルの書き込みをトランザクションの最後に行う（書き込みに失敗したら商品の更新を取り消す）。
+ * 商品の画像（issue #41）は、大きさと中身の形式を確かめてからファイルに保存し、ファイルの名前を DB に記録する。
+ * 画像を付ける・消すことは商品の更新ではないため、更新日時と変更履歴は変えない。差し替え・削除・商品の削除では前のファイルを消す。
  */
 import {
   CategoryAlreadyDefinedError,
@@ -31,7 +33,15 @@ import {
   determineStatusBeforeAutomaticTransition,
   isProductArchived,
 } from '../domain/productStatusTransition.ts';
+import {
+  MAXIMUM_PRODUCT_IMAGE_BYTES,
+  ProductImageTooLargeError,
+  UnsupportedProductImageError,
+  detectProductImageFormat,
+  type ProductImageFormat,
+} from '../domain/productImage.ts';
 import type { CategoryDefinition } from '../infrastructure/categoryDefinitionFile.ts';
+import { createProductImageStorage } from '../infrastructure/productImageStorage.ts';
 import type { ProductRepository } from '../infrastructure/sqliteProductRepository.ts';
 import type { DeliveryConfirmationRequest, ProductInput } from '../../shared/productContract.ts';
 
@@ -40,6 +50,9 @@ export type Clock = { now(): Date };
 
 /** 一覧の商品。延期の確認を待っているかを含む。 */
 export type ListedProduct = Product & { readonly deliveryConfirmationPending: boolean };
+
+/** 商品の画像の中身と形式（issue #41）。 */
+export type ProductImage = { readonly bytes: Uint8Array; readonly format: ProductImageFormat };
 
 /** 商品の操作。 */
 export type ProductService = {
@@ -68,10 +81,30 @@ export type ProductService = {
    */
   updateProduct(productId: ProductId, input: ProductInput): Product;
   /**
-   * 商品を削除する。
+   * 商品を削除する。画像を付けていれば、そのファイルも消す。
    * @throws {ProductNotFoundError} 商品が存在しない場合
    */
   deleteProduct(productId: ProductId): void;
+  /**
+   * 商品に画像を付ける（差し替える）。前の画像のファイルは消す。更新日時と変更履歴は変えない（issue #41）。
+   * @param bytes 画像の中身（形式は中身で判定する）
+   * @returns 画像を付けた商品
+   * @throws {ProductImageTooLargeError} 画像が大きさの上限を超えている場合
+   * @throws {UnsupportedProductImageError} 中身が受け付ける形式（JPEG・PNG・WebP）でない場合
+   * @throws {ProductNotFoundError} 商品が存在しない場合
+   */
+  saveProductImage(productId: ProductId, bytes: Uint8Array): Product;
+  /**
+   * 商品の画像を消す。画像がなければ何もしない（issue #41）。
+   * @throws {ProductNotFoundError} 商品が存在しない場合
+   */
+  deleteProductImage(productId: ProductId): void;
+  /** 商品の画像を読む。商品か画像がなければ undefined（issue #41）。 */
+  readProductImage(productId: ProductId): ProductImage | undefined;
+  /** 商品の画像の版（画像を付け直すたびに変わる値）。画像がなければ null（issue #41）。 */
+  findProductImageVersion(productId: ProductId): string | null;
+  /** 画像を付けた商品の ID と、その画像の版（issue #41）。 */
+  listProductImageVersions(): Map<ProductId, string>;
   /**
    * アーカイブされた商品をリストに戻す。ステータスは自動遷移の前に戻し、発売月を新しい月にし、延期の確認待ちを外す。
    * @param releaseMonth 新しい発売月（当月以降）
@@ -137,11 +170,19 @@ export type ProductServiceDependencies = {
   readonly clock: Clock;
   readonly generateProductId: () => ProductId;
   readonly categoryDefinition: CategoryDefinition;
+  /** 商品の画像を保存するフォルダ（なければ最初の保存のときに作る。issue #41）。 */
+  readonly productImageDirectory: string;
 };
+
+/** 画像のファイルの名前から、画像の版（拡張子を除いた乱数の部分）を求める。 */
+function toImageVersion(fileName: string): string {
+  return fileName.replace(/\.[a-z]+$/, '');
+}
 
 /** 商品の操作を作る。 */
 export function createProductService(dependencies: ProductServiceDependencies): ProductService {
   const { productRepository, clock, generateProductId, categoryDefinition } = dependencies;
+  const productImageStorage = createProductImageStorage({ directory: dependencies.productImageDirectory });
 
   /**
    * 入力のカテゴリーの ID から、保存するカテゴリー（ID と名前）を求める。
@@ -255,7 +296,50 @@ export function createProductService(dependencies: ProductServiceDependencies): 
     },
 
     deleteProduct(productId) {
+      const imageFileName = productRepository.findUploadedImageFileName(productId);
       if (!productRepository.deleteProduct(productId)) throw new ProductNotFoundError(productId);
+      if (imageFileName !== null && imageFileName !== undefined) productImageStorage.deleteImage(imageFileName);
+    },
+
+    saveProductImage(productId, bytes) {
+      if (bytes.byteLength > MAXIMUM_PRODUCT_IMAGE_BYTES) throw new ProductImageTooLargeError(bytes.byteLength);
+      const format = detectProductImageFormat(bytes);
+      if (format === null) throw new UnsupportedProductImageError();
+      const previousFileName = productRepository.findUploadedImageFileName(productId);
+      if (previousFileName === undefined) throw new ProductNotFoundError(productId);
+      const fileName = productImageStorage.saveImage(bytes, format);
+      if (!productRepository.setUploadedImageFileName(productId, fileName)) {
+        // 保存の間に商品が削除された場合は、保存したファイルを残さない
+        productImageStorage.deleteImage(fileName);
+        throw new ProductNotFoundError(productId);
+      }
+      if (previousFileName !== null) productImageStorage.deleteImage(previousFileName);
+      return findProductOrThrow(productId);
+    },
+
+    deleteProductImage(productId) {
+      const fileName = productRepository.findUploadedImageFileName(productId);
+      if (fileName === undefined) throw new ProductNotFoundError(productId);
+      if (fileName === null) return;
+      productRepository.setUploadedImageFileName(productId, null);
+      productImageStorage.deleteImage(fileName);
+    },
+
+    readProductImage(productId) {
+      const fileName = productRepository.findUploadedImageFileName(productId);
+      if (fileName === null || fileName === undefined) return undefined;
+      return productImageStorage.readImage(fileName);
+    },
+
+    findProductImageVersion(productId) {
+      const fileName = productRepository.findUploadedImageFileName(productId);
+      return fileName === null || fileName === undefined ? null : toImageVersion(fileName);
+    },
+
+    listProductImageVersions() {
+      const versions = new Map<ProductId, string>();
+      for (const [productId, fileName] of productRepository.listUploadedImageFileNames()) versions.set(productId, toImageVersion(fileName));
+      return versions;
     },
 
     restoreProduct(productId, releaseMonth) {

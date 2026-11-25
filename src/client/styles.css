@@ -278,7 +278,8 @@ textarea {
   border-left-width: 5px;
 }
 
-.product-card--unpurchased .product-card-placeholder {
+.product-card--unpurchased .product-card-placeholder,
+.product-card--unpurchased .product-card-image {
   opacity: 0.45;
 }
 
@@ -307,6 +308,15 @@ textarea {
 .product-card-placeholder {
   width: 44px;
   height: 44px;
+}
+
+/* 商品の画像は切らずに枠の中に収める（余白は枠の背景色。issue #41）。ステータスは画像の上に重ねる */
+.product-card-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .product-card-status {
@@ -420,6 +430,15 @@ textarea {
   color: #a3aab2;
 }
 
+.product-list .product-card-image {
+  grid-area: thumbnail;
+  position: static;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: #eceef1;
+}
+
 .product-list .product-card-status {
   grid-area: status;
   position: static;
@@ -508,6 +527,22 @@ textarea {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+/* 追加・編集のモーダルの、選んだ画像・今の画像（issue #41） */
+.product-image-preview {
+  justify-self: start;
+  max-width: 100%;
+  max-height: 180px;
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  background: #eceef1;
+  object-fit: contain;
+}
+
+.product-image-remove {
+  justify-self: start;
 }
 
 .field label {
