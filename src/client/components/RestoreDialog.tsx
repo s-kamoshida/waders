@@ -4,6 +4,7 @@
  * 所属: クライアント（画面の部品）
  * 責務: 新しい発売月（既定は当月。当月以降のみ）を入力させ、商品をリストに戻す。
  * ステータスはサーバーが変更履歴から自動遷移の前に戻す。戻せたら onRestored を呼ぶ。
+ * 見出しの行の「閉じる」ボタン（×）は「キャンセル」と同じく送らずに onClose を呼ぶ。送信中は押せない（issue #49）。
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { releaseMonthSchema, type ProductResponse } from '../../shared/productContract.ts';
@@ -71,9 +72,14 @@ export function RestoreDialog({ product, currentMonth, onClose, onRestored }: Re
         }}
       >
         <form noValidate onSubmit={(event) => void submitRestore(event)}>
-          <h2 id={`${idPrefix}-title`} className="dialog-title">
-            {SCREEN_MESSAGES.restoreTitle}
-          </h2>
+          <div className="dialog-header">
+            <h2 id={`${idPrefix}-title`} className="dialog-title">
+              {SCREEN_MESSAGES.restoreTitle}
+            </h2>
+            <button type="button" className="dialog-close-button" aria-label="閉じる" disabled={isSubmitting} onClick={onClose}>
+              ×
+            </button>
+          </div>
           <div className="dialog-body">
             {generalError !== null && (
               <p role="alert" className="dialog-error">

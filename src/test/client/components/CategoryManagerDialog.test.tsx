@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CategoryManagerDialog } from '../../../client/components/CategoryManagerDialog.tsx';
 import type { ProductListItem } from '../../../shared/productContract.ts';
+import { getFooterButton, getHeaderCloseButton, holdFetchRoute } from '../dialogCloseButtonQueries.ts';
 import { stubFetchRoutes, type StubRouteHandlers } from '../testFetchStub.ts';
 
 afterEach(() => {
@@ -435,7 +436,7 @@ describe('閉じる', () => {
   it('何も変えずに「閉じる」を押した場合、変更なし（false）で onClose を呼ぶ', async () => {
     const { dialog, onClose } = await openDialog([]);
 
-    await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+    await userEvent.click(getFooterButton(dialog, '閉じる'));
 
     expect(onClose).toHaveBeenCalledWith(false);
   });
@@ -447,7 +448,7 @@ describe('閉じる', () => {
     await userEvent.type(within(dialog).getByRole('textbox', { name: '新しいカテゴリー' }), 'プラモデル{Enter}');
     await waitFor(() => expect(within(dialog).getByRole('textbox', { name: '新しいカテゴリー' })).toHaveValue(''));
 
-    await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+    await userEvent.click(getFooterButton(dialog, '閉じる'));
 
     expect(onClose).toHaveBeenCalledWith(true);
   });
@@ -623,7 +624,7 @@ describe('入力する項目の設定（issue #27）', () => {
     await userEvent.click(within(ticket).getByRole('checkbox', { name: '交通費（見込）' }));
     await waitFor(() => expect(within(ticket).getByRole('checkbox', { name: '交通費（見込）' })).toBeChecked());
 
-    await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+    await userEvent.click(getFooterButton(dialog, '閉じる'));
 
     expect(onClose).toHaveBeenCalledWith(true);
   });
@@ -633,5 +634,63 @@ describe('入力する項目の設定（issue #27）', () => {
 
     const removed = await within(dialog).findByRole('group', { name: 'プライズ（定義にない）' });
     expect(within(removed).queryByRole('button', { name: '入力する項目' })).not.toBeInTheDocument();
+  });
+});
+
+describe('右上の閉じるボタン（issue #49）', () => {
+  it('開いた場合、見出しの行に「閉じる」ボタン（×）を表示する', async () => {
+    const { dialog } = await openDialog([]);
+
+    expect(getHeaderCloseButton(dialog)).toBeEnabled();
+  });
+
+  it('何も変えずに「閉じる」ボタン（×）を押した場合、フッターの「閉じる」と同じく変更なし（false）で onClose を呼ぶ', async () => {
+    const { dialog, onClose, requests } = await openDialog([]);
+
+    await userEvent.click(getHeaderCloseButton(dialog));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith(false);
+    expect(findChangingRequests(requests)).toEqual([]);
+  });
+
+  it('変更した後に「閉じる」ボタン（×）を押した場合、フッターの「閉じる」と同じく変更あり（true）で onClose を呼ぶ', async () => {
+    const { dialog, onClose } = await openDialog([], {
+      'POST /api/categories': () => ({ status: 201, body: { id: 'plastic', name: 'プラモデル' } }),
+    });
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '新しいカテゴリー' }), 'プラモデル{Enter}');
+    await waitFor(() => expect(within(dialog).getByRole('textbox', { name: '新しいカテゴリー' })).toHaveValue(''));
+
+    await userEvent.click(getHeaderCloseButton(dialog));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith(true);
+  });
+
+  it('入力欄に名前を入れたまま「閉じる」ボタン（×）を押した場合、追加を送らずに閉じる', async () => {
+    const { dialog, onClose, requests } = await openDialog([]);
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '新しいカテゴリー' }), 'プラモデル');
+
+    await userEvent.click(getHeaderCloseButton(dialog));
+
+    expect(onClose).toHaveBeenCalledWith(false);
+    expect(findChangingRequests(requests)).toEqual([]);
+  });
+
+  it('変更を送っている間は、「閉じる」ボタン（×）とフッターの「閉じる」は押せず、×・フッターの「閉じる」・Esc キーのいずれでも閉じない', async () => {
+    const { dialog, onClose, fetchMock } = await openDialog([]);
+    holdFetchRoute(fetchMock, 'POST /api/categories');
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '新しいカテゴリー' }), 'プラモデル');
+
+    await userEvent.click(within(dialog).getByRole('button', { name: '追加' }));
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '追加' })).toBeDisabled());
+    const closeButton = getHeaderCloseButton(dialog);
+    expect(closeButton).toBeDisabled();
+    expect(getFooterButton(dialog, '閉じる')).toBeDisabled();
+    await userEvent.click(closeButton);
+    await userEvent.click(getFooterButton(dialog, '閉じる'));
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

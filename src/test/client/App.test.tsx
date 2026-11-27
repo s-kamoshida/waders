@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../client/App.tsx';
 import type { ProductListItem } from '../../shared/productContract.ts';
+import { getFooterButton } from './dialogCloseButtonQueries.ts';
 import { stubFetchRoutes } from './testFetchStub.ts';
 
 /** 日本時間 2026-11-17 12:00。 */
@@ -172,7 +173,7 @@ describe('App', () => {
       await within(dialog).findByRole('group', { name: 'プラモデル' });
       const productLoadCount = requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products').length;
 
-      await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+      await userEvent.click(getFooterButton(dialog, '閉じる'));
 
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       await waitFor(() =>
@@ -191,7 +192,7 @@ describe('App', () => {
       await within(dialog).findByRole('group', { name: 'スケールフィギュア' });
       const requestCount = requests.length;
 
-      await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+      await userEvent.click(getFooterButton(dialog, '閉じる'));
 
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(requests.length).toBe(requestCount);
@@ -479,7 +480,7 @@ describe('ページの中の領域でのスクロール（issue #21）', () => {
 
     expect(readOverflowY(region)).toBe('hidden');
 
-    await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+    await userEvent.click(getFooterButton(dialog, '閉じる'));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(['auto', 'scroll']).toContain(readOverflowY(region));
@@ -653,7 +654,7 @@ describe('キーボードで一覧をスクロールするためのフォーカ�
     await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: 'カテゴリーの管理' }));
     const dialog = await screen.findByRole('dialog', { name: 'カテゴリーの管理' });
 
-    await userEvent.click(within(dialog).getByRole('button', { name: '閉じる' }));
+    await userEvent.click(getFooterButton(dialog, '閉じる'));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await waitFor(() => expect(getListRegion()).toHaveFocus());

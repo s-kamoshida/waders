@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RestoreDialog } from '../../../client/components/RestoreDialog.tsx';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
+import { getHeaderCloseButton, holdFetchRoute } from '../dialogCloseButtonQueries.ts';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -95,6 +96,59 @@ describe('RestoreDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
 
     expect(onClose).toHaveBeenCalled();
+    expect(requests).toEqual([]);
+  });
+});
+
+describe('右上の閉じるボタン（issue #49）', () => {
+  it('開いた場合、見出しの行に「閉じる」ボタン（×）を表示する', () => {
+    stubFetchRoutes({});
+    render(<RestoreDialog product={product} currentMonth="2026-11" onClose={vi.fn()} onRestored={vi.fn()} />);
+
+    expect(getHeaderCloseButton(screen.getByRole('dialog', { name: 'リストに戻す' }))).toBeEnabled();
+  });
+
+  it('新しい発売月を変えてから「閉じる」ボタン（×）を押した場合、キャンセルと同じく送信せずに onClose を呼ぶ', async () => {
+    const { requests } = stubFetchRoutes({});
+    const onClose = vi.fn();
+    const onRestored = vi.fn();
+    render(<RestoreDialog product={product} currentMonth="2026-11" onClose={onClose} onRestored={onRestored} />);
+
+    fireEvent.change(screen.getByLabelText('新しい発売月'), { target: { value: '2027-01' } });
+    await userEvent.click(getHeaderCloseButton(screen.getByRole('dialog', { name: 'リストに戻す' })));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onRestored).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+  });
+
+  it('送信中の場合、「閉じる」ボタン（×）とキャンセルは押せず、×・キャンセル・Esc キーのいずれでも閉じない', async () => {
+    const { fetchMock } = stubFetchRoutes({});
+    holdFetchRoute(fetchMock, 'POST /api/products/product-1/restore');
+    const onClose = vi.fn();
+    render(<RestoreDialog product={product} currentMonth="2026-11" onClose={onClose} onRestored={vi.fn()} />);
+    const dialog = screen.getByRole('dialog', { name: 'リストに戻す' });
+
+    await userEvent.click(screen.getByRole('button', { name: '戻す' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '戻す' })).toBeDisabled());
+    const closeButton = getHeaderCloseButton(dialog);
+    expect(closeButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'キャンセル' })).toBeDisabled();
+    await userEvent.click(closeButton);
+    await userEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('Esc キーを押した場合、今までどおり送信せずに onClose を呼ぶ', async () => {
+    const { requests } = stubFetchRoutes({});
+    const onClose = vi.fn();
+    render(<RestoreDialog product={product} currentMonth="2026-11" onClose={onClose} onRestored={vi.fn()} />);
+
+    await userEvent.keyboard('{Escape}');
+
+    expect(onClose).toHaveBeenCalledTimes(1);
     expect(requests).toEqual([]);
   });
 });
