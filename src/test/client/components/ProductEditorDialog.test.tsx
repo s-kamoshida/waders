@@ -1449,3 +1449,191 @@ describe('商品の画像（issue #41）', () => {
     expect((screen.getByLabelText('画像') as HTMLInputElement).files).toHaveLength(0);
   });
 });
+
+describe('クリップボードの画像の貼り付け（issue #45）', () => {
+  const pastedImage = new File(['pasted'], 'image.png', { type: 'image/png' });
+  const selectedPhoto = new File(['photo'], 'photo.jpg', { type: 'image/jpeg' });
+  const NO_IMAGE_MESSAGE = 'クリップボードに画像がありません。';
+
+  /** 貼り付けの中身（ブラウザの DataTransfer の、貼り付けで使う部分）を作る。 */
+  function createClipboardData(contents: { readonly files?: readonly File[]; readonly text?: string }) {
+    const files = contents.files ?? [];
+    const text = contents.text ?? '';
+    const fileItems = files.map((file) => ({ kind: 'file', type: file.type, getAsFile: () => file }));
+    const textItems = text === '' ? [] : [{ kind: 'string', type: 'text/plain', getAsFile: () => null }];
+    return {
+      files,
+      items: [...textItems, ...fileItems],
+      types: [...(text === '' ? [] : ['text/plain']), ...(files.length === 0 ? [] : ['Files'])],
+      getData: (format: string) => (format === 'text/plain' || format === 'text' ? text : ''),
+    };
+  }
+
+  /** 要素に貼り付ける。既定の動作（文字を入れるなど）が止められなければ true を返す。 */
+  function pasteInto(element: Element, contents: { readonly files?: readonly File[]; readonly text?: string }): boolean {
+    return fireEvent.paste(element, { clipboardData: createClipboardData(contents) });
+  }
+
+  /** 追加のモーダルを開く。 */
+  function renderCreateDialog(onSaved = vi.fn()) {
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
+  }
+
+  it('画像の欄に、画像の貼り付け欄を表示する', () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+
+    expect(screen.getByRole('textbox', { name: '画像の貼り付け欄' })).toBeInTheDocument();
+  });
+
+  it('貼り付け欄に画像を貼り付けた場合、縮小した画像のプレビューを表示し、「画像を消す」ボタンを表示する', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+
+    const notPrevented = pasteInto(screen.getByRole('textbox', { name: '画像の貼り付け欄' }), { files: [pastedImage] });
+
+    expect(await screen.findByRole('img', { name: '選んだ画像' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '画像を消す' })).toBeInTheDocument();
+    expect(notPrevented).toBe(false);
+  });
+
+  it('モーダルの中の、入力欄ではない場所で画像を貼り付けた場合も、プレビューを表示する', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+
+    pasteInto(screen.getByRole('dialog'), { files: [pastedImage] });
+
+    expect(await screen.findByRole('img', { name: '選んだ画像' })).toBeInTheDocument();
+  });
+
+  it('商品名の欄に入力位置があるときに画像を貼り付けた場合、画像として受け取り、商品名には何も入れない', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+    const nameInput = screen.getByLabelText('商品名');
+
+    const notPrevented = pasteInto(nameInput, { files: [pastedImage] });
+
+    expect(await screen.findByRole('img', { name: '選んだ画像' })).toBeInTheDocument();
+    expect(notPrevented).toBe(false);
+    expect(nameInput).toHaveValue('');
+  });
+
+  it('商品名の欄に文字を貼り付けた場合、今までどおり文字を貼る（既定の動作を止めず、画像も知らせも表示しない）', () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+
+    const notPrevented = pasteInto(screen.getByLabelText('商品名'), { text: 'アクションフィギュア' });
+
+    expect(notPrevented).toBe(true);
+    expect(screen.queryByRole('img', { name: '選んだ画像' })).not.toBeInTheDocument();
+    expect(screen.queryByText(NO_IMAGE_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it('貼り付け欄に文字だけを貼り付けた場合、クリップボードに画像がないことを表示し、文字は入れない', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+    const pasteArea = screen.getByRole('textbox', { name: '画像の貼り付け欄' });
+
+    const notPrevented = pasteInto(pasteArea, { text: 'アクションフィギュア' });
+
+    expect(await screen.findByText(NO_IMAGE_MESSAGE)).toBeInTheDocument();
+    expect(notPrevented).toBe(false);
+    expect(pasteArea).toHaveTextContent('');
+    expect(screen.queryByRole('img', { name: '選んだ画像' })).not.toBeInTheDocument();
+  });
+
+  it('貼り付け欄に画像でないファイルを貼り付けた場合、クリップボードに画像がないことを表示する', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+
+    pasteInto(screen.getByRole('textbox', { name: '画像の貼り付け欄' }), { files: [new File(['%PDF'], 'document.pdf', { type: 'application/pdf' })] });
+
+    expect(await screen.findByText(NO_IMAGE_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: '選んだ画像' })).not.toBeInTheDocument();
+  });
+
+  it('画像がないことを表示した後に画像を貼り付けた場合、表示を消してプレビューを表示する', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+    const pasteArea = screen.getByRole('textbox', { name: '画像の貼り付け欄' });
+
+    pasteInto(pasteArea, { text: 'アクションフィギュア' });
+    await screen.findByText(NO_IMAGE_MESSAGE);
+    pasteInto(pasteArea, { files: [pastedImage] });
+
+    expect(await screen.findByRole('img', { name: '選んだ画像' })).toBeInTheDocument();
+    expect(screen.queryByText(NO_IMAGE_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it('貼り付けた画像が画像として読めない場合、ファイルを選んだときと同じく読めなかったことを表示する', async () => {
+    stubFetchRoutes({});
+    renderCreateDialog();
+
+    pasteInto(screen.getByRole('textbox', { name: '画像の貼り付け欄' }), { files: [new File(['x'], 'broken.jpg', { type: 'image/jpeg' })] });
+
+    expect(await screen.findByText('画像を読み込めませんでした。別の画像を選んでください。')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: '選んだ画像' })).not.toBeInTheDocument();
+  });
+
+  it('追加で画像を貼り付けて保存した場合、商品を登録してから、縮小した貼り付けた画像を送る', async () => {
+    const { requests } = stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+      'PUT /api/products/product-1/image': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=new' }) }),
+    });
+    const onSaved = vi.fn();
+    renderCreateDialog(onSaved);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    pasteInto(screen.getByLabelText('商品名'), { files: [pastedImage] });
+    await screen.findByRole('img', { name: '選んだ画像' });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual(['POST /api/products', 'PUT /api/products/product-1/image']);
+    expect(requests[1]?.body).toEqual({ data: 'PREPARED-image.png' });
+    expect(screen.getByLabelText('商品名')).toHaveValue('アクションフィギュア');
+  });
+
+  it('ファイルを選んだ後に画像を貼り付けた場合、貼り付けた画像を送る', async () => {
+    const { requests } = stubFetchRoutes({
+      'POST /api/products': () => ({ status: 201, body: createProduct() }),
+      'PUT /api/products/product-1/image': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=new' }) }),
+    });
+    const onSaved = vi.fn();
+    renderCreateDialog(onSaved);
+
+    await userEvent.type(screen.getByLabelText('商品名'), 'アクションフィギュア');
+    await userEvent.upload(screen.getByLabelText('画像'), selectedPhoto);
+    await screen.findByRole('img', { name: '選んだ画像' });
+    pasteInto(screen.getByRole('textbox', { name: '画像の貼り付け欄' }), { files: [pastedImage] });
+    await waitFor(() => expect((screen.getByLabelText('画像') as HTMLInputElement).files).toHaveLength(0));
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    expect(requests[1]?.body).toEqual({ data: 'PREPARED-image.png' });
+  });
+
+  it('編集で画像がある商品に画像を貼り付けて保存した場合、今の画像の代わりにプレビューを表示し、商品を更新してから貼り付けた画像を送る', async () => {
+    const { requests } = stubFetchRoutes({
+      'PUT /api/products/product-1': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }),
+      'PUT /api/products/product-1/image': () => ({ body: createProduct({ imageUrl: '/api/products/product-1/image?v=new' }) }),
+    });
+    const onSaved = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'edit', product: createProduct({ imageUrl: '/api/products/product-1/image?v=old' }) }}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    );
+
+    pasteInto(screen.getByRole('textbox', { name: '画像の貼り付け欄' }), { files: [pastedImage] });
+    await screen.findByRole('img', { name: '選んだ画像' });
+    expect(screen.queryByRole('img', { name: '今の画像' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    expect(requests.map((recorded) => `${recorded.method} ${recorded.path}`)).toEqual(['PUT /api/products/product-1', 'PUT /api/products/product-1/image']);
+    expect(requests[1]?.body).toEqual({ data: 'PREPARED-image.png' });
+  });
+});

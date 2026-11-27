@@ -545,6 +545,34 @@ textarea {
   justify-self: start;
 }
 
+/* 画像の貼り付け欄（issue #45）。文字は入れさせず、空のときに案内を表示する */
+.product-image-paste-area {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  caret-color: transparent;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.product-image-paste-area:empty::before {
+  content: attr(data-placeholder);
+}
+
+.product-image-paste-area[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.product-image-paste-area:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .field label {
   font-size: 12px;
   font-weight: 600;
