@@ -32,9 +32,23 @@ export function determineAutomaticTransition(
     return isReleaseMonthPassed ? { status: 'purchased', awaitsDeliveryConfirmation: true } : null;
   }
   if (product.status !== 'considering') return null;
-  const isOrderDeadlinePassed = product.orderDeadline !== null && product.orderDeadline < formatDateInJapan(currentTime);
-  if (!isReleaseMonthPassed && !isOrderDeadlinePassed) return null;
+  if (!isReleaseMonthPassed && !isOrderDeadlinePassed(product, currentTime)) return null;
   return { status: 'unpurchased', awaitsDeliveryConfirmation: false };
+}
+
+/** 受注期限を超過した（日本時間の受注期限の翌日 0:00 になった）か。受注期限がなければ false。 */
+function isOrderDeadlinePassed(product: Pick<Product, 'orderDeadline'>, currentTime: Date): boolean {
+  return product.orderDeadline !== null && product.orderDeadline < formatDateInJapan(currentTime);
+}
+
+/**
+ * 利用者が手で保存する商品で、検討中なのに受注期限を超過していれば、受注期限を消した商品を返す（issue #60、BR-39）。
+ * 受注期限が残っていると、自動遷移ですぐに未購入に戻り、検討中にできないため。それ以外は渡した商品をそのまま返す。
+ * 登録・編集・ステータスの変更・リストに戻すなど、利用者の操作で保存する直前に使う（自動遷移では使わない）。
+ */
+export function clearPassedOrderDeadlineOfConsidering<T extends Pick<Product, 'status' | 'orderDeadline'>>(product: T, currentTime: Date): T {
+  if (product.status !== 'considering' || !isOrderDeadlinePassed(product, currentTime)) return product;
+  return { ...product, orderDeadline: null };
 }
 
 /**
