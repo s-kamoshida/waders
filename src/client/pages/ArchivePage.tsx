@@ -4,7 +4,7 @@
  * 所属: クライアント（画面）
  * 責務:
  *  - 商品の一覧を読み込み、発売月が当月より前の商品を、新しい月から順に年・月のグループ（見出しに個数と合計金額の実績）で表示する。
- *    商品のない月は表示しない。年のまとめ方（暦年・年度）はリストで選んだものを使う
+ *    商品のない月は表示しない。年は暦年でまとめる（issue #58）
  *  - 商品を押して編集のモーダルを開く（発売月は変更できない）。「リストに戻す」で新しい発売月を指定してリストに戻す
  *  - 保存・リストに戻した後に読み込み直す
  *  - リストと同じカテゴリーの選択で絞り込み、見出しの集計も絞り込んだ商品で数える（issue #10）
@@ -22,7 +22,6 @@ import { fetchProducts } from '../productApiClient.ts';
 import { formatDateInJapan, formatMonthInJapan } from '../productDisplay.ts';
 import { buildArchiveGroups, collectMakerSuggestions, formatArchiveSummary, splitProductsByArchive } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
-import { readStoredYearMode } from './ProductListPage.tsx';
 
 /** 開いているモーダル（detail は商品の詳細画面。issue #52）。 */
 type OpenDialog = { readonly kind: 'detail' | 'edit' | 'restore'; readonly product: ProductResponse };
@@ -37,7 +36,6 @@ export type ArchivePageProps = {
 export function ArchivePage({ currentTime }: ArchivePageProps) {
   const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [hasLoadError, setHasLoadError] = useState(false);
-  const [yearMode] = useState(readStoredYearMode);
   const [openDialog, setOpenDialog] = useState<OpenDialog | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
 
@@ -62,7 +60,7 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
     () => splitProductsByArchive(categoryFilter.filteredProducts, currentMonth).archived,
     [categoryFilter.filteredProducts, currentMonth],
   );
-  const yearGroups = useMemo(() => buildArchiveGroups(archivedProducts, { yearMode }), [archivedProducts, yearMode]);
+  const yearGroups = useMemo(() => buildArchiveGroups(archivedProducts), [archivedProducts]);
 
   const makerSuggestions = useMemo(() => collectMakerSuggestions(products ?? []), [products]);
 
