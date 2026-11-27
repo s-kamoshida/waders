@@ -162,7 +162,7 @@ export function ProductImageField({ inputId, currentImageUrl, choice, onChoiceCh
         suppressContentEditableWarning
         inputMode="none"
         tabIndex={0}
-        data-placeholder="ここに画像を貼り付け（長押しして「ペースト」、または Ctrl/⌘+V）"
+        aria-placeholder={SCREEN_MESSAGES.productImagePasteAreaHint}
         onPaste={pasteIntoPasteArea}
         onBeforeInput={(event) => event.preventDefault()}
         onDrop={(event) => event.preventDefault()}
