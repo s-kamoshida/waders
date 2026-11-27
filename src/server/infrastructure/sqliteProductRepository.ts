@@ -161,6 +161,11 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
     OR card_image_file_name GLOB '${imageFileNameStemPattern}.webp'
   );
   `,
+  // 版数 9: 値引き（ポイント・クーポンなどの総額。issue #50）。既存の商品は値引きなし（NULL）になる。
+  // 金額と送料などの合計以下という決まり（BR-35）は入力の検証で確かめ、DB では値の範囲だけを制約にする
+  `
+  ALTER TABLE products ADD COLUMN discount INTEGER CHECK (discount IS NULL OR discount BETWEEN 0 AND ${MAXIMUM_PRICE_YEN});
+  `,
 ];
 
 /** 最新のスキーマの版数。 */
@@ -265,6 +270,7 @@ const productRowSchema = z.object({
   other_expense: z.number().int().nullable(),
   event_starts_at: z.string().nullable(),
   event_ends_at: z.string().nullable(),
+  discount: z.number().int().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -302,6 +308,7 @@ function convertRowToProduct(row: unknown): Product {
     otherExpense: parsedRow.other_expense,
     eventStartsAt: parsedRow.event_starts_at,
     eventEndsAt: parsedRow.event_ends_at,
+    discount: parsedRow.discount,
     createdAt: parsedRow.created_at,
     updatedAt: parsedRow.updated_at,
   };
@@ -419,8 +426,8 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
         database
           .prepare(
             `INSERT INTO products (id, name, release_month, status, cancelable, price, shipping_fee, order_deadline, url, category_id, category, maker, note,
-                                   location, handling_fee, travel_expense, other_expense, event_starts_at, event_ends_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                   location, handling_fee, travel_expense, other_expense, event_starts_at, event_ends_at, discount, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             product.id,
@@ -442,6 +449,7 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
             product.otherExpense,
             product.eventStartsAt,
             product.eventEndsAt,
+            product.discount,
             product.createdAt,
             product.updatedAt,
           );
@@ -466,7 +474,7 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
             `UPDATE products
              SET name = ?, release_month = ?, status = ?, cancelable = ?, price = ?, shipping_fee = ?,
                  order_deadline = ?, url = ?, category_id = ?, category = ?, maker = ?, note = ?,
-                 location = ?, handling_fee = ?, travel_expense = ?, other_expense = ?, event_starts_at = ?, event_ends_at = ?, updated_at = ?
+                 location = ?, handling_fee = ?, travel_expense = ?, other_expense = ?, event_starts_at = ?, event_ends_at = ?, discount = ?, updated_at = ?
              WHERE id = ?`,
           )
           .run(
@@ -488,6 +496,7 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
             product.otherExpense,
             product.eventStartsAt,
             product.eventEndsAt,
+            product.discount,
             product.updatedAt,
             product.id,
           );

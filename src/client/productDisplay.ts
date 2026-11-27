@@ -1,5 +1,5 @@
 /**
- * 商品の表示の補助（金額・送料・購入先・ステータスの表記、受注期限の警告、日本時間の日付、開催日時と開催期間、
+ * 商品の表示の補助（金額（値引き後）・送料・購入先・ステータスの表記、受注期限の警告、日本時間の日付、開催日時と開催期間、
  * カテゴリーごとに表示する入力項目と「その他費用」の名前）。
  *
  * 所属: クライアント
@@ -33,6 +33,16 @@ export function formatYen(amount: number): string {
 /** 金額の表記。未入力は「金額未入力」。 */
 export function formatPriceLabel(price: number | null): string {
   return price === null ? '金額未入力' : formatYen(price);
+}
+
+/**
+ * カード・リストに表示する金額（値引き後の金額）を求める（issue #50）。
+ * 値引きが金額を超える場合（送料などまでポイントで払った場合）は 0 円にする。
+ * @returns 金額が未入力なら null、値引きがなければ金額のまま
+ */
+export function calculateDiscountedPrice(price: number | null, discount: number | null): number | null {
+  if (price === null) return null;
+  return Math.max(0, price - (discount ?? 0));
 }
 
 /** 送料の表記。未入力と 0 円は「送料無料」、それ以外は「送料 800円」。 */

@@ -11,6 +11,8 @@ import {
 } from '../../client/productList.ts';
 import type { ProductResponse } from '../../shared/productContract.ts';
 
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
 /** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
 const NO_IMAGE_KIND = { imageKind: null } as const;
 
@@ -40,12 +42,18 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    ...NO_DISCOUNT,
     imageUrl: null,
     ...NO_IMAGE_KIND,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
   };
+}
+
+/** 値引きを指定する（issue #50）。createProduct の引数に展開して渡す。 */
+function withDiscount(discount: number | null) {
+  return { discount };
 }
 
 /** グループの月の一覧を返す。 */
@@ -190,6 +198,53 @@ describe('見出しの個数と合計金額', () => {
     const [yearGroup] = buildArchiveGroups([product], { yearMode: 'calendar' });
 
     expect(yearGroup?.summary).toEqual({ count: 1, totalYen: 11730 });
+  });
+
+  it('値引きがある商品は、金額・送料などの合計から値引きを引いた額を合計金額に含める（issue #50）', () => {
+    const products = [
+      createProduct({ price: 5000, shippingFee: 800, ...withDiscount(500) }),
+      createProduct({ price: 8800, handlingFee: 330, travelExpense: 2000, otherExpense: 600, ...withDiscount(1000) }),
+    ];
+
+    const [yearGroup] = buildProductListGroups(products, { currentMonth: '2026-11', yearMode: 'calendar' });
+
+    expect(yearGroup?.summary).toEqual({ count: 2, totalYen: 5000 + 800 - 500 + (8800 + 330 + 2000 + 600 - 1000) });
+    expect(yearGroup?.months[0]?.summary).toEqual({ count: 2, totalYen: 16030 });
+  });
+
+  it('値引きが金額を超え、送料まで値引きした商品は、合計金額に 0 円として含める（issue #50）', () => {
+    const products = [createProduct({ price: 1000, shippingFee: 800, ...withDiscount(1800) }), createProduct({ price: 3000 })];
+
+    const [yearGroup] = buildProductListGroups(products, { currentMonth: '2026-11', yearMode: 'calendar' });
+
+    expect(yearGroup?.summary).toEqual({ count: 2, totalYen: 3000 });
+  });
+
+  it('値引きが null や 0 円の商品は、今までどおり金額・送料などの合計を含める（issue #50）', () => {
+    const products = [createProduct({ price: 5000, shippingFee: 800, ...withDiscount(null) }), createProduct({ price: 1000, ...withDiscount(0) })];
+
+    const [yearGroup] = buildProductListGroups(products, { currentMonth: '2026-11', yearMode: 'calendar' });
+
+    expect(yearGroup?.summary).toEqual({ count: 2, totalYen: 6800 });
+  });
+
+  it('未購入の商品は、値引きがあっても合計金額に含めない（ほかの商品の合計から値引きを引かない。issue #50）', () => {
+    const products = [
+      createProduct({ status: 'unpurchased', price: 5000, ...withDiscount(500) }),
+      createProduct({ price: 1000 }),
+    ];
+
+    const [yearGroup] = buildProductListGroups(products, { currentMonth: '2026-11', yearMode: 'calendar' });
+
+    expect(yearGroup?.summary).toEqual({ count: 1, totalYen: 1000 });
+  });
+
+  it('アーカイブの見出しの合計金額からも、値引きを引く（issue #50）', () => {
+    const product = createProduct({ releaseMonth: '2026-10', status: 'purchased', price: 5000, shippingFee: 800, ...withDiscount(500) });
+
+    const [yearGroup] = buildArchiveGroups([product], { yearMode: 'calendar' });
+
+    expect(yearGroup?.summary).toEqual({ count: 1, totalYen: 5300 });
   });
 
   it('見出しの集計を「3個（合計 44,000円見込）」と表記する', () => {

@@ -14,6 +14,9 @@ import { STUB_CATEGORIES, type RecordedRequest } from '../testFetchStub.ts';
 /** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
 const NO_IMAGE_KIND = { imageKind: null } as const;
 
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
+
 // 画像の縮小・読み込み（canvas）は jsdom では動かないため、結果を決まった値にする（issue #41・#51）
 const preparationMocks = vi.hoisted(() => ({
   prepareProductImage: vi.fn(async (file: File) => ({ data: `PREPARED-${file.name}`, width: 800, height: 600 })),
@@ -61,6 +64,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    ...NO_DISCOUNT,
     imageUrl: null,
     ...NO_IMAGE_KIND,
     createdAt: '2026-11-01T00:00:00.000Z',

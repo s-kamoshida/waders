@@ -64,6 +64,7 @@ describe('POST /api/products', () => {
       otherExpense: null,
       eventStartsAt: null,
       eventEndsAt: null,
+      discount: null,
       imageUrl: null,
       imageKind: null,
       createdAt: TEST_CURRENT_TIME.toISOString(),
@@ -206,6 +207,71 @@ describe('開催日時と終了日時（PR #30 のレビュー）', () => {
     expect(response.status).toBe(400);
     expect(response.body.error.fieldErrors).toEqual({ eventEndsAt: '終了日時は開催日時以降にしてください。' });
     expect(harness.productService.listProducts()).toEqual([]);
+  });
+});
+
+describe('値引き（issue #50・BR-35）', () => {
+  const discountedInput = { ...validInput, price: 5000, shippingFee: 800, discount: 500 };
+
+  it('値引きを付けて登録した場合、201 と値引きを含む商品を返し、一覧でも返す', async () => {
+    const response = await request(harness.application).post('/api/products').send(discountedInput).expect(201);
+
+    expect(response.body).toMatchObject({ price: 5000, shippingFee: 800, discount: 500 });
+    const listResponse = await request(harness.application).get('/api/products').expect(200);
+    expect(listResponse.body.products[0]).toMatchObject({ discount: 500 });
+  });
+
+  it('値引きを更新した場合、200 と更新した商品を返し、null で値引きなしに戻せる', async () => {
+    const created = await createProductThroughApi(discountedInput);
+
+    const changed = await request(harness.application)
+      .put(`/api/products/${created.id}`)
+      .send({ ...discountedInput, discount: 1800 })
+      .expect(200);
+    expect(changed.body).toMatchObject({ discount: 1800 });
+
+    const cleared = await request(harness.application)
+      .put(`/api/products/${created.id}`)
+      .send({ ...discountedInput, discount: null })
+      .expect(200);
+    expect(cleared.body).toMatchObject({ discount: null });
+  });
+
+  it('値引きを省略して更新した場合、値引きなし（null）になる', async () => {
+    const created = await createProductThroughApi(discountedInput);
+
+    const response = await request(harness.application).put(`/api/products/${created.id}`).send(validInput).expect(200);
+
+    expect(response.body).toMatchObject({ discount: null });
+  });
+
+  it.each([
+    ['負の値引き', { discount: -1 }, '金額は 0 円以上で入力してください。'],
+    ['上限を超える値引き', { price: 9_999_999, shippingFee: 9_999_999, discount: 10_000_000 }, '金額は 9,999,999 円以下で入力してください。'],
+    ['整数でない値引き', { discount: 1.5 }, '金額は整数で入力してください。'],
+    ['金額と送料などの合計を超える値引き', { discount: 5801 }, '値引きは、金額と送料などの合計以下で入力してください。'],
+    ['金額が空のままの値引き', { price: null, discount: 500 }, '値引きを入力する場合は、金額も入力してください。'],
+  ])('%s の場合、400 と値引きの文言を返し、登録しない', async (_label, overrides, message) => {
+    const response = await request(harness.application)
+      .post('/api/products')
+      .send({ ...discountedInput, ...overrides });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(response.body.error.fieldErrors).toEqual({ discount: message });
+    expect(harness.productService.listProducts()).toEqual([]);
+  });
+
+  it('更新で値引きが金額と送料などの合計を超える場合、400 と値引きの文言を返し、更新しない', async () => {
+    const created = await createProductThroughApi(discountedInput);
+
+    const response = await request(harness.application)
+      .put(`/api/products/${created.id}`)
+      .send({ ...discountedInput, discount: 5801 });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.fieldErrors).toEqual({ discount: '値引きは、金額と送料などの合計以下で入力してください。' });
+    expect(harness.productService.listProducts()[0]).toMatchObject({ discount: 500 });
   });
 });
 

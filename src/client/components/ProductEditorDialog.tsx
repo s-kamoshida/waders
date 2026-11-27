@@ -11,6 +11,7 @@
  *  - 場所・手数料・交通費（見込）・その他費用（issue #26）と、開催日時・終了日時（日本時間で分まで入力し、UTC で送る。PR #30 のレビュー）を入力できる
  *  - カテゴリーごとに出し入れする項目は、選んでいるカテゴリーで有効な項目と、開いた時点で値が保存されている項目だけを表示し、
  *    表示していない項目は未入力として送る。その他費用はカテゴリーの名前で示す（issue #27）
+ *  - 値引き（ポイント・クーポンなどの総額）は、カテゴリーに関係なく金額の下に常に表示する。金額と送料などの合計以下に限る（BR-35。issue #50）
  *  - 削除は確認のうえで行う（元に戻せない）
  *  - アーカイブされた商品の編集では、発売月を変更できなくし、「リストに戻す」ボタンを表示する（issue #9）
  *  - 追加では、保存ボタンの横のプルダウンで保存の方法（「保存」「保存して続けて追加」）を選べる。選んだ方法はモーダルを
@@ -82,7 +83,7 @@ export type ProductEditorDialogProps = {
   readonly onRestoreRequested?: () => void;
   /**
    * 追加の場合に渡すと、保存ボタンの横に保存の方法のプルダウンを表示する。「保存して続けて追加」で保存したときに呼ぶ（モーダルは閉じない）。
-   * 次の入力では、商品名・金額・送料・URL・メーカー・備考・場所・費用・開催日時・終了日時・画像を空に戻し、
+   * 次の入力では、商品名・金額・送料・URL・メーカー・備考・場所・費用・開催日時・終了日時・値引き・画像を空に戻し、
    * 発売月・ステータス・キャンセル可・受注期限・カテゴリーを残す。
    */
   readonly onSavedAndContinued?: () => void;
@@ -125,6 +126,8 @@ type FormValues = {
   eventStartsAt: string;
   /** 終了日時（日本時間の日時の入力欄の値）。 */
   eventEndsAt: string;
+  /** 値引き（円。issue #50）。 */
+  discount: string;
 };
 
 /** 「保存して続けて追加」で空に戻す項目の値。 */
@@ -141,6 +144,7 @@ const CLEARED_FOR_NEXT_PRODUCT = {
   otherExpense: '',
   eventStartsAt: '',
   eventEndsAt: '',
+  discount: '',
 } as const satisfies Partial<FormValues>;
 
 /** 用途に応じた入力欄の初期値を作る。 */
@@ -167,6 +171,7 @@ function createInitialValues(mode: ProductEditorMode): FormValues {
     otherExpense: product.otherExpense === null ? '' : String(product.otherExpense),
     eventStartsAt: formatUtcAsJapanDateTimeInput(product.eventStartsAt),
     eventEndsAt: formatUtcAsJapanDateTimeInput(product.eventEndsAt),
+    discount: product.discount === null ? '' : String(product.discount),
   };
 }
 
@@ -194,6 +199,8 @@ function convertToProductInput(values: FormValues, visibleFields: ReadonlySet<Ca
     otherExpense: whenVisible('otherExpense', convertToNumberOrNull(values.otherExpense)),
     eventStartsAt: whenVisible('eventPeriod', convertJapanDateTimeInputToUtc(values.eventStartsAt)),
     eventEndsAt: whenVisible('eventPeriod', convertJapanDateTimeInputToUtc(values.eventEndsAt)),
+    // 値引きはカテゴリーに関係なく常に表示する（issue #50）
+    discount: convertToNumberOrNull(values.discount),
   };
 }
 
@@ -425,8 +432,8 @@ export function ProductEditorDialog({
     );
   const describedBy = (fieldName: string) => (fieldErrors[fieldName] === undefined ? undefined : `${fieldId(fieldName)}-error`);
 
-  /** 円の金額の入力欄（送料・手数料・交通費・その他費用）を描画する。 */
-  const renderYenField = (fieldName: 'shippingFee' | 'handlingFee' | 'travelExpense' | 'otherExpense', label: string) => (
+  /** 円の金額の入力欄（送料・手数料・交通費・その他費用・値引き）を描画する。 */
+  const renderYenField = (fieldName: 'discount' | 'shippingFee' | 'handlingFee' | 'travelExpense' | 'otherExpense', label: string) => (
     <div className="field">
       <label htmlFor={fieldId(fieldName)}>{label}</label>
       <input
@@ -615,6 +622,8 @@ export function ProductEditorDialog({
               </div>
               {visibleFields.has('shippingFee') && renderYenField('shippingFee', '送料（税込）')}
             </div>
+            {/* 値引きはカテゴリーに関係なく常に表示し、金額の真下に半分の幅で置く（issue #50） */}
+            <div className="field-row field-row--keep-columns">{renderYenField('discount', '値引き')}</div>
             {(visibleFields.has('handlingFee') || visibleFields.has('travelExpense')) && (
               <div className="field-row field-row--keep-columns">
                 {visibleFields.has('handlingFee') && renderYenField('handlingFee', '手数料')}

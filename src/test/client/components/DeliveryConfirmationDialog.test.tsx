@@ -10,6 +10,9 @@ import { getHeaderCloseButton, holdFetchRoute } from '../dialogCloseButtonQuerie
 /** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
 const NO_IMAGE_KIND = { imageKind: null } as const;
 
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -36,6 +39,7 @@ function createAwaitingProduct(id: string, name: string): ProductListItem {
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    ...NO_DISCOUNT,
     imageUrl: null,
     ...NO_IMAGE_KIND,
     createdAt: '2026-06-01T00:00:00.000Z',

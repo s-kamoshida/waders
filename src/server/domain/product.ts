@@ -49,6 +49,8 @@ export type Product = {
   readonly eventStartsAt: string | null;
   /** 終了日時（UTC の ISO 8601。開催日時より前にはならない）。未入力は null（PR #30 のレビュー）。 */
   readonly eventEndsAt: string | null;
+  /** 値引き（ポイント・クーポンなどの総額。円）。値引きなしは null。金額と送料などの合計以下（BR-35。issue #50）。 */
+  readonly discount: number | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 };

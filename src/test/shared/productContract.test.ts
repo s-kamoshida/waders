@@ -4,10 +4,14 @@ import {
   MAXIMUM_NOTE_LENGTH,
   MAXIMUM_PRICE_YEN,
   MAXIMUM_PRODUCT_NAME_LENGTH,
+  collectFieldErrors,
   productInputSchema,
   productListItemSchema,
   productSchema,
 } from '../../shared/productContract.ts';
+
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
 
 /** 必須項目だけを持つ入力。 */
 const minimumInput = { name: 'アクションフィギュア セカンド・フォーム', releaseMonth: '2026-12' };
@@ -39,6 +43,7 @@ describe('必須項目', () => {
       otherExpense: null,
       eventStartsAt: null,
       eventEndsAt: null,
+      discount: null,
     });
   });
 
@@ -257,6 +262,79 @@ describe('開催日時と終了日時（PR #30 のレビュー）', () => {
   });
 });
 
+describe('値引き（issue #50・BR-35）', () => {
+  /** 値引きが合計を超える場合の文言（MSG-V-031）。 */
+  const DISCOUNT_EXCEEDS_TOTAL_MESSAGE = '値引きは、金額と送料などの合計以下で入力してください。';
+  /** 金額が空のまま値引きを入れた場合の文言（MSG-V-032）。 */
+  const DISCOUNT_WITHOUT_PRICE_MESSAGE = '値引きを入力する場合は、金額も入力してください。';
+  /** 金額・送料・手数料・交通費（見込）・その他費用（合計 8,730 円）。 */
+  const ALL_COSTS = { price: 5000, shippingFee: 800, handlingFee: 330, travelExpense: 2000, otherExpense: 600 };
+
+  /** 入力を検証し、値引きの欄に表示する文言（誤りがなければ undefined）を返す。 */
+  function findDiscountError(input: Record<string, unknown>): string | undefined {
+    const result = productInputSchema.safeParse({ ...minimumInput, ...input });
+    return result.success ? undefined : collectFieldErrors(result.error).discount;
+  }
+
+  it('金額があり、値引きがその範囲内の場合、値引きを受け付ける', () => {
+    expect(productInputSchema.parse({ ...minimumInput, price: 5000, discount: 500 })).toMatchObject({ price: 5000, discount: 500 });
+  });
+
+  it('値引きが null の場合、値引きなし（null）として受け付ける', () => {
+    expect(productInputSchema.parse({ ...minimumInput, price: 5000, discount: null })).toMatchObject({ discount: null });
+  });
+
+  it('値引きが 0 円の場合、受け付ける', () => {
+    expect(productInputSchema.parse({ ...minimumInput, price: 5000, discount: 0 })).toMatchObject({ discount: 0 });
+  });
+
+  it('値引きが上限の金額（9,999,999 円）で、合計がそれ以上の場合、受け付ける', () => {
+    const input = { ...minimumInput, price: MAXIMUM_PRICE_YEN, discount: MAXIMUM_PRICE_YEN };
+
+    expect(productInputSchema.parse(input)).toMatchObject({ discount: 9_999_999 });
+  });
+
+  it.each([
+    [-1, '金額は 0 円以上で入力してください。'],
+    [10_000_000, '金額は 9,999,999 円以下で入力してください。'],
+    [100.5, '金額は整数で入力してください。'],
+  ])('値引きが範囲外または整数でない（%s）場合、金額と同じ文言で拒否する', (discount, message) => {
+    expect(findDiscountError({ price: MAXIMUM_PRICE_YEN, shippingFee: MAXIMUM_PRICE_YEN, discount })).toBe(message);
+  });
+
+  it('値引きが、金額・送料・手数料・交通費（見込）・その他費用の合計と同じ場合、受け付ける', () => {
+    expect(productInputSchema.parse({ ...minimumInput, ...ALL_COSTS, discount: 8730 })).toMatchObject({ discount: 8730 });
+  });
+
+  it('値引きが、金額・送料・手数料・交通費（見込）・その他費用の合計を超える場合、値引きの誤りとして文言とともに拒否する', () => {
+    expect(findDiscountError({ ...ALL_COSTS, discount: 8731 })).toBe(DISCOUNT_EXCEEDS_TOTAL_MESSAGE);
+  });
+
+  it('値引きが金額を超えても、送料などを含めた合計以下の場合（ポイントで送料まで払う場合）、受け付ける', () => {
+    expect(productInputSchema.parse({ ...minimumInput, price: 1000, shippingFee: 800, discount: 1800 })).toMatchObject({ discount: 1800 });
+  });
+
+  it('送料などがなく、値引きが金額を超える場合、値引きの誤りとして文言とともに拒否する', () => {
+    expect(findDiscountError({ price: 1000, discount: 1001 })).toBe(DISCOUNT_EXCEEDS_TOTAL_MESSAGE);
+  });
+
+  it('金額が空のまま値引きを入れた場合、値引きの誤りとして文言とともに拒否する', () => {
+    expect(findDiscountError({ price: null, discount: 500 })).toBe(DISCOUNT_WITHOUT_PRICE_MESSAGE);
+  });
+
+  it('金額が空で、値引きが送料などの範囲内の場合も、金額が空の文言で拒否する', () => {
+    expect(findDiscountError({ price: null, shippingFee: 800, handlingFee: 330, discount: 500 })).toBe(DISCOUNT_WITHOUT_PRICE_MESSAGE);
+  });
+
+  it('金額が空のまま値引きを 0 円にした場合も、金額が空の文言で拒否する（値の有無で判断する）', () => {
+    expect(findDiscountError({ price: null, discount: 0 })).toBe(DISCOUNT_WITHOUT_PRICE_MESSAGE);
+  });
+
+  it('金額も値引きも空の場合は、今までどおり受け付ける', () => {
+    expect(isValid({ ...minimumInput, price: null, shippingFee: 800, discount: null })).toBe(true);
+  });
+});
+
 describe('API が返す商品の画像の種類（issue #51）', () => {
   /** API が返す商品（画像の種類のほかの項目）。 */
   const responseProduct = {
@@ -279,6 +357,7 @@ describe('API が返す商品の画像の種類（issue #51）', () => {
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    ...NO_DISCOUNT,
     imageUrl: '/api/products/product-1/image?v=1',
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',

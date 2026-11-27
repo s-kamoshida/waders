@@ -12,6 +12,9 @@ import {
   type ProductRepository,
 } from '../../../server/infrastructure/sqliteProductRepository.ts';
 
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
+
 let database: DatabaseSync;
 let repository: ProductRepository;
 
@@ -46,6 +49,7 @@ function createProduct(overrides: Partial<Product> = {}): Product {
     otherExpense: 600,
     eventStartsAt: '2026-12-20T09:00:00.000Z',
     eventEndsAt: '2026-12-20T12:00:00.000Z',
+    ...NO_DISCOUNT,
     createdAt: '2026-11-17T01:00:00.000Z',
     updatedAt: '2026-11-17T01:00:00.000Z',
     ...overrides,
@@ -368,8 +372,8 @@ describe('スキーマの移行（版数 1 から）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('最新のスキーマの版数は 8 である（issue #42）', () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(8);
+  it('最新のスキーマの版数は 9 である（issue #50）', () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(9);
   });
 
   it('版数 1 の DB を開いた場合、最新の版数に移行し、既存の商品と履歴を保ち、確認待ちは空、メーカーと備考は未入力になる', () => {
@@ -836,7 +840,7 @@ describe('スキーマの移行（版数 7 → 8。issue #42）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('版数 7 の DB を開いた場合、版数 8 に移行し、既存の商品と画像のファイルの名前を保ち、カード画像のファイルの名前は null になる', () => {
+  it('版数 7 の DB を開いた場合、最新の版数に移行し、既存の商品と画像のファイルの名前を保ち、カード画像のファイルの名前は null になる', () => {
     const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
     const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
     const uploadedImageFileName = '0b6c2d0e-3f0a-4c55-9a8e-2f1d6c7b8a90.jpg';
@@ -852,10 +856,114 @@ describe('スキーマの移行（版数 7 → 8。issue #42）', () => {
     const migratedRepository = createSqliteProductRepository(migratedDatabase);
 
     const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
-    expect(version.user_version).toBe(8);
+    expect(version.user_version).toBe(LATEST_SCHEMA_VERSION);
     expect(migratedRepository.findProductById(product.id)).toEqual(product);
     expect(migratedRepository.findUploadedImageFileName(product.id)).toBe(uploadedImageFileName);
     expect(migratedRepository.findCardImageFileName(product.id)).toBeNull();
+    migratedDatabase.close();
+  });
+});
+
+/** 値引きを指定する（issue #50）。フィクスチャの引数に展開して渡す。 */
+function withDiscount(discount: number | null) {
+  return { discount };
+}
+
+describe('値引き（issue #50）', () => {
+  const change = { changedAt: '2026-11-18T00:00:00.000Z', changeKind: 'user' } as const;
+
+  it('値引きのある商品を登録した場合、値引きも保存される', () => {
+    const product = createProduct({ price: 5000, ...withDiscount(500) });
+
+    repository.insertProduct(product);
+
+    expect(repository.findProductById(product.id)).toMatchObject({ price: 5000, discount: 500 });
+  });
+
+  it('値引きのない商品を登録した場合、値引きは null のまま保存される', () => {
+    const product = createProduct();
+
+    repository.insertProduct(product);
+
+    expect(repository.findProductById(product.id)).toMatchObject({ discount: null });
+  });
+
+  it('値引きを変えて更新した場合、変えた値引きが保存され、null で値引きなしに戻せる', () => {
+    const product = createProduct({ price: 5000, ...withDiscount(500) });
+    repository.insertProduct(product);
+
+    repository.updateProduct({ ...product, ...withDiscount(1200), updatedAt: change.changedAt }, change);
+    expect(repository.findProductById(product.id)).toMatchObject({ discount: 1200 });
+
+    repository.updateProduct({ ...product, ...withDiscount(null), updatedAt: change.changedAt }, change);
+    expect(repository.findProductById(product.id)).toMatchObject({ discount: null });
+  });
+
+  it('値引きが上限の金額（9,999,999 円）の場合、保存できる', () => {
+    const product = createProduct({ price: 9_999_999, ...withDiscount(9_999_999) });
+
+    repository.insertProduct(product);
+
+    expect(repository.findProductById(product.id)).toMatchObject({ discount: 9_999_999 });
+  });
+
+  it.each([
+    ['負の値引き', -1],
+    ['上限を超える値引き', 10_000_000],
+  ])('%s を保存しようとした場合、DB の制約で拒否する', (_label, discount) => {
+    const invalidProduct = { ...createProduct({ price: 9_999_999 }), ...withDiscount(discount) } as Product;
+
+    expect(() => repository.insertProduct(invalidProduct)).toThrow(/CHECK constraint failed/);
+  });
+});
+
+describe('スキーマの移行（版数 8 → 9。issue #50）', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), 'waders-migration-'));
+  });
+
+  afterEach(() => {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  /** 版数 8 の DB に商品を 1 件書き込み、ファイルの場所と商品を返す。 */
+  function prepareVersionEightDatabase() {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const product = createProduct(FIELDS_ADDED_IN_VERSION_SIX);
+    const versionEightDatabase = new DatabaseSync(databaseFilePath);
+    versionEightDatabase.exec('PRAGMA foreign_keys = ON');
+    for (const migration of SCHEMA_MIGRATIONS.slice(0, 8)) versionEightDatabase.exec(migration);
+    versionEightDatabase.exec('PRAGMA user_version = 8');
+    insertProductForVersionFour(versionEightDatabase, product);
+    versionEightDatabase.close();
+    return { databaseFilePath, product };
+  }
+
+  it('版数 8 の DB を開いた場合、版数 9 に移行し、既存の商品のすべての項目を保ち、値引きは null（値引きなし）になる', () => {
+    const { databaseFilePath, product } = prepareVersionEightDatabase();
+
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
+    expect(version.user_version).toBe(9);
+    expect(migratedRepository.findProductById(product.id)).toEqual(product);
+    expect(migratedRepository.findProductById(product.id)).toMatchObject({ discount: null });
+    expect(migratedRepository.listProductHistory(product.id)).toHaveLength(2);
+    migratedDatabase.close();
+  });
+
+  it('移行した DB の値引きの列は、0 円以上 9,999,999 円以下だけを受け付ける（CHECK 制約）', () => {
+    const { databaseFilePath, product } = prepareVersionEightDatabase();
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const setDiscount = (discount: number) => migratedDatabase.prepare('UPDATE products SET discount = ? WHERE id = ?').run(discount, product.id);
+
+    expect(() => setDiscount(-1)).toThrow(/CHECK constraint failed/);
+    expect(() => setDiscount(10_000_000)).toThrow(/CHECK constraint failed/);
+    setDiscount(9_999_999);
+    expect(createSqliteProductRepository(migratedDatabase).findProductById(product.id)).toMatchObject({ discount: 9_999_999 });
     migratedDatabase.close();
   });
 });

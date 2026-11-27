@@ -49,6 +49,7 @@ describe('商品の登録', () => {
       otherExpense: null,
       eventStartsAt: null,
       eventEndsAt: null,
+      discount: null,
       createdAt: TEST_CURRENT_TIME.toISOString(),
       updatedAt: TEST_CURRENT_TIME.toISOString(),
     });
