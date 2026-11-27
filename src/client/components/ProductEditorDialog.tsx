@@ -20,6 +20,7 @@
  *    同じ URL では取り直さない（取った結果を覚えておく）。保存済みの URL のまま・空・形の誤りでは取りに行かない。
  *    取りに行っている間に URL を変えた場合は、前の URL の結果を表示しない。取得中・取れなかった場合も保存はできる。
  *    プレビューの画像は保存では送らない（カード画像は保存の後にサーバーが取りに行く。#42）
+ *  - 見出しの行の「閉じる」ボタン（×）は「キャンセル」と同じく、確認を出さずに保存せずに閉じる。保存中は押せない（issue #49）
  * 保存・削除に成功したら onSaved を、「保存して続けて追加」で保存したら onSavedAndContinued を呼ぶ。
  * 商品を保存できて画像を保存できなかった場合は、onSaved に { imageSaveFailed: true } を渡す（issue #41）。
  */
@@ -481,9 +482,14 @@ export function ProductEditorDialog({
             void saveProduct(saveMethod === 'saveAndContinue');
           }}
         >
-          <h2 id={`${idPrefix}-title`} className="dialog-title">
-            {title}
-          </h2>
+          <div className="dialog-header">
+            <h2 id={`${idPrefix}-title`} className="dialog-title">
+              {title}
+            </h2>
+            <button type="button" className="dialog-close-button" aria-label="閉じる" disabled={isSubmitting} onClick={onClose}>
+              ×
+            </button>
+          </div>
           <div className="dialog-body">
             {generalError !== null && (
               <p role="alert" className="dialog-error">

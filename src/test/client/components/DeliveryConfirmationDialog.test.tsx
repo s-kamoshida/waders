@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeliveryConfirmationDialog } from '../../../client/components/DeliveryConfirmationDialog.tsx';
 import type { ProductListItem } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
+import { getHeaderCloseButton, holdFetchRoute } from '../dialogCloseButtonQueries.ts';
 
 /** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
 const NO_IMAGE_KIND = { imageKind: null } as const;
@@ -150,6 +151,63 @@ describe('DeliveryConfirmationDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: 'あとで' }));
 
     expect(onClose).toHaveBeenCalled();
+    expect(requests).toEqual([]);
+  });
+});
+
+describe('右上の閉じるボタン（issue #49）', () => {
+  /** 延期の確認のモーダルを返す。 */
+  const getDialog = () => screen.getByRole('dialog', { name: '発売月を過ぎた予約商品の確認' });
+
+  it('開いた場合、見出しの行に「閉じる」ボタン（×）を表示する', () => {
+    stubFetchRoutes({});
+    render(<DeliveryConfirmationDialog products={products} currentMonth="2026-11" onClose={vi.fn()} onCompleted={vi.fn()} />);
+
+    expect(getHeaderCloseButton(getDialog())).toBeEnabled();
+  });
+
+  it('回答を選んでから「閉じる」ボタン（×）を押した場合、「あとで」と同じく送信せずに onClose を呼ぶ', async () => {
+    const { requests } = stubFetchRoutes({});
+    const onClose = vi.fn();
+    const onCompleted = vi.fn();
+    render(<DeliveryConfirmationDialog products={products} currentMonth="2026-11" onClose={onClose} onCompleted={onCompleted} />);
+
+    await userEvent.click(within(getAnswerGroup('届いたはずの商品')).getByLabelText('届いた'));
+    await userEvent.click(getHeaderCloseButton(getDialog()));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCompleted).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+  });
+
+  it('送信中の場合、「閉じる」ボタン（×）と「あとで」は押せず、×・「あとで」・Esc キーのいずれでも閉じない', async () => {
+    const { fetchMock } = stubFetchRoutes({});
+    holdFetchRoute(fetchMock, 'POST /api/products/product-1/delivery-confirmation');
+    const onClose = vi.fn();
+    render(<DeliveryConfirmationDialog products={products} currentMonth="2026-11" onClose={onClose} onCompleted={vi.fn()} />);
+
+    await userEvent.click(within(getAnswerGroup('届いたはずの商品')).getByLabelText('届いた'));
+    await userEvent.click(screen.getByRole('button', { name: '回答を保存' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '回答を保存' })).toBeDisabled());
+    const closeButton = getHeaderCloseButton(getDialog());
+    expect(closeButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'あとで' })).toBeDisabled();
+    await userEvent.click(closeButton);
+    await userEvent.click(screen.getByRole('button', { name: 'あとで' }));
+    fireEvent.keyDown(getDialog(), { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('モーダルの中で Esc キーを押した場合、今までどおり送信せずに onClose を呼ぶ', async () => {
+    const { requests } = stubFetchRoutes({});
+    const onClose = vi.fn();
+    render(<DeliveryConfirmationDialog products={products} currentMonth="2026-11" onClose={onClose} onCompleted={vi.fn()} />);
+
+    await userEvent.click(within(getAnswerGroup('届いたはずの商品')).getByLabelText('届いた'));
+    await userEvent.keyboard('{Escape}');
+
+    expect(onClose).toHaveBeenCalledTimes(1);
     expect(requests).toEqual([]);
   });
 });
