@@ -4,8 +4,8 @@
  * 所属: クライアント（画面の部品）
  * 責務:
  *  - カードを押したときに、編集の前に開く「見るだけ」のモーダル。画像を大きく、編集で入れられる項目をすべて表示する
- *    （カテゴリーで出し入れする項目は編集のモーダルと同じ決まり。値がなければ「未入力」）
- *  - 金額は、最終的な金額と内訳（送料・手数料・交通費（見込）・その他費用・値引き）を表示する
+ *    （カテゴリーで出し入れする項目は編集のモーダルと同じ決まり。値がなければ「－」、読み上げでは「未入力」。issue #63）
+ *  - 金額は、最終的な金額と内訳（送料・手数料・交通費（見込）・その他費用・値引き）を表示する（金額が未入力なら「－」）
  *  - ステータスはプルダウンで選ぶと、その場で保存する（PATCH /api/products/:productId/status）。失敗したら元に戻して知らせる
  *  - 右上の閉じるボタン（×）と Esc で閉じる。「削除」（確認を出す）・「編集」、アーカイブの商品では「リストに戻す」
  *  - 購入先は項目のドメイン名のリンクで開く（下の端に「購入先を開く」ボタンは置かない。押し間違えやすいため）
@@ -80,13 +80,25 @@ function DetailPlaceholderIcon() {
   );
 }
 
-/** 項目の 1 行（値がなければ「未入力」）。 */
+/**
+ * 値がないことを示す印（issue #63）。見た目は全角の「－」だけにし、読み上げでは「未入力」と伝える
+ * （「－」だけでは意味が伝わらないため、アクセシブルな名前を付ける）。
+ */
+function EmptyValueMark({ className }: { readonly className?: string }) {
+  return (
+    <span className={className === undefined ? 'detail-empty' : `${className} detail-empty`} role="img" aria-label={SCREEN_MESSAGES.detailValueEmptyLabel}>
+      {SCREEN_MESSAGES.detailValueEmpty}
+    </span>
+  );
+}
+
+/** 項目の 1 行（値がなければ「－」）。 */
 function DetailItem({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   const isEmpty = children === null || children === undefined || children === '';
   return (
     <div className="detail-row">
       <dt>{label}</dt>
-      <dd>{isEmpty ? <span className="detail-empty">{SCREEN_MESSAGES.detailValueEmpty}</span> : children}</dd>
+      <dd>{isEmpty ? <EmptyValueMark /> : children}</dd>
     </div>
   );
 }
@@ -189,7 +201,7 @@ export function ProductDetailDialog({ product, categories, onClose, onEditReques
           </div>
           <div className="detail-price">
             {amount === null ? (
-              <span className="detail-total detail-empty">{SCREEN_MESSAGES.detailValueEmpty}</span>
+              <EmptyValueMark className="detail-total" />
             ) : (
               <>
                 <span className="detail-total">{amount.total}</span>
