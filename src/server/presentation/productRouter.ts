@@ -13,7 +13,9 @@
  *  - PUT    /api/products/:productId/image  画像を付ける・差し替える（本文は { data: base64 }。200。issue #41）
  *  - DELETE /api/products/:productId/image  画像を消す（204。issue #41）
  *  - GET    /api/products/:productId/image  画像の中身（中身から判定した形式の Content-Type。issue #41）
- * 商品を返す応答には、画像の URL（imageUrl。画像を付け直すたびに変わる版を含む）を付ける（issue #41）。
+ *  - POST   /api/products/card-image-preview  保存の前のカード画像のプレビュー（本文は { url }。保存はしない。
+ *           200 で { cardImage: { data: base64, format } }、取れなければ { cardImage: null }。issue #51）
+ * 商品を返す応答には、画像の URL（imageUrl。画像を付け直すたびに変わる版を含む）と、画像の種類（imageKind）を付ける（issue #41・#51）。
  * 入力の誤りは 400（VALIDATION_ERROR と項目ごとの文言）、存在しない商品は 404（PRODUCT_NOT_FOUND）。
  * 業務ルールに反する操作のエラーの対応は PRODUCT_ERROR_RESPONSES を参照。カテゴリーの定義のファイルの誤りは 503（issue #10）。
  */
@@ -33,6 +35,7 @@ import {
 import { PRODUCT_IMAGE_CONTENT_TYPES, ProductImageTooLargeError, UnsupportedProductImageError } from '../domain/productImage.ts';
 import { sendCategoryDefinitionError } from './categoryRouter.ts';
 import {
+  cardImagePreviewRequestSchema,
   collectFieldErrors,
   deliveryConfirmationRequestSchema,
   productImageUploadRequestSchema,
@@ -40,6 +43,7 @@ import {
   releaseMonthChangeRequestSchema,
   restoreRequestSchema,
   type ApiErrorResponse,
+  type CardImagePreviewResponse,
   type ProductResponse,
 } from '../../shared/productContract.ts';
 
@@ -150,7 +154,11 @@ function respondWithProductOperation(
 ): void {
   try {
     const product = operation();
-    const body: ProductResponse = { ...product, imageUrl: buildImageUrl(product.id, productService.findProductImageVersion(product.id)) };
+    const body: ProductResponse = {
+      ...product,
+      imageUrl: buildImageUrl(product.id, productService.findProductImageVersion(product.id)),
+      imageKind: productService.findProductImageKind(product.id),
+    };
     response.status(status).json(body);
   } catch (error) {
     sendProductError(response, error);
@@ -177,9 +185,26 @@ export function createProductRouter(productService: ProductService): express.Rou
   router.get('/', (_request, response) => {
     const products = productService.listProducts();
     const imageVersions = productService.listProductImageVersions();
+    const imageKinds = productService.listProductImageKinds();
     response.json({
-      products: products.map((product) => ({ ...product, imageUrl: buildImageUrl(product.id, imageVersions.get(product.id) ?? null) })),
+      products: products.map((product) => ({
+        ...product,
+        imageUrl: buildImageUrl(product.id, imageVersions.get(product.id) ?? null),
+        imageKind: imageKinds.get(product.id) ?? null,
+      })),
     });
+  });
+
+  router.post('/card-image-preview', async (request, response) => {
+    const previewRequest = parseRequestBody(cardImagePreviewRequestSchema, request.body, response);
+    if (previewRequest === undefined) return;
+    const cardImage = await productService.previewCardImage(previewRequest.url);
+    const body: CardImagePreviewResponse = {
+      cardImage: cardImage === null ? null : { data: Buffer.from(cardImage.bytes).toString('base64'), format: cardImage.format },
+    };
+    // 取った画像は保存しないため、ブラウザにも覚えさせない
+    response.setHeader('Cache-Control', 'no-store');
+    response.json(body);
   });
 
   router.post('/', (request, response) => {

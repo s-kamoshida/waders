@@ -14,6 +14,8 @@
  * アップロードした画像とは別に保存する。表示する画像は、アップロードした画像があればそれ、なければカード画像。
  * 取りに行くのは URL を入れた・変えたときと、まだカード画像がないとき。URL を消した・変えたときは前のカード画像を消す。
  * 取りに行っている間に URL が変わった・商品が消えた・新しく取りに行った場合は、前の結果を使わない。
+ * 保存の前のプレビュー（issue #51）では、同じ取得の処理でカード画像を取り、大きさと中身の形式を確かめて返す（保存はしない）。
+ * 表示する画像の種類（アップロードした画像かカード画像か）も返す（issue #51）。
  */
 import {
   CategoryAlreadyDefinedError,
@@ -47,7 +49,7 @@ import {
 import type { CategoryDefinition } from '../infrastructure/categoryDefinitionFile.ts';
 import { createProductImageStorage } from '../infrastructure/productImageStorage.ts';
 import type { ProductRepository } from '../infrastructure/sqliteProductRepository.ts';
-import type { DeliveryConfirmationRequest, ProductInput } from '../../shared/productContract.ts';
+import type { DeliveryConfirmationRequest, ProductImageKind, ProductInput } from '../../shared/productContract.ts';
 
 /** 現在時刻を返す（テストで時刻を固定するため、直接 new Date() を呼ばない）。 */
 export type Clock = { now(): Date };
@@ -109,6 +111,17 @@ export type ProductService = {
   findProductImageVersion(productId: ProductId): string | null;
   /** 表示する画像のある商品の ID と、その画像の版（issue #41・#42）。 */
   listProductImageVersions(): Map<ProductId, string>;
+  /** 表示する画像の種類（アップロードした画像があれば uploaded、なければカード画像の card）。画像がなければ null（issue #51）。 */
+  findProductImageKind(productId: ProductId): ProductImageKind | null;
+  /** 表示する画像のある商品の ID と、その画像の種類（issue #51）。 */
+  listProductImageKinds(): Map<ProductId, ProductImageKind>;
+  /**
+   * 保存の前のプレビューのために、購入先のページのカード画像を取る。保存はしない（issue #51）。
+   * 取得先の検証は、保存の後の取得と同じ処理（fetchCardImage）が行う。
+   * @param pageUrl 検証済みの購入先の URL
+   * @returns 取った画像（形式は中身で判定）。取れない・失敗した・大きさの上限を超えた・受け付けない形式の場合は null
+   */
+  previewCardImage(pageUrl: string): Promise<ProductImage | null>;
   /** 裏で取りに行っているカード画像の取得が、すべて終わるのを待つ（テスト・終了の前に使う。issue #42）。 */
   waitForPendingCardImageFetches(): Promise<void>;
   /**
@@ -417,6 +430,27 @@ export function createProductService(dependencies: ProductServiceDependencies): 
       // カード画像を先に入れ、アップロードした画像で上書きする（アップロードした画像を優先する）
       const fileNames = new Map([...productRepository.listCardImageFileNames(), ...productRepository.listUploadedImageFileNames()]);
       return new Map([...fileNames].map(([productId, fileName]) => [productId, toImageVersion(fileName)]));
+    },
+
+    findProductImageKind(productId) {
+      if ((productRepository.findUploadedImageFileName(productId) ?? null) !== null) return 'uploaded';
+      return (productRepository.findCardImageFileName(productId) ?? null) !== null ? 'card' : null;
+    },
+
+    listProductImageKinds() {
+      const kinds = new Map<ProductId, ProductImageKind>();
+      for (const productId of productRepository.listCardImageFileNames().keys()) kinds.set(productId, 'card');
+      for (const productId of productRepository.listUploadedImageFileNames().keys()) kinds.set(productId, 'uploaded');
+      return kinds;
+    },
+
+    async previewCardImage(pageUrl) {
+      const cardImage = await Promise.resolve()
+        .then(() => dependencies.fetchCardImage(pageUrl))
+        .catch(() => null);
+      if (cardImage === null || cardImage.bytes.byteLength > MAXIMUM_PRODUCT_IMAGE_BYTES) return null;
+      const format = detectProductImageFormat(cardImage.bytes);
+      return format === null ? null : { bytes: cardImage.bytes, format };
     },
 
     async waitForPendingCardImageFetches() {

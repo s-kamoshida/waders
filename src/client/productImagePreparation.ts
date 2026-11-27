@@ -5,6 +5,7 @@
  * 責務:
  *  - 選んだ画像を読み込み、長い辺を 800px 以下に縮めて JPEG にし、base64 の文字列にする（スマートフォンの写真をそのまま送らないため）
  *  - 縮めた画像を、モーダルのプレビュー（canvas）に描く
+ *  - サーバーが取った購入先のページのカード画像（base64）を読み込み、同じ形にしてプレビューに描けるようにする（issue #51）
  * CSP で data: と blob: の画像を禁止しているため、プレビューは img ではなく canvas に描く。
  * 透過のある画像は、白の背景に重ねてから JPEG にする。
  */
@@ -48,7 +49,25 @@ function getDrawingContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D 
  * @throws {Error} 画像として読めないファイルの場合
  */
 export async function prepareProductImage(file: File): Promise<PreparedProductImage> {
-  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  return prepareImageFromBlob(file);
+}
+
+/** カード画像の形式と、読み込むときの種類（MIME タイプ）。 */
+const CARD_IMAGE_MEDIA_TYPES = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' } as const;
+
+/**
+ * サーバーが取ったカード画像（base64）を読み込み、選んだ画像と同じく縮めた形にする（プレビューに描くため。issue #51）。
+ * 画像は img の data: や blob: の URL にはせず（CSP で禁止）、Blob から直接読み込んで canvas に描く。
+ * @throws {Error} 画像として読めない場合
+ */
+export async function prepareCardImagePreview(cardImage: { readonly data: string; readonly format: keyof typeof CARD_IMAGE_MEDIA_TYPES }): Promise<PreparedProductImage> {
+  const bytes = Uint8Array.from(atob(cardImage.data), (character) => character.charCodeAt(0));
+  return prepareImageFromBlob(new Blob([bytes], { type: CARD_IMAGE_MEDIA_TYPES[cardImage.format] }));
+}
+
+/** 画像を読み込み、長い辺を上限以下に縮めて JPEG にする。 */
+async function prepareImageFromBlob(blob: Blob): Promise<PreparedProductImage> {
+  const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
   try {
     const size = calculatePreparedImageSize(bitmap.width, bitmap.height);
     const canvas = document.createElement('canvas');

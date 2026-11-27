@@ -9,8 +9,10 @@
  */
 import {
   apiErrorResponseSchema,
+  cardImagePreviewResponseSchema,
   productListResponseSchema,
   productSchema,
+  type CardImagePreviewResponse,
   type DeliveryConfirmationRequest,
   type ProductInput,
   type ProductListItem,
@@ -109,6 +111,15 @@ export async function uploadProductImage(productId: string, data: string): Promi
 /** 商品の画像を消す（issue #41）。 */
 export async function deleteProductImage(productId: string): Promise<void> {
   await sendApiRequest('DELETE', `/api/products/${encodeURIComponent(productId)}/image`);
+}
+
+/**
+ * 保存の前に、購入先の URL のカード画像を取ってもらう（保存はしない。issue #51）。
+ * @returns 取れた画像の中身（base64）と形式。取れなければ null
+ * @throws {ApiRequestError} URL の誤り・ログインが必要な場合など
+ */
+export async function fetchCardImagePreview(url: string): Promise<CardImagePreviewResponse['cardImage']> {
+  return cardImagePreviewResponseSchema.parse(await sendApiRequest('POST', '/api/products/card-image-preview', { url })).cardImage;
 }
 
 /** アーカイブされた商品を、新しい発売月でリストに戻す（issue #9）。 */

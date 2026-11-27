@@ -198,9 +198,17 @@ export const productSchema = z.object({
    * 画面と API を置くパス（basePath）は含まないため、画面では resolveApiPath で解決して使う。
    */
   imageUrl: z.string().nullable(),
+  /**
+   * 表示する画像の種類。uploaded はアップロードした画像、card は購入先のページのカード画像、画像がなければ null（issue #51）。
+   * 両方あるときは、表示するアップロードした画像（uploaded）。編集の画面が、URL を変えたときにカード画像のプレビューに置き換えるかを決めるのに使う。
+   */
+  imageKind: z.enum(['uploaded', 'card']).nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
+
+/** 表示する画像の種類（issue #51）。 */
+export type ProductImageKind = NonNullable<z.infer<typeof productSchema>['imageKind']>;
 
 /** API が返す商品。 */
 export type ProductResponse = z.infer<typeof productSchema>;
@@ -277,3 +285,24 @@ export function collectFieldErrors(error: z.ZodError): Record<string, string> {
   }
   return fieldErrors;
 }
+
+/** カード画像のプレビューの要求の本文（POST /api/products/card-image-preview。issue #51）。URL の検証は購入先の URL と同じ。 */
+export const cardImagePreviewRequestSchema = z.object({
+  url: productUrlSchema,
+});
+
+/**
+ * カード画像のプレビューの応答（issue #51）。cardImage は取れた画像の中身（base64）と、中身から判定した形式。取れなければ null。
+ */
+export const cardImagePreviewResponseSchema = z.object({
+  cardImage: z
+    .object({
+      data: z.string(),
+      format: z.enum(['jpeg', 'png', 'webp']),
+    })
+    .nullable(),
+});
+
+/** カード画像のプレビューの応答。 */
+export type CardImagePreviewResponse = z.infer<typeof cardImagePreviewResponseSchema>;
+
