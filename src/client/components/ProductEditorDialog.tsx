@@ -45,7 +45,7 @@ import {
 } from '../productDisplay.ts';
 import { formatUndefinedCategoryLabel } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
-import { ProductImageField, type ProductImageChoice } from './ProductImageField.tsx';
+import { ProductImageField, type ProductImageChoice, type ProductImageFieldHandle } from './ProductImageField.tsx';
 
 /** モーダルの用途。追加の場合は発売月の既定値を、編集の場合は対象の商品を持つ。 */
 export type ProductEditorMode =
@@ -230,6 +230,8 @@ export function ProductEditorDialog({
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
   const [imageChoice, setImageChoice] = useState<ProductImageChoice>({ kind: 'unchanged' });
   const [isPreparingImage, setIsPreparingImage] = useState(false);
+  /** モーダル全体で貼り付けた画像を画像の欄に渡すための参照（issue #45）。 */
+  const imageFieldRef = useRef<ProductImageFieldHandle>(null);
   const saveMenuToggleRef = useRef<HTMLButtonElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const idPrefix = useId();
@@ -398,6 +400,10 @@ export function ProductEditorDialog({
         aria-labelledby={`${idPrefix}-title`}
         onKeyDown={(event) => {
           if (event.key === 'Escape' && !isSubmitting) onClose();
+        }}
+        onPaste={(event) => {
+          // クリップボードに画像があれば、文字の欄に入力位置があっても画像として受け取る（issue #45）
+          if (imageFieldRef.current?.selectPastedImage(event.clipboardData) === true) event.preventDefault();
         }}
       >
         <form
@@ -590,6 +596,7 @@ export function ProductEditorDialog({
               {renderFieldError('url')}
             </div>
             <ProductImageField
+              ref={imageFieldRef}
               inputId={fieldId('image')}
               currentImageUrl={mode.kind === 'edit' ? mode.product.imageUrl : null}
               choice={imageChoice}

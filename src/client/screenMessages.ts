@@ -15,6 +15,8 @@ export const SCREEN_MESSAGES = {
   productAddedAndContinue: (productName: string) => `「${productName}」を追加しました。`,
   /** 商品の画像（issue #41）。 */
   productImageLoadFailed: '画像を読み込めませんでした。別の画像を選んでください。',
+  /** 貼り付け欄に画像以外を貼り付けた場合の文言（issue #45）。 */
+  productImageClipboardEmpty: 'クリップボードに画像がありません。',
   productImageSaveFailed: '商品は保存しましたが、画像を保存できませんでした。',
   /** 「保存して続けて追加」で保存し、画像を保存できなかった場合。 */
   productAddedWithoutImage: (productName: string) => `「${productName}」を追加しましたが、画像を保存できませんでした。`,
