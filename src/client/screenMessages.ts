@@ -73,7 +73,7 @@ export const SCREEN_MESSAGES = {
   archiveEmpty: 'アーカイブされた商品はありません',
   archivedReleaseMonthHint: '発売月は「リストに戻す」で変更します。',
   restoreTitle: 'リストに戻す',
-  restoreNote: 'ステータスはアーカイブ時に自動で変わる前に戻ります（手で変えたステータスはそのまま）。',
+  restoreNote: 'ステータスはアーカイブ時に自動で変わる前に戻ります（手で変えたステータスはそのまま。キャンセルは検討中に戻ります）。',
   restoreFailed: 'リストに戻せませんでした。時間をおいて、もう一度お試しください。',
   deliveryConfirmationTitle: '発売月を過ぎた予約商品の確認',
   deliveryConfirmationNote:

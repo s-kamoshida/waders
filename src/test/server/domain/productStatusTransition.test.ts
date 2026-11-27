@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { determineAutomaticTransition, isProductArchived } from '../../../server/domain/productStatusTransition.ts';
+import type { ProductStatus } from '../../../shared/productContract.ts';
+
+/** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+const CANCELED_STATUS = 'canceled' as string as ProductStatus;
 
 /** 日本時間の日時を UTC の Date にする（例: '2026-12-01T00:00' → 2026-11-30T15:00Z）。 */
 function japanTime(localDateTime: string): Date {
@@ -101,4 +105,39 @@ describe('アーカイブの判定', () => {
     expect(isProductArchived({ releaseMonth: '2026-11' }, japanTime('2026-11-30T23:59'))).toBe(false);
     expect(isProductArchived({ releaseMonth: '2027-01' }, japanTime('2026-11-17T12:00'))).toBe(false);
   });
+});
+
+describe('キャンセル（issue #57、BR-38）', () => {
+  /** 判定に使う商品の値（ステータス・発売月・受注期限）。 */
+  type JudgedProduct = { readonly status: ProductStatus; readonly releaseMonth: string; readonly orderDeadline: string | null };
+
+  it.each([
+    ['発売月を超過した', '2026-10', null],
+    ['受注期限を超過した', '2027-01', '2026-11-10'],
+  ])('キャンセルの商品は、%s場合も自動では変えない（自動遷移の対象外）', (_label, releaseMonth, orderDeadline) => {
+    const product: JudgedProduct = { status: CANCELED_STATUS, releaseMonth, orderDeadline };
+
+    expect(determineAutomaticTransition(product, japanTime('2026-11-17T12:00'))).toBeNull();
+  });
+
+  it.each(['2026-11', '2026-12', '2027-06'])('キャンセルの商品は、発売月が当月以降（%s）でもアーカイブとする', (releaseMonth) => {
+    const product: JudgedProduct = { status: CANCELED_STATUS, releaseMonth, orderDeadline: null };
+
+    expect(isProductArchived(product, japanTime('2026-11-17T12:00'))).toBe(true);
+  });
+
+  it('キャンセルの商品は、発売月が当月より前の場合もアーカイブとする', () => {
+    const product: JudgedProduct = { status: CANCELED_STATUS, releaseMonth: '2026-10', orderDeadline: null };
+
+    expect(isProductArchived(product, japanTime('2026-11-17T12:00'))).toBe(true);
+  });
+
+  it.each(['considering', 'reserved', 'purchased', 'unpurchased'] as const)(
+    'キャンセル以外（%s）の商品は、今までどおり発売月が当月以降ならアーカイブとしない',
+    (status) => {
+      const product: JudgedProduct = { status, releaseMonth: '2026-11', orderDeadline: null };
+
+      expect(isProductArchived(product, japanTime('2026-11-17T12:00'))).toBe(false);
+    },
+  );
 });

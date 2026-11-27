@@ -89,12 +89,12 @@ describe('商品の追加', () => {
     expect(screen.queryByRole('button', { name: '削除' })).not.toBeInTheDocument();
   });
 
-  it('ステータスは検討中・予約済・購入済・未購入の4つから選べる', () => {
+  it('ステータスは検討中・予約済・購入済・未購入・キャンセルの5つから選べる（キャンセルは issue #57）', () => {
     stubFetchRoutes({});
     render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
 
     const options = Array.from((screen.getByLabelText('ステータス') as HTMLSelectElement).options).map((option) => option.text);
-    expect(options).toEqual(['検討中', '予約済', '購入済', '未購入']);
+    expect(options).toEqual(['検討中', '予約済', '購入済', '未購入', 'キャンセル']);
   });
 
   it('入力して保存した場合、入力した値を POST /api/products に JSON で送り、onSaved を呼ぶ', async () => {
@@ -262,6 +262,43 @@ describe('商品の編集', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ method: 'PUT', path: '/api/products/product-1', body: { status: 'considering' } });
+  });
+});
+
+describe('ステータス「キャンセル」（issue #57）', () => {
+  /** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+  const CANCELED_STATUS = 'canceled' as string as ProductResponse['status'];
+
+  /** ステータスの選択肢の表記の一覧。 */
+  function listStatusOptionTexts(): string[] {
+    return Array.from((screen.getByLabelText('ステータス') as HTMLSelectElement).options).map((option) => option.text);
+  }
+
+  it.each(['considering', 'reserved', 'purchased', 'unpurchased'] as const)(
+    '%s の商品の編集で「キャンセル」を選んで保存した場合、ステータスを canceled として PUT /api/products/:id に送る',
+    async (status) => {
+      const { requests } = stubFetchRoutes({
+        'PUT /api/products/product-1': () => ({ body: createProduct({ status: CANCELED_STATUS }) }),
+      });
+      const onSaved = vi.fn();
+      render(<ProductEditorDialog mode={{ kind: 'edit', product: createProduct({ status }) }} onClose={vi.fn()} onSaved={onSaved} />);
+
+      expect(listStatusOptionTexts()).toContain('キャンセル');
+      await userEvent.selectOptions(screen.getByLabelText('ステータス'), 'キャンセル');
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      expect(withoutCardImagePreviewRequests(requests)).toEqual([
+        expect.objectContaining({ method: 'PUT', path: '/api/products/product-1', body: expect.objectContaining({ status: 'canceled' }) }),
+      ]);
+    },
+  );
+
+  it('キャンセルの商品を編集する場合、ステータスの欄に「キャンセル」が選ばれている', () => {
+    stubFetchRoutes({});
+    render(<ProductEditorDialog mode={{ kind: 'edit', product: createProduct({ status: CANCELED_STATUS }) }} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    expect(screen.getByLabelText('ステータス')).toHaveDisplayValue('キャンセル');
   });
 });
 

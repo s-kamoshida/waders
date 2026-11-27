@@ -388,3 +388,51 @@ describe('商品の画像（issue #41）', () => {
     expect(container.querySelector('.product-card-thumbnail img')).toHaveAttribute('src', '/waders/api/products/product-1/image?v=abc');
   });
 });
+
+describe('ステータス「キャンセル」の見せ方（issue #57）', () => {
+  /** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+  const CANCELED_STATUS = 'canceled' as string as ProductResponse['status'];
+
+  it.each(['grid', 'list'] as const)(
+    'キャンセルの商品（%s）は、キャンセルの見た目のクラスを付け、未購入・購入済の見た目にはせず、ステータスを「キャンセル」と表示する',
+    (layout) => {
+      const { container } = render(<ProductCard product={createProduct({ status: CANCELED_STATUS })} today={today} onSelect={vi.fn()} layout={layout} />);
+
+      const card = container.querySelector('article');
+      expect(card).toHaveClass('product-card--canceled');
+      expect(card).not.toHaveClass('product-card--unpurchased');
+      expect(card).not.toHaveClass('product-card--purchased');
+      expect(container.querySelector('.product-card-status')).toHaveTextContent(/^キャンセル$/);
+    },
+  );
+
+  it('キャンセル可だった商品をキャンセルにした場合も、「予約済（キャンセル可）」ではなくキャンセルとして表示する', () => {
+    const { container } = render(
+      <ProductCard product={createProduct({ status: CANCELED_STATUS, cancelable: true })} today={today} onSelect={vi.fn()} />,
+    );
+
+    expect(container.querySelector('article')).toHaveClass('product-card--canceled');
+    expect(container.querySelector('article')).not.toHaveClass('product-card--cancelable');
+    expect(container.querySelector('.product-card-status')).toHaveTextContent(/^キャンセル$/);
+  });
+
+  it('キャンセルの商品にも、画像があれば画像を表示し、商品名はそのまま表示する', () => {
+    const { container } = render(
+      <ProductCard
+        product={createProduct({ status: CANCELED_STATUS, imageUrl: '/api/products/product-1/image?v=abc' })}
+        today={today}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('.product-card-thumbnail img')).toHaveClass('product-card-image');
+    expect(screen.getByText('オリジナルキャラクター シュガー ver.')).toBeInTheDocument();
+  });
+
+  it('キャンセルの商品には、受注期限が近くても ⚠️ を付けず、受注期限も表示しない', () => {
+    render(<ProductCard product={createProduct({ status: CANCELED_STATUS, orderDeadline: '2026-11-20' })} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.queryByText(/⚠️/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/受注期限/)).not.toBeInTheDocument();
+  });
+});

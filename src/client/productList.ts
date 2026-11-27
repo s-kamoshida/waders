@@ -15,7 +15,7 @@ import { formatYen } from './productDisplay.ts';
 export type YearMode = 'calendar';
 
 /**
- * 見出しの集計。未購入を除いた個数と、金額・送料・手数料・交通費（見込）・その他費用の合計から値引きを引いた額
+ * 見出しの集計。未購入とキャンセル（issue #57）を除いた個数と、金額・送料・手数料・交通費（見込）・その他費用の合計から値引きを引いた額
  * （金額が未入力の商品は個数だけに含める。手数料などは issue #26、値引きは issue #50）。
  */
 export type GroupSummary = { readonly count: number; readonly totalYen: number };
@@ -40,12 +40,23 @@ export type YearGroup = {
   readonly summary: GroupSummary;
 };
 
-/** 同じ月の中の並び順（小さいほど上）。購入済 → 予約済 → 予約済（キャンセル可）→ 検討中 → 未購入。 */
+/** 同じ月の中の並び順（小さいほど上）。購入済 → 予約済 → 予約済（キャンセル可）→ 検討中 → 未購入 → キャンセル（issue #57）。 */
 function rankProduct(product: ProductResponse): number {
   if (product.status === 'purchased') return 0;
   if (product.status === 'reserved') return product.cancelable ? 2 : 1;
   if (product.status === 'considering') return 3;
-  return 4;
+  if (product.status === 'unpurchased') return 4;
+  return 5;
+}
+
+/** 見出しの個数と合計金額に含めるか。未購入とキャンセル（払っていないため。issue #57）は含めない。 */
+function isCountedInSummary(product: ProductResponse): boolean {
+  return product.status !== 'unpurchased' && product.status !== 'canceled';
+}
+
+/** アーカイブに表示するか。キャンセルは発売月に関係なく、それ以外は発売月が当月より前ならアーカイブ（issue #9・#57）。 */
+function isArchivedProduct(product: ProductResponse, currentMonth: string): boolean {
+  return product.status === 'canceled' || product.releaseMonth < currentMonth;
 }
 
 /** 年月（YYYY-MM）に月数を足す。 */
@@ -77,7 +88,7 @@ function calculateProductTotalYen(product: ProductResponse): number {
 
 /** 商品の見出しの集計を求める。 */
 function summarizeProducts(products: readonly ProductResponse[]): GroupSummary {
-  const countedProducts = products.filter((product) => product.status !== 'unpurchased');
+  const countedProducts = products.filter(isCountedInSummary);
   const totalYen = countedProducts.reduce((total, product) => total + calculateProductTotalYen(product), 0);
   return { count: countedProducts.length, totalYen };
 }
@@ -128,7 +139,7 @@ export function buildProductListGroups(
 }
 
 /**
- * 商品を、リスト（発売月が当月以降）とアーカイブ（発売月が当月より前）に振り分ける（issue #9）。
+ * 商品を、リスト（発売月が当月以降）とアーカイブ（発売月が当月より前、またはキャンセル）に振り分ける（issue #9・#57）。
  * @param currentMonth 日本時間の当月（YYYY-MM）
  */
 export function splitProductsByArchive<Item extends ProductResponse>(
@@ -136,8 +147,8 @@ export function splitProductsByArchive<Item extends ProductResponse>(
   currentMonth: string,
 ): { active: Item[]; archived: Item[] } {
   return {
-    active: products.filter((product) => product.releaseMonth >= currentMonth),
-    archived: products.filter((product) => product.releaseMonth < currentMonth),
+    active: products.filter((product) => !isArchivedProduct(product, currentMonth)),
+    archived: products.filter((product) => isArchivedProduct(product, currentMonth)),
   };
 }
 

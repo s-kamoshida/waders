@@ -3,7 +3,8 @@
  *
  * 所属: クライアント（画面の部品）
  * 責務: 新しい発売月（既定は当月。当月以降のみ）を入力させ、商品をリストに戻す。
- * ステータスはサーバーが変更履歴から自動遷移の前に戻す。戻せたら onRestored を呼ぶ。
+ * 発売月が当月以降の商品（キャンセルの商品。issue #57）は、その発売月を既定にする（戻すときに月が変わらないように）。
+ * ステータスはサーバーが変更履歴から自動遷移の前に戻す（キャンセルの商品は検討中にする）。戻せたら onRestored を呼ぶ。
  * 見出しの行の「閉じる」ボタン（×）は「キャンセル」と同じく送らずに onClose を呼ぶ。送信中は押せない（issue #49）。
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
@@ -33,7 +34,7 @@ export function validateNewReleaseMonth(releaseMonth: string, currentMonth: stri
 
 /** リストに戻すモーダルを描画する。 */
 export function RestoreDialog({ product, currentMonth, onClose, onRestored }: RestoreDialogProps) {
-  const [releaseMonth, setReleaseMonth] = useState(currentMonth);
+  const [releaseMonth, setReleaseMonth] = useState(product.releaseMonth >= currentMonth ? product.releaseMonth : currentMonth);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);

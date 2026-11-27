@@ -10,6 +10,10 @@ import {
   getStatusLabel,
   isOrderDeadlineApproaching,
 } from '../../client/productDisplay.ts';
+import type { ProductStatus } from '../../shared/productContract.ts';
+
+/** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+const CANCELED_STATUS = 'canceled' as string as ProductStatus;
 
 describe('金額と送料の表記', () => {
   it('金額は 3 桁区切りに「円」を付ける', () => {
@@ -49,6 +53,14 @@ describe('ステータスの表記', () => {
     ['unpurchased', false, '未購入'],
   ] as const)('%s（キャンセル可否: %s）の場合、「%s」と表記する', (status, cancelable, label) => {
     expect(getStatusLabel(status, cancelable)).toBe(label);
+  });
+
+  it.each([false, true])('キャンセルの場合（キャンセル可否: %s）、「キャンセル」と表記する（issue #57）', (cancelable) => {
+    expect(getStatusLabel(CANCELED_STATUS, cancelable)).toBe('キャンセル');
+  });
+
+  it('キャンセルの商品には、受注期限が近くても警告（⚠️）を出さない（issue #57）', () => {
+    expect(isOrderDeadlineApproaching({ status: CANCELED_STATUS, orderDeadline: '2026-11-20' }, '2026-11-17')).toBe(false);
   });
 });
 

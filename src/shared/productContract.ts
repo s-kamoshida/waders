@@ -36,8 +36,12 @@ export const MAXIMUM_LOCATION_LENGTH = 100;
  * - reserved: 予約済
  * - purchased: 購入済
  * - unpurchased: 未購入
+ * - canceled: キャンセル（予約した後に取り消した商品。手でだけ選べ、発売月に関係なくアーカイブに表示する。issue #57、BR-38）
+ *
+ * DB の最初の移行（版数 1）の CHECK は、この一覧ではなく当時の 4 つに固定している（古い移行の SQL を変えないため）。
+ * 値を加えるときは、表を作り直す移行を末尾に足す（sqliteProductRepository.ts。キャンセルは版数 10）。
  */
-export const PRODUCT_STATUSES = ['considering', 'reserved', 'purchased', 'unpurchased'] as const;
+export const PRODUCT_STATUSES = ['considering', 'reserved', 'purchased', 'unpurchased', 'canceled'] as const;
 
 /** 商品のステータスのスキーマ。 */
 export const productStatusSchema = z.enum(PRODUCT_STATUSES);
