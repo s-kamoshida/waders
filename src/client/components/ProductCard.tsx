@@ -5,6 +5,7 @@
  * 責務: 1 件の商品を、画像（画像がない・読み込めない場合は共通のアイコン。issue #41）・ステータス・メーカー・商品名・場所・金額・送料・費用・備考の印・開催日時・受注期限・
  * 購入先のリンクとして表示する。
  *  - 費用（手数料・交通費（見込）・その他費用）は値があるものだけを示し、その他費用はカテゴリーの名前で示す（issue #26・#27）
+ *  - 金額は値引き後の金額だけを示す（値引きが金額を超えたら 0 円。値引きの額は示さない。issue #50）
  *  - 「送料無料」は、送料が有効なカテゴリーの商品（未設定・定義にないカテゴリーを含む）にだけ示す（issue #27）
  *  - 開催日時と終了日時は両方あるときだけ、並べる形式では日時、リスト形式では開催期間を示す（PR #30 のレビュー）
  * カードを押すと onSelect で選択を知らせる。購入先のリンクは別のタブで開き、選択はしない。
@@ -13,6 +14,7 @@ import { useState, type HTMLAttributes } from 'react';
 import type { CategoryResponse } from '../../shared/categoryContract.ts';
 import type { ProductResponse } from '../../shared/productContract.ts';
 import {
+  calculateDiscountedPrice,
   determineVisibleCategoryFields,
   extractShopDomain,
   formatEventDuration,
@@ -108,7 +110,7 @@ export function ProductCard({ product, today, onSelect, dragHandlers, isGrabbed 
           <span className="product-card-name">{isWarning ? `⚠️ ${product.name}` : product.name}</span>
           {product.location !== null && <span className="product-card-location">{product.location}</span>}
           <span className="product-card-price">
-            <span>{formatPriceLabel(product.price)}</span>
+            <span>{formatPriceLabel(calculateDiscountedPrice(product.price, product.discount))}</span>
             {product.price !== null && showsShipping && <span className="product-card-shipping">{formatShippingLabel(product.shippingFee)}</span>}
             {product.note !== null && (
               <span className="product-card-note" role="img" aria-label="備考あり" title="備考あり">

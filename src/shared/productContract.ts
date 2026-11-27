@@ -9,7 +9,7 @@ import { z } from 'zod';
 /** 商品名の上限の文字数。 */
 export const MAXIMUM_PRODUCT_NAME_LENGTH = 200;
 
-/** 金額・送料の上限（円）。桁の打ち間違いを防ぐため 1,000 万円未満とする。 */
+/** 金額・送料・費用・値引きの上限（円）。桁の打ち間違いを防ぐため 1,000 万円未満とする。 */
 export const MAXIMUM_PRICE_YEN = 9_999_999;
 
 /** URL の上限の文字数。 */
@@ -109,6 +109,45 @@ function createEventDateTimeSchema(label: string) {
 /** 終了日時が開催日時より前の場合の文言（同じ時刻はよい）。 */
 export const EVENT_END_BEFORE_START_MESSAGE = '終了日時は開催日時以降にしてください。';
 
+/** 値引きが、金額と送料・手数料・交通費（見込）・その他費用の合計を超える場合の文言（MSG-V-031。issue #50）。 */
+export const DISCOUNT_EXCEEDS_TOTAL_MESSAGE = '値引きは、金額と送料などの合計以下で入力してください。';
+
+/** 金額が空のまま値引きを入れた場合の文言（MSG-V-032。issue #50）。 */
+export const DISCOUNT_WITHOUT_PRICE_MESSAGE = '値引きを入力する場合は、金額も入力してください。';
+
+/** 値引きと比べる、商品の費用の項目。 */
+type ProductCosts = {
+  readonly price: number | null;
+  readonly shippingFee: number | null;
+  readonly handlingFee: number | null;
+  readonly travelExpense: number | null;
+  readonly otherExpense: number | null;
+};
+
+/**
+ * 金額と送料・手数料・交通費（見込）・その他費用の合計（値引き前）を求める（issue #26・#50）。
+ * @returns 金額が未入力なら null（金額が空の商品は合計金額に含めないため）
+ */
+export function sumProductCostsYen(costs: ProductCosts): number | null {
+  if (costs.price === null) return null;
+  const additionalCosts = [costs.shippingFee, costs.handlingFee, costs.travelExpense, costs.otherExpense];
+  return additionalCosts.reduce<number>((total, cost) => total + (cost ?? 0), costs.price);
+}
+
+/**
+ * 値引きの決まり（BR-35。issue #50）を確かめ、誤りを値引きの項目に加える。
+ * 金額が空のまま値引きがある場合は MSG-V-032、値引きが金額と送料などの合計を超える場合は MSG-V-031（同じ額はよい）。
+ */
+function checkDiscount(input: ProductCosts & { readonly discount: number | null }, context: z.RefinementCtx): void {
+  if (input.discount === null) return;
+  const totalYen = sumProductCostsYen(input);
+  if (totalYen === null) {
+    context.addIssue({ code: 'custom', message: DISCOUNT_WITHOUT_PRICE_MESSAGE, path: ['discount'] });
+    return;
+  }
+  if (input.discount > totalYen) context.addIssue({ code: 'custom', message: DISCOUNT_EXCEEDS_TOTAL_MESSAGE, path: ['discount'] });
+}
+
 /**
  * 商品の入力（登録・編集）のスキーマ。
  * 必須は商品名と発売月。ステータスの既定は検討中、キャンセル可否の既定は不可、任意の項目の既定は未入力（null）。
@@ -162,10 +201,17 @@ export const productInputSchema = z.object({
   eventStartsAt: createEventDateTimeSchema('開催日時').nullable().default(null),
   /** 終了日時（UTC）。未入力は null。開催日時より前は不可（同じ時刻はよい）。 */
   eventEndsAt: createEventDateTimeSchema('終了日時').nullable().default(null),
-}).refine(
-  (input) => input.eventStartsAt === null || input.eventEndsAt === null || input.eventEndsAt >= input.eventStartsAt,
-  { message: EVENT_END_BEFORE_START_MESSAGE, path: ['eventEndsAt'] },
-);
+  /**
+   * 値引き（ポイント・クーポンなどの総額。円。issue #50）。未入力は null（値引きなし）。
+   * 金額があり、金額と送料などの合計以下に限る（BR-35）。
+   */
+  discount: yenAmountSchema.nullable().default(null),
+})
+  .refine(
+    (input) => input.eventStartsAt === null || input.eventEndsAt === null || input.eventEndsAt >= input.eventStartsAt,
+    { message: EVENT_END_BEFORE_START_MESSAGE, path: ['eventEndsAt'] },
+  )
+  .superRefine(checkDiscount);
 
 /** 検証済みの商品の入力。 */
 export type ProductInput = z.infer<typeof productInputSchema>;
@@ -193,6 +239,8 @@ export const productSchema = z.object({
   otherExpense: z.number().int().nullable(),
   eventStartsAt: z.string().nullable(),
   eventEndsAt: z.string().nullable(),
+  /** 値引き（円）。値引きなしは null（issue #50）。 */
+  discount: z.number().int().nullable(),
   /**
    * 商品の画像の URL（API のパス。画像を付け直すたびに変わる版を含む）。画像がなければ null（issue #41）。
    * 画面と API を置くパス（basePath）は含まないため、画面では resolveApiPath で解決して使う。

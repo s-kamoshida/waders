@@ -5,15 +5,15 @@
  * 責務: 商品の一覧を、画面に表示する年・月のグループに組み立てる純粋な関数（要件「リストの構成」「アーカイブ」）。
  */
 import type { CategoryResponse } from '../shared/categoryContract.ts';
-import type { ProductResponse } from '../shared/productContract.ts';
+import { sumProductCostsYen, type ProductResponse } from '../shared/productContract.ts';
 import { formatYen } from './productDisplay.ts';
 
 /** 年のまとめ方。calendar は暦年（1月〜12月）、fiscal は年度（4月〜翌3月）。 */
 export type YearMode = 'calendar' | 'fiscal';
 
 /**
- * 見出しの集計。未購入を除いた個数と、金額・送料・手数料・交通費（見込）・その他費用の合計
- * （金額が未入力の商品は個数だけに含める。手数料などは issue #26）。
+ * 見出しの集計。未購入を除いた個数と、金額・送料・手数料・交通費（見込）・その他費用の合計から値引きを引いた額
+ * （金額が未入力の商品は個数だけに含める。手数料などは issue #26、値引きは issue #50）。
  */
 export type GroupSummary = { readonly count: number; readonly totalYen: number };
 
@@ -62,11 +62,14 @@ function listMonthsToShow(products: readonly ProductResponse[], currentMonth: st
   return months;
 }
 
-/** 商品の合計金額への寄与。金額が未入力なら 0（送料・手数料なども含めない）。 */
+/**
+ * 商品の合計金額への寄与。金額・送料・手数料・交通費（見込）・その他費用の合計から値引きを引いた額（issue #50）。
+ * 金額が未入力なら 0（送料・手数料なども含めない）。値引きは合計以下に限る（BR-35）が、念のため 0 円で止める。
+ */
 function calculateProductTotalYen(product: ProductResponse): number {
-  if (product.price === null) return 0;
-  const additionalCosts = [product.shippingFee, product.handlingFee, product.travelExpense, product.otherExpense];
-  return additionalCosts.reduce<number>((total, cost) => total + (cost ?? 0), product.price);
+  const totalYen = sumProductCostsYen(product);
+  if (totalYen === null) return 0;
+  return Math.max(0, totalYen - (product.discount ?? 0));
 }
 
 /** 商品の見出しの集計を求める。 */
