@@ -8,18 +8,32 @@
  *  - 「画像を消す」で、選んだ画像・今の画像を外す
  *  - クリップボードの画像を貼り付けさせる（issue #45）。iPhone 向けに、長押しで「ペースト」できる貼り付け欄を置く。
  *    モーダル全体での貼り付けは、モーダルが selectPastedImage を呼ぶ
+ *  - 購入先のページのカード画像のプレビュー・取得中・取れなかった表示と、注釈を出す（issue #51）。取りに行くのはモーダル。
+ *    選んだ画像・今のアップロードした画像があれば、そちらを表示する。今の画像がカード画像なら、URL を変えたときに新しい URL の表示に置き換える。
+ *    カード画像（今のカード画像・プレビュー）には「画像を消す」を出さない（消しても保存の後にサーバーが取り直すため）
  * 画像は選んだ時点では送らない。どうするか（imageChoice）をモーダルに伝え、モーダルが商品を保存した後に送る。
  */
 import { useEffect, useImperativeHandle, useRef, useState, type ClipboardEvent, type Ref } from 'react';
 import { resolveApiPath } from '../productApiClient.ts';
 import { drawProductImagePreview, prepareProductImage, type PreparedProductImage } from '../productImagePreparation.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
+import type { ProductImageKind } from '../../shared/productContract.ts';
 
 /** 画像をどうするか。unchanged は触れていない、selected は選んだ画像を付ける、removed は今の画像を消す。 */
 export type ProductImageChoice =
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'selected'; readonly prepared: PreparedProductImage }
   | { readonly kind: 'removed' };
+
+/**
+ * カード画像のプレビューの状態（issue #51）。none は表示しない（URL がない・保存済みの URL のまま）、fetching は取得中、
+ * failed は取れなかった、ready は取れた画像。
+ */
+export type CardImagePreviewState =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'fetching' }
+  | { readonly kind: 'failed' }
+  | { readonly kind: 'ready'; readonly prepared: PreparedProductImage };
 
 /** モーダルから画像の欄を操作するための参照（issue #45）。 */
 export type ProductImageFieldHandle = {
@@ -51,6 +65,10 @@ export type ProductImageFieldProps = {
   readonly inputId: string;
   /** 今の画像の URL（API のパス）。追加や、画像がない商品では null。 */
   readonly currentImageUrl: string | null;
+  /** 今の画像の種類（アップロードした画像かカード画像か）。追加や、画像がない商品では null（issue #51）。 */
+  readonly currentImageKind: ProductImageKind | null;
+  /** 購入先の URL のカード画像のプレビューの状態（issue #51）。 */
+  readonly cardImagePreview: CardImagePreviewState;
   readonly choice: ProductImageChoice;
   readonly onChoiceChange: (choice: ProductImageChoice) => void;
   /** 選んだ画像を縮めている間は true を知らせる（その間は保存させない）。 */
@@ -59,15 +77,26 @@ export type ProductImageFieldProps = {
   readonly ref?: Ref<ProductImageFieldHandle>;
 };
 
-/** 選んだ画像のプレビュー（canvas に描く）。 */
-function PreparedImagePreview({ prepared }: { readonly prepared: PreparedProductImage }) {
+/** 縮めた画像のプレビュー（canvas に描く。CSP で data:・blob: の画像を禁止しているため）。 */
+function PreparedImagePreview({ prepared, label }: { readonly prepared: PreparedProductImage; readonly label: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     if (canvasRef.current !== null) drawProductImagePreview(canvasRef.current, prepared);
   }, [prepared]);
 
-  return <canvas ref={canvasRef} className="product-image-preview" role="img" aria-label="選んだ画像" />;
+  return <canvas ref={canvasRef} className="product-image-preview" role="img" aria-label={label} />;
+}
+
+/** カード画像のプレビュー、または取得中・取れなかった表示（issue #51）。 */
+function CardImagePreview({ state }: { readonly state: CardImagePreviewState }) {
+  if (state.kind === 'ready') return <PreparedImagePreview prepared={state.prepared} label="購入先のページの画像" />;
+  if (state.kind === 'none') return null;
+  return (
+    <span className="hint" aria-live="polite">
+      {state.kind === 'fetching' ? SCREEN_MESSAGES.cardImageFetching : SCREEN_MESSAGES.cardImageFetchFailed}
+    </span>
+  );
 }
 
 /** 画像をどこから受け取ったか（誤りの印をどちらの欄に付けるかに使う）。file はファイルの選択、paste は貼り付け。 */
@@ -77,13 +106,29 @@ type ImageSource = 'file' | 'paste';
 type ImageError = { readonly message: string; readonly source: ImageSource };
 
 /** 画像の欄を描画する。 */
-export function ProductImageField({ inputId, currentImageUrl, choice, onChoiceChange, onPreparingChange, ref }: ProductImageFieldProps) {
+export function ProductImageField({
+  inputId,
+  currentImageUrl,
+  currentImageKind,
+  cardImagePreview,
+  choice,
+  onChoiceChange,
+  onPreparingChange,
+  ref,
+}: ProductImageFieldProps) {
   /** 画像の欄の下に出す文言（読めない画像・クリップボードに画像がない）。 */
   const [imageError, setImageError] = useState<ImageError | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   /** 最後に選んだファイルの番号（先に選んだファイルの縮小が後から終わっても、表示を置き換えないため）。 */
   const latestSelectionRef = useRef(0);
-  const showsCurrentImage = choice.kind === 'unchanged' && currentImageUrl !== null;
+  const hasCurrentImage = currentImageUrl !== null;
+  const isCurrentCardImage = hasCurrentImage && currentImageKind === 'card';
+  // 今の画像がカード画像なら、URL を変えて新しい URL の画像を取りに行った時点で、その表示に置き換える（issue #51）
+  const replacesCurrentCardImage = isCurrentCardImage && cardImagePreview.kind !== 'none';
+  const showsCurrentImage = choice.kind === 'unchanged' && hasCurrentImage && !replacesCurrentCardImage;
+  // 選んだ画像・今のアップロードした画像があれば、カード画像のプレビューは表示しない
+  const showsCardImagePreview = choice.kind === 'removed' || (choice.kind === 'unchanged' && (!hasCurrentImage || replacesCurrentCardImage));
+  const showsRemoveButton = choice.kind === 'selected' || (showsCurrentImage && !isCurrentCardImage);
 
   // 画像を外したとき（「保存して続けて追加」の後を含む）は、選んだファイルを入力欄から消す
   useEffect(() => {
@@ -128,17 +173,22 @@ export function ProductImageField({ inputId, currentImageUrl, choice, onChoiceCh
 
   const removeImage = () => {
     setImageError(null);
-    onChoiceChange(currentImageUrl === null ? { kind: 'unchanged' } : { kind: 'removed' });
+    // 今の画像がない・カード画像なら、選んだ画像を外すだけにする（カード画像は消さない。issue #51）
+    onChoiceChange(currentImageUrl === null || currentImageKind === 'card' ? { kind: 'unchanged' } : { kind: 'removed' });
   };
 
   return (
     <div className="field">
       <label htmlFor={inputId}>画像</label>
-      {choice.kind === 'selected' && <PreparedImagePreview prepared={choice.prepared} />}
+      <span id={`${inputId}-annotation`} className="hint">
+        {SCREEN_MESSAGES.cardImageAnnotation}
+      </span>
+      {choice.kind === 'selected' && <PreparedImagePreview prepared={choice.prepared} label="選んだ画像" />}
       {showsCurrentImage && currentImageUrl !== null && (
         <img className="product-image-preview" src={resolveApiPath(currentImageUrl)} alt="今の画像" />
       )}
-      {(choice.kind === 'selected' || showsCurrentImage) && (
+      {showsCardImagePreview && <CardImagePreview state={cardImagePreview} />}
+      {showsRemoveButton && (
         <button type="button" className="button product-image-remove" onClick={removeImage}>
           画像を消す
         </button>
@@ -149,7 +199,7 @@ export function ProductImageField({ inputId, currentImageUrl, choice, onChoiceCh
         type="file"
         accept="image/*"
         aria-invalid={imageError?.source === 'file'}
-        aria-describedby={imageError?.source === 'file' ? `${inputId}-error` : undefined}
+        aria-describedby={imageError?.source === 'file' ? `${inputId}-annotation ${inputId}-error` : `${inputId}-annotation`}
         onChange={(event) => void selectFile(event.target.files?.[0], 'file')}
       />
       <div

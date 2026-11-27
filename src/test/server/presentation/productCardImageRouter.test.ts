@@ -303,3 +303,72 @@ describe('表示する画像の優先順位（issue #42）', () => {
     expect(uploaded.imageUrl).not.toBe(cardImageUrl);
   });
 });
+
+describe('商品の応答の画像の種類（issue #51）', () => {
+  /** 一覧・登録などの応答の imageKind は、アップロードした画像なら uploaded、カード画像なら card、画像がなければ null。 */
+  async function uploadImageThroughApi(productId: string) {
+    const response = await request(harness.application).put(`/api/products/${productId}/image`).send({ data: UPLOADED_JPEG.toString('base64') }).expect(200);
+    return productSchema.parse(response.body);
+  }
+
+  it('画像がない商品の場合、登録・一覧の応答の imageKind を null にする', async () => {
+    createHarness(createFakeFetch({}));
+
+    const created = await createProductThroughApi(null);
+    await harness.waitForCardImageFetches();
+
+    expect(created).toMatchObject({ imageUrl: null, imageKind: null });
+    expect(await findFirstListedProduct()).toMatchObject({ imageUrl: null, imageKind: null });
+  });
+
+  it('アップロードした画像だけがある場合、画像を付けた応答と一覧の imageKind を uploaded にする', async () => {
+    createHarness(createFakeFetch({}));
+    const product = await createProductThroughApi(null);
+
+    const uploaded = await uploadImageThroughApi(product.id);
+
+    expect(uploaded).toMatchObject({ imageKind: 'uploaded' });
+    expect(await findFirstListedProduct()).toMatchObject({ imageKind: 'uploaded' });
+  });
+
+  it('カード画像だけがある場合、一覧と編集の応答の imageKind を card にする', async () => {
+    createHarness(createFakeFetch());
+    const product = await createProductThroughApi();
+    await harness.waitForCardImageFetches();
+
+    expect(await findFirstListedProduct()).toMatchObject({ imageKind: 'card' });
+    expect(await updateProductThroughApi(product.id, SHOP_URL, '名前を直した')).toMatchObject({ imageKind: 'card' });
+  });
+
+  it('アップロードした画像とカード画像の両方がある場合、imageKind を uploaded にする', async () => {
+    createHarness(createFakeFetch());
+    const product = await createProductThroughApi();
+    await harness.waitForCardImageFetches();
+
+    await uploadImageThroughApi(product.id);
+
+    expect(await findFirstListedProduct()).toMatchObject({ imageKind: 'uploaded' });
+  });
+
+  it('両方がある商品のアップロードした画像を消した場合、imageKind を card にする', async () => {
+    createHarness(createFakeFetch());
+    const product = await createProductThroughApi();
+    await harness.waitForCardImageFetches();
+    await uploadImageThroughApi(product.id);
+
+    await request(harness.application).delete(`/api/products/${product.id}/image`).set('Content-Type', 'application/json').expect(204);
+
+    expect(await findFirstListedProduct()).toMatchObject({ imageKind: 'card' });
+  });
+
+  it('カード画像だけがある商品の URL を消した場合、imageKind を null にする', async () => {
+    createHarness(createFakeFetch());
+    const product = await createProductThroughApi();
+    await harness.waitForCardImageFetches();
+
+    await updateProductThroughApi(product.id, null);
+    await harness.waitForCardImageFetches();
+
+    expect(await findFirstListedProduct()).toMatchObject({ imageUrl: null, imageKind: null });
+  });
+});

@@ -65,6 +65,7 @@ describe('POST /api/products', () => {
       eventStartsAt: null,
       eventEndsAt: null,
       imageUrl: null,
+      imageKind: null,
       createdAt: TEST_CURRENT_TIME.toISOString(),
       updatedAt: TEST_CURRENT_TIME.toISOString(),
     });

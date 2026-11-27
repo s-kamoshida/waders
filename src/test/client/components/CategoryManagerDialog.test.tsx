@@ -7,6 +7,9 @@ import type { ProductListItem } from '../../../shared/productContract.ts';
 import { getFooterButton, getHeaderCloseButton, holdFetchRoute } from '../dialogCloseButtonQueries.ts';
 import { stubFetchRoutes, type StubRouteHandlers } from '../testFetchStub.ts';
 
+/** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
+const NO_IMAGE_KIND = { imageKind: null } as const;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -37,6 +40,7 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     eventStartsAt: null,
     eventEndsAt: null,
     imageUrl: null,
+    ...NO_IMAGE_KIND,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     deliveryConfirmationPending: false,

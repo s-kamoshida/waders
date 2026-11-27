@@ -11,6 +11,9 @@ import {
 } from '../../client/productList.ts';
 import type { ProductResponse } from '../../shared/productContract.ts';
 
+/** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
+const NO_IMAGE_KIND = { imageKind: null } as const;
+
 let createdCount = 0;
 
 /** テスト用の商品を作る。登録日時は作った順に進む。 */
@@ -38,6 +41,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     eventStartsAt: null,
     eventEndsAt: null,
     imageUrl: null,
+    ...NO_IMAGE_KIND,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
