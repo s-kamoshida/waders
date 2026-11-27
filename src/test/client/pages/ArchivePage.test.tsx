@@ -145,18 +145,19 @@ describe('カテゴリーの絞り込み（issue #10）', () => {
 });
 
 describe('アーカイブされた商品の編集とリストに戻す', () => {
-  it('商品を押した場合、編集のモーダルを開き、発売月は変更できず、「リストに戻す」ボタンがある', async () => {
+  it('商品を押して詳細画面の「編集」を押した場合、編集のモーダルを開き、発売月は変更できず、「リストに戻す」ボタンがある（issue #52 で詳細画面を挟む）', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '届いた商品' })] } }) });
     render(<ArchivePage currentTime={currentTime} />);
 
     await userEvent.click(await screen.findByRole('button', { name: /届いた商品/ }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('button', { name: '編集' }));
 
     const dialog = screen.getByRole('dialog', { name: '商品を編集' });
     expect(within(dialog).getByLabelText('発売月')).toBeDisabled();
     expect(within(dialog).getByRole('button', { name: 'リストに戻す' })).toBeInTheDocument();
   });
 
-  it('「リストに戻す」で新しい発売月を指定して戻した場合、一覧を読み込み直し、アーカイブから消える', async () => {
+  it('詳細画面の「リストに戻す」で新しい発売月を指定して戻した場合、一覧を読み込み直し、アーカイブから消える', async () => {
     const archivedProduct = createProduct({ id: 'archived-1', name: '延期された商品', status: 'purchased' });
     let products = [archivedProduct];
     const { requests } = stubFetchRoutes({
@@ -170,7 +171,8 @@ describe('アーカイブされた商品の編集とリストに戻す', () => {
     render(<ArchivePage currentTime={currentTime} />);
 
     await userEvent.click(await screen.findByRole('button', { name: /延期された商品/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'リストに戻す' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('button', { name: 'リストに戻す' }));
+    expect(screen.queryByRole('dialog', { name: '商品の詳細' })).not.toBeInTheDocument();
     const restoreDialog = screen.getByRole('dialog', { name: 'リストに戻す' });
     await userEvent.click(within(restoreDialog).getByRole('button', { name: '戻す' }));
 
@@ -259,11 +261,61 @@ describe('商品の画像を保存できなかった場合（issue #41）', () =
     render(<ArchivePage currentTime={currentTime} />);
 
     await userEvent.click(await screen.findByRole('button', { name: /届いた商品/ }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('button', { name: '編集' }));
     await userEvent.upload(screen.getByLabelText('画像'), new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
     await screen.findByRole('img', { name: '選んだ画像' });
     await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('商品は保存しましたが、画像を保存できませんでした。');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('アーカイブの商品の詳細画面（issue #52）', () => {
+  it('商品を押した場合、編集のモーダルではなく詳細画面を開き、詳細画面に「リストに戻す」がある', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '届いた商品' })] } }) });
+    render(<ArchivePage currentTime={currentTime} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /届いた商品/ }));
+
+    const detail = screen.getByRole('dialog', { name: '商品の詳細' });
+    expect(within(detail).getByRole('button', { name: 'リストに戻す' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '商品を編集' })).not.toBeInTheDocument();
+  });
+
+  it('詳細画面の「編集」から編集のモーダルを開いて保存した場合、アーカイブに戻り（詳細画面は開かない）、一覧を読み込み直す', async () => {
+    const archivedProduct = createProduct({ id: 'archived-1', name: '届いた商品' });
+    const { requests } = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products: [archivedProduct] } }),
+      'PUT /api/products/archived-1': () => ({ body: archivedProduct }),
+    });
+    render(<ArchivePage currentTime={currentTime} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /届いた商品/ }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('button', { name: '編集' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products')).toHaveLength(2));
+  });
+
+  it('詳細画面でステータスを変えた場合、詳細画面は開いたまま、一覧を読み込み直す', async () => {
+    const archivedProduct = createProduct({ id: 'archived-1', name: '届いた商品', status: 'purchased' });
+    let products = [archivedProduct];
+    const { requests } = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'PATCH /api/products/archived-1/status': () => {
+        products = [{ ...archivedProduct, status: 'unpurchased' }];
+        return { body: products[0] };
+      },
+    });
+    render(<ArchivePage currentTime={currentTime} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /届いた商品/ }));
+    await userEvent.selectOptions(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('combobox', { name: 'ステータス' }), '未購入');
+
+    await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products')).toHaveLength(2));
+    expect(screen.getByRole('dialog', { name: '商品の詳細' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /届いた商品/ }).closest('article')).toHaveClass('product-card--unpurchased'));
   });
 });
