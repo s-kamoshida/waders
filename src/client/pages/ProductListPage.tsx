@@ -5,7 +5,7 @@
  * 責務:
  *  - 商品の一覧を読み込み、発売月が当月以降の商品を年・月のグループ（見出しに個数と合計金額の見込み）で表示する。
  *    0 件の月も表示する。当月より前の商品はアーカイブの画面に表示する（issue #9）
- *  - 年・月の折りたたみと、暦年・年度の切り替え（端末ごとに記憶）
+ *  - 年（暦年）・月の折りたたみ（暦年・年度の切り替えは issue #58 でなくした）
  *  - ＋ボタン・月の見出しの＋ボタン（その月を発売月にする。issue #16）で追加、商品を押して編集・削除のモーダルを開き、保存後に読み込み直す
  *  - 「保存して続けて追加」で保存した場合は、モーダルを開いたまま読み込み直す（issue #16）
  *  - カテゴリーで絞り込む（選択は端末ごとに覚え、見出しの集計も絞り込んだ商品で数える。issue #10）
@@ -21,38 +21,10 @@ import { ProductDetailDialog } from '../components/ProductDetailDialog.tsx';
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { fetchProducts, moveProductToReleaseMonth } from '../productApiClient.ts';
 import { formatDateInJapan, formatMonthInJapan } from '../productDisplay.ts';
-import {
-  buildProductListGroups,
-  collectMakerSuggestions,
-  formatGroupSummary,
-  splitProductsByArchive,
-  type YearMode,
-} from '../productList.ts';
+import { buildProductListGroups, collectMakerSuggestions, formatGroupSummary, splitProductsByArchive } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 
-/** 暦年・年度の切り替えを覚えておくための、ブラウザの保存領域のキー。 */
-export const YEAR_MODE_STORAGE_KEY = 'waders.yearMode';
-
 export { CATEGORY_FILTER_STORAGE_KEY } from '../components/CategoryFilterMenu.tsx';
-
-/** 保存されている年のまとめ方を読む。読めない・不正な値なら暦年。アーカイブの画面でも使う。 */
-export function readStoredYearMode(): YearMode {
-  try {
-    const storedValue = localStorage.getItem(YEAR_MODE_STORAGE_KEY);
-    return storedValue === 'fiscal' ? 'fiscal' : 'calendar';
-  } catch {
-    return 'calendar';
-  }
-}
-
-/** 年のまとめ方を保存する。保存できなくても画面の動作は続ける。 */
-function storeYearMode(yearMode: YearMode): void {
-  try {
-    localStorage.setItem(YEAR_MODE_STORAGE_KEY, yearMode);
-  } catch {
-    // プライベートブラウズなどで保存できない場合は、記憶しないだけにする
-  }
-}
 
 /** カード画像を取りに行っている間に一覧を読み直す間隔（ミリ秒。issue #42）。 */
 const CARD_IMAGE_POLL_INTERVAL_MILLISECONDS = 2000;
@@ -71,7 +43,6 @@ export type ProductListPageProps = {
 export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPageProps) {
   const [products, setProducts] = useState<ProductListItem[] | null>(null);
   const [hasLoadError, setHasLoadError] = useState(false);
-  const [yearMode, setYearMode] = useState<YearMode>(readStoredYearMode);
   const [editorMode, setEditorMode] = useState<ProductEditorMode | null>(null);
   /** 詳細画面で開いている商品（issue #52）。 */
   const [detailProduct, setDetailProduct] = useState<ProductResponse | null>(null);
@@ -119,8 +90,8 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
 
   const categoryFilter = useCategoryFilter(products ?? []);
   const yearGroups = useMemo(
-    () => buildProductListGroups(splitProductsByArchive(categoryFilter.filteredProducts, currentMonth).active, { currentMonth, yearMode }),
-    [categoryFilter.filteredProducts, currentMonth, yearMode],
+    () => buildProductListGroups(splitProductsByArchive(categoryFilter.filteredProducts, currentMonth).active, { currentMonth }),
+    [categoryFilter.filteredProducts, currentMonth],
   );
 
   const makerSuggestions = useMemo(() => collectMakerSuggestions(products ?? []), [products]);
@@ -147,12 +118,6 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
   const handleDeletedFromDetail = () => {
     setDetailProduct(null);
     reloadAfterSave();
-  };
-
-  const changeYearMode = (nextYearMode: YearMode) => {
-    setNotice(null);
-    setYearMode(nextYearMode);
-    storeYearMode(nextYearMode);
   };
 
   const expireNotice = useCallback((expired: Notice) => {
@@ -204,25 +169,6 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           }}
           disabled={categoryFilter.categories === null}
         />
-        <div className="segmented" role="radiogroup" aria-label="年のまとめ方">
-          {(
-            [
-              ['calendar', '暦年'],
-              ['fiscal', '年度'],
-            ] as const
-          ).map(([value, label]) => (
-            <label key={value} className={yearMode === value ? 'segmented-option segmented-option--selected' : 'segmented-option'}>
-              <input
-                type="radio"
-                name="year-mode"
-                value={value}
-                checked={yearMode === value}
-                onChange={() => changeYearMode(value)}
-              />
-              {label}
-            </label>
-          ))}
-        </div>
         <span className="toolbar-spacer" />
         <button
           type="button"

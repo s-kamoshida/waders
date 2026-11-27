@@ -115,6 +115,21 @@ function getItemValue(label: string): HTMLElement {
   return value;
 }
 
+/** 詳細画面で値がないことを示す印（読み上げでは「未入力」と伝わる）をすべて返す（issue #63）。 */
+function getAllEmptyMarks(container: HTMLElement): HTMLElement[] {
+  return within(container).getAllByRole('img', { name: '未入力' });
+}
+
+/**
+ * 項目の値（dd）が「値がない」表示であることを確かめる（issue #63）。
+ * 見た目は全角の「－」（U+FF0D）だけで、「未入力」の文字は出さず、読み上げでは「未入力」と伝わる。
+ */
+function expectEmptyValue(value: HTMLElement) {
+  expect(value.textContent).toBe('\uFF0D');
+  expect(getAllEmptyMarks(value)).toHaveLength(1);
+  expect(getAllEmptyMarks(value)[0]).toHaveTextContent('\uFF0D');
+}
+
 /** 項目の一覧に、その名前の項目があるか。 */
 function hasItem(label: string): boolean {
   return within(getDetailDialog()).queryByText(label, { selector: 'dt' }) !== null;
@@ -155,14 +170,14 @@ describe('商品の詳細画面の表示（issue #52）', () => {
     expect(within(getDetailDialog()).queryByRole('img', { name: '商品の画像' })).not.toBeInTheDocument();
   });
 
-  it('物品の場合、カテゴリー・発売月・受注期限・購入先・備考を項目として表示し、値がない項目は「未入力」と示す', () => {
+  it('物品の場合、カテゴリー・発売月・受注期限・購入先・備考を項目として表示し、値がない項目は「－」と示す（読み上げでは「未入力」）', () => {
     stubFetchRoutes({});
     renderDetail(createProduct({ note: null }));
 
     expect(getItemValue('カテゴリー')).toHaveTextContent('可動フィギュア');
     expect(getItemValue('発売月')).toHaveTextContent('2026/12');
     expect(getItemValue('受注期限')).toHaveTextContent('2026/11/30');
-    expect(getItemValue('備考')).toHaveTextContent('未入力');
+    expectEmptyValue(getItemValue('備考'));
     expect(hasItem('場所')).toBe(false);
     expect(hasItem('開催日時')).toBe(false);
   });
@@ -177,11 +192,11 @@ describe('商品の詳細画面の表示（issue #52）', () => {
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
   });
 
-  it('購入先がない場合、購入先は「未入力」と示し、リンクは出さない', () => {
+  it('購入先がない場合、購入先は「－」と示し（読み上げでは「未入力」）、リンクは出さない', () => {
     stubFetchRoutes({});
     renderDetail(createProduct({ url: null }));
 
-    expect(getItemValue('購入先')).toHaveTextContent('未入力');
+    expectEmptyValue(getItemValue('購入先'));
     expect(within(getItemValue('購入先')).queryByRole('link')).not.toBeInTheDocument();
   });
 
@@ -214,20 +229,39 @@ describe('商品の詳細画面の表示（issue #52）', () => {
     expect(getItemValue('受注期限')).toHaveTextContent('2026/12/10');
   });
 
-  it('カテゴリーが未設定の場合、カテゴリーは「未設定」と示す', () => {
+  it('カテゴリーが未設定の場合、カテゴリーは今までどおり「未設定」と示し、「－」にはしない', () => {
     stubFetchRoutes({});
     renderDetail(createProduct({ categoryId: null, categoryName: null }));
 
-    expect(getItemValue('カテゴリー')).toHaveTextContent('未設定');
+    const category = getItemValue('カテゴリー');
+    expect(category.textContent).toBe('未設定');
+    expect(within(category).queryByRole('img', { name: '未入力' })).not.toBeInTheDocument();
   });
 
-  it('開催日時・終了日時が空の場合、「未入力」と示す', () => {
+  it('受注期限が空の場合、受注期限は「－」と示す（読み上げでは「未入力」）', () => {
+    stubFetchRoutes({});
+    renderDetail(createProduct({ orderDeadline: null }));
+
+    expectEmptyValue(getItemValue('受注期限'));
+  });
+
+  it('場所・開催日時・終了日時が空の場合、「－」と示す（読み上げでは「未入力」）', () => {
     stubFetchRoutes({});
     renderDetail(createTicket({ eventStartsAt: null, eventEndsAt: null, location: null }));
 
-    expect(getItemValue('場所')).toHaveTextContent('未入力');
-    expect(getItemValue('開催日時')).toHaveTextContent('未入力');
-    expect(getItemValue('終了日時')).toHaveTextContent('未入力');
+    expectEmptyValue(getItemValue('場所'));
+    expectEmptyValue(getItemValue('開催日時'));
+    expectEmptyValue(getItemValue('終了日時'));
+  });
+
+  it('値がない項目がある場合も、「未入力」の文字は画面に表示しない', () => {
+    stubFetchRoutes({});
+    renderDetail(createTicket({ price: null, eventStartsAt: null, eventEndsAt: null, location: null, url: null, note: null }));
+
+    const dialog = getDetailDialog();
+    expect(getAllEmptyMarks(dialog).length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText(/未入力/)).not.toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent('未入力');
   });
 });
 
@@ -268,13 +302,18 @@ describe('詳細画面の金額（issue #52）', () => {
     expect(within(dialog).getByText('（1,000円 ＋ 送料 500円 − 値引き 1,200円）')).toBeInTheDocument();
   });
 
-  it('金額が未入力の場合、金額は「未入力」と示す', () => {
+  it('金額が未入力の場合、金額は「－」と示し（読み上げでは「未入力」）、「未入力」の文字や金額は表示しない', () => {
     stubFetchRoutes({});
-    // ほかの項目には値を入れ、「未入力」が金額だけになるようにする
+    // ほかの項目には値を入れ、値がない印が金額だけになるようにする
     renderDetail(createProduct({ price: null, shippingFee: null, note: '予約の受付を待っている' }));
 
-    expect(within(getDetailDialog()).getByText('未入力')).toBeInTheDocument();
-    expect(within(getDetailDialog()).queryByText(/円/)).not.toBeInTheDocument();
+    const dialog = getDetailDialog();
+    const marks = getAllEmptyMarks(dialog);
+    expect(marks).toHaveLength(1);
+    expect(marks[0]).toHaveTextContent(/^\uFF0D$/);
+    expect(marks[0]?.closest('dd')).toBeNull();
+    expect(dialog).not.toHaveTextContent('未入力');
+    expect(within(dialog).queryByText(/円/)).not.toBeInTheDocument();
   });
 });
 

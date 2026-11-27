@@ -101,15 +101,6 @@ describe('年のグループ', () => {
     ]);
   });
 
-  it('年度の場合、4 月〜翌 3 月でまとめ、開始年で「FY26」と表記する', () => {
-    const groups = buildProductListGroups(products, { currentMonth: '2026-12', yearMode: 'fiscal' });
-
-    expect(groups.map((group) => [group.label, group.months.map((month) => month.month)])).toEqual([
-      ['FY26', ['2026-12', '2027-01', '2027-02', '2027-03']],
-      ['FY27', ['2027-04']],
-    ]);
-  });
-
   it('月の表記は「2026/11」とする', () => {
     const groups = buildProductListGroups([], { currentMonth: '2026-11', yearMode: 'calendar' });
 
@@ -282,14 +273,6 @@ describe('アーカイブのグループ（issue #9）', () => {
       ['2026年', ['2026-10', '2026-08']],
       ['2025年', ['2025-12']],
     ]);
-  });
-
-  it('年度でまとめることもできる', () => {
-    const groups = buildArchiveGroups([createProduct({ releaseMonth: '2026-03' }), createProduct({ releaseMonth: '2026-04' })], {
-      yearMode: 'fiscal',
-    });
-
-    expect(groups.map((group) => group.label)).toEqual(['FY26', 'FY25']);
   });
 
   it('同じ月の中の並び順と集計は、リストと同じ規則にする', () => {

@@ -35,6 +35,7 @@ import {
   type ProductId,
 } from '../domain/product.ts';
 import {
+  clearPassedOrderDeadlineOfConsidering,
   determineAutomaticTransition,
   determineStatusBeforeAutomaticTransition,
   isProductArchived,
@@ -331,7 +332,8 @@ export function createProductService(dependencies: ProductServiceDependencies): 
   /** 利用者の操作として商品を更新する。 */
   const updateByUser = (current: Product, changes: Partial<Product>, currentTime: Date): Product => {
     const now = currentTime.toISOString();
-    const updated: Product = { ...current, ...changes, updatedAt: now };
+    // 利用者の操作で検討中にした商品の受注期限が過ぎていれば消す（自動遷移ですぐ未購入に戻らないように。issue #60、BR-39）
+    const updated: Product = clearPassedOrderDeadlineOfConsidering({ ...current, ...changes, updatedAt: now }, currentTime);
     productRepository.updateProduct(updated, { changedAt: now, changeKind: 'user' });
     return updated;
   };
@@ -368,8 +370,13 @@ export function createProductService(dependencies: ProductServiceDependencies): 
     applyAutomaticTransitions,
 
     createProduct(input) {
-      const now = clock.now().toISOString();
-      const product: Product = { id: generateProductId(), ...input, ...resolveCategory(input.categoryId), createdAt: now, updatedAt: now };
+      const currentTime = clock.now();
+      const now = currentTime.toISOString();
+      // 受注期限を過ぎた商品を検討中で登録した場合は、受注期限を消す（issue #60、BR-39）
+      const product: Product = clearPassedOrderDeadlineOfConsidering(
+        { id: generateProductId(), ...input, ...resolveCategory(input.categoryId), createdAt: now, updatedAt: now },
+        currentTime,
+      );
       productRepository.insertProduct(product);
       refreshCardImage(product.id, null, product.url);
       return product;

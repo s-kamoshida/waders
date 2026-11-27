@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CATEGORY_FILTER_STORAGE_KEY, ProductListPage, YEAR_MODE_STORAGE_KEY } from '../../../client/pages/ProductListPage.tsx';
+import { CATEGORY_FILTER_STORAGE_KEY, ProductListPage } from '../../../client/pages/ProductListPage.tsx';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import { getFooterButton, getHeaderCloseButton } from '../dialogCloseButtonQueries.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
@@ -17,6 +17,12 @@ vi.mock('../../../client/productImagePreparation.ts', () => ({
   prepareProductImage: vi.fn(async () => ({ data: 'PREPARED', width: 800, height: 600 })),
   drawProductImagePreview: vi.fn(),
 }));
+
+/**
+ * 以前（issue #8〜#58）に暦年・年度の選択を覚えていた、ブラウザの保存領域のキー。
+ * issue #58 で切り替えをなくした後も、古い端末にはこの値が残っているため、実装の定数ではなく値そのものを使う。
+ */
+const LEGACY_YEAR_MODE_STORAGE_KEY = 'waders.yearMode';
 
 /** 日本時間 2026-11-17 12:00。 */
 const currentTime = new Date('2026-11-17T03:00:00.000Z');
@@ -146,26 +152,54 @@ describe('折りたたみ', () => {
   });
 });
 
-describe('暦年と年度の切り替え', () => {
-  it('「年度」に切り替えた場合、年の見出しを FY で表示し、次に開いたときも年度で表示する', async () => {
+describe('年のまとめ方（issue #58 で暦年だけにした）', () => {
+  it('一覧を開いた場合、ツールバーに暦年・年度の切り替えを表示しない', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [] } }) });
-    const { unmount } = render(<ProductListPage currentTime={currentTime} />);
-    await screen.findByRole('button', { name: /^2026年/ });
 
-    await userEvent.click(screen.getByRole('radio', { name: '年度' }));
-
-    expect(screen.getByRole('button', { name: /^FY26/ })).toBeInTheDocument();
-    expect(localStorage.getItem(YEAR_MODE_STORAGE_KEY)).toBe('fiscal');
-
-    unmount();
     render(<ProductListPage currentTime={currentTime} />);
 
-    expect(await screen.findByRole('button', { name: /^FY26/ })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: '年度' })).toBeChecked();
+    await screen.findByRole('button', { name: /^2026年/ });
+    expect(screen.queryByRole('radiogroup', { name: '年のまとめ方' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '暦年' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '年度' })).not.toBeInTheDocument();
   });
 
-  it('保存されている値が不正な場合、暦年で表示する', async () => {
-    localStorage.setItem(YEAR_MODE_STORAGE_KEY, 'unknown');
+  it('年をまたぐ商品がある場合、1 月〜12 月の暦年でまとめ、「2026年」「2027年」と表記する', async () => {
+    const products = [
+      createProduct({ releaseMonth: '2026-12', price: 10000 }),
+      createProduct({ releaseMonth: '2027-03', price: 20000, shippingFee: 500 }),
+      createProduct({ releaseMonth: '2027-04', price: 30000 }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ProductListPage currentTime={currentTime} />);
+
+    await screen.findByRole('region', { name: '2026/12' });
+    expect(screen.getByRole('button', { name: /^2026年/ })).toHaveTextContent('1個（合計 10,000円見込）');
+    expect(screen.getByRole('button', { name: /^2027年/ })).toHaveTextContent('2個（合計 50,500円見込）');
+    expect(screen.queryByRole('button', { name: /^FY/ })).not.toBeInTheDocument();
+  });
+
+  it('端末に年度（fiscal）を選んだ記録が残っている場合も、年の見出しを暦年で表示し、個数と合計金額は暦年で数える', async () => {
+    localStorage.setItem(LEGACY_YEAR_MODE_STORAGE_KEY, 'fiscal');
+    const products = [
+      createProduct({ releaseMonth: '2026-12', price: 10000 }),
+      createProduct({ releaseMonth: '2027-03', price: 20000, shippingFee: 500 }),
+      createProduct({ releaseMonth: '2027-04', price: 30000 }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ProductListPage currentTime={currentTime} />);
+
+    await screen.findByRole('region', { name: '2026/12' });
+    expect(screen.getByRole('button', { name: /^2026年/ })).toHaveTextContent('1個（合計 10,000円見込）');
+    expect(screen.getByRole('button', { name: /^2027年/ })).toHaveTextContent('2個（合計 50,500円見込）');
+    expect(screen.queryByRole('button', { name: /^FY/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^2027\/03 / })).toHaveTextContent('1個（合計 20,500円見込）');
+  });
+
+  it('端末に不正な値が残っている場合、暦年で表示する', async () => {
+    localStorage.setItem(LEGACY_YEAR_MODE_STORAGE_KEY, 'unknown');
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [] } }) });
 
     render(<ProductListPage currentTime={currentTime} />);
@@ -662,7 +696,6 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
     ['商品を押して詳細画面を開いた（issue #52）', async () => userEvent.click(screen.getByRole('button', { name: /1月の商品/ }))],
     ['＋ボタンで追加のモーダルを開いた', async () => userEvent.click(screen.getByRole('button', { name: '商品を追加' }))],
     ['月の見出しの＋で追加のモーダルを開いた', async () => userEvent.click(screen.getByRole('button', { name: '2026/12に商品を追加' }))],
-    ['年のまとめ方を切り替えた', async () => userEvent.click(screen.getByLabelText('年度'))],
     [
       'カテゴリーの絞り込みを変えた',
       async () => {
@@ -1266,6 +1299,20 @@ describe('商品の詳細画面（issue #52）', () => {
     expect(within(detail).getByText('2,660円')).toBeInTheDocument();
     expect(within(detail).getByText('（2,500円 ＋ 送料 660円 − 値引き 500円）')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '商品を編集' })).not.toBeInTheDocument();
+  });
+
+  it('金額が未入力の商品の場合、カードは今までどおり「金額未入力」と表示し、詳細画面の金額は「－」と示す（読み上げでは「未入力」。issue #63）', async () => {
+    const product = createProduct({ id: 'detail-1', name: '詳細を見る商品', price: null, shippingFee: 800 });
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [product] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const card = await screen.findByRole('button', { name: /詳細を見る商品/ });
+    expect(within(card).getByText('金額未入力')).toBeInTheDocument();
+
+    const detail = await openDetail();
+    const marks = within(detail).getAllByRole('img', { name: '未入力' });
+    expect(marks.some((mark) => mark.textContent === '－' && mark.closest('dd') === null)).toBe(true);
+    expect(detail).not.toHaveTextContent('未入力');
   });
 
   it('一覧の商品の詳細画面には、「リストに戻す」を表示しない', async () => {
