@@ -1411,7 +1411,7 @@ describe('ステータス「キャンセル」の商品（issue #57）', () => {
     expect(await screen.findByText('予約済の商品')).toBeInTheDocument();
     expect(screen.queryByText('今月のキャンセルした商品')).not.toBeInTheDocument();
     expect(screen.queryByText('来年のキャンセルした商品')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^2026\/11/ })).toHaveTextContent('1個（合計 13,200円見込）');
+    expect(screen.getByRole('button', { name: /^2026\/11 / })).toHaveTextContent('1個（合計 13,200円見込）');
     expect(screen.queryByRole('region', { name: '2027/01' })).not.toBeInTheDocument();
   });
 
@@ -1440,7 +1440,7 @@ describe('ステータス「キャンセル」の商品（issue #57）', () => {
 
     await waitFor(() => expect(countListRequests()).toBe(2));
     expect(requests.find((recorded) => recorded.method === 'PATCH')).toMatchObject({ path: '/api/products/cancel-1/status', body: { status: 'canceled' } });
-    await waitFor(() => expect(within(screen.getByRole('region', { name: '2026/12' })).queryByText('キャンセルする商品')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /キャンセルする商品/ })).not.toBeInTheDocument());
   });
 
   it('編集のモーダルで「キャンセル」を選んで保存した場合、一覧を読み込み直して、リストから消す', async () => {
