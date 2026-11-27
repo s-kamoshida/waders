@@ -6,6 +6,9 @@ import { RestoreDialog } from '../../../client/components/RestoreDialog.tsx';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
+/** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
+const NO_IMAGE_KIND = { imageKind: null } as const;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -31,6 +34,7 @@ const product: ProductResponse = {
   eventStartsAt: null,
   eventEndsAt: null,
   imageUrl: null,
+  ...NO_IMAGE_KIND,
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-06-01T00:00:00.000Z',
 };

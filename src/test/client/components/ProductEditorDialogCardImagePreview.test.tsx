@@ -11,6 +11,9 @@ import { ProductEditorDialog } from '../../../client/components/ProductEditorDia
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import { STUB_CATEGORIES, type RecordedRequest } from '../testFetchStub.ts';
 
+/** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
+const NO_IMAGE_KIND = { imageKind: null } as const;
+
 // 画像の縮小・読み込み（canvas）は jsdom では動かないため、結果を決まった値にする（issue #41・#51）
 const preparationMocks = vi.hoisted(() => ({
   prepareProductImage: vi.fn(async (file: File) => ({ data: `PREPARED-${file.name}`, width: 800, height: 600 })),
@@ -59,6 +62,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     eventStartsAt: null,
     eventEndsAt: null,
     imageUrl: null,
+    ...NO_IMAGE_KIND,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,
@@ -535,5 +539,128 @@ describe('プレビューと保存（issue #51）', () => {
     expect(urlInput()).toHaveValue('');
     expect(within(imageField()).queryByRole('img', { name: CARD_IMAGE_LABEL })).not.toBeInTheDocument();
     expect(within(imageField()).queryByText(FETCH_FAILED_MESSAGE)).not.toBeInTheDocument();
+  });
+});
+
+describe('編集で今の画像がある商品の URL を変えた場合（issue #51）', () => {
+  const CURRENT_IMAGE_URL = '/api/products/product-1/image?v=old';
+
+  /** 今の画像がある商品（imageKind はアップロードした画像か、カード画像か）。項目ができる前でも型に合うよう、展開して加える。 */
+  function createProductWithCurrentImage(imageKind: 'uploaded' | 'card'): ProductResponse {
+    const imageKindField = { imageKind };
+    return { ...createProduct({ url: SHOP_URL, imageUrl: CURRENT_IMAGE_URL }), ...imageKindField };
+  }
+
+  /** 画像の API（PUT・DELETE /api/products/:productId/image）に送った要求。 */
+  function imageApiRequests(requests: readonly RecordedRequest[]): string[] {
+    return requests.filter((recorded) => recorded.path === '/api/products/product-1/image').map((recorded) => recorded.method);
+  }
+
+  /** 後から返る応答や表示の更新を待つ。 */
+  function waitForPendingUpdates(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  it('今の画像がアップロードした画像の場合、URL を変えても今の画像を表示したままにし、カード画像のプレビューや取得の表示を出さない', async () => {
+    stubFetch((url) => (url === OTHER_SHOP_URL ? cardImageReply('OTHER-CARD-DATA') : NO_CARD_IMAGE_REPLY));
+    renderEditDialog(createProductWithCurrentImage('uploaded'));
+
+    await typeUrlAndLeave(OTHER_SHOP_URL);
+    await waitForPendingUpdates();
+
+    expect(within(imageField()).getByRole('img', { name: '今の画像' })).toHaveAttribute('src', CURRENT_IMAGE_URL);
+    expect(within(imageField()).queryByRole('img', { name: CARD_IMAGE_LABEL })).not.toBeInTheDocument();
+    expect(within(imageField()).queryByText(FETCHING_MESSAGE)).not.toBeInTheDocument();
+    expect(within(imageField()).queryByText(FETCH_FAILED_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it('今の画像がアップロードした画像の場合、URL を変えて保存すると、新しい URL で商品を更新し、画像の API は呼ばない（今の画像を消さない・送らない）', async () => {
+    const { requests } = stubFetch((url) => (url === OTHER_SHOP_URL ? cardImageReply('OTHER-CARD-DATA') : NO_CARD_IMAGE_REPLY));
+    const onSaved = vi.fn();
+    renderEditDialog(createProductWithCurrentImage('uploaded'), onSaved);
+    await typeUrlAndLeave(OTHER_SHOP_URL);
+    await waitForPendingUpdates();
+
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const updated = requests.find((recorded) => recorded.method === 'PUT' && recorded.path === '/api/products/product-1');
+    expect(updated?.body).toEqual(expect.objectContaining({ url: OTHER_SHOP_URL }));
+    expect(imageApiRequests(requests)).toEqual([]);
+  });
+
+  it('今の画像がアップロードした画像の場合、URL を変えてから「画像を消す」を押すと、新しい URL のカード画像のプレビューを表示し、保存では今の画像を消す', async () => {
+    const { requests } = stubFetch((url) => (url === OTHER_SHOP_URL ? cardImageReply('OTHER-CARD-DATA') : NO_CARD_IMAGE_REPLY));
+    const onSaved = vi.fn();
+    renderEditDialog(createProductWithCurrentImage('uploaded'), onSaved);
+    await typeUrlAndLeave(OTHER_SHOP_URL);
+
+    await userEvent.click(within(imageField()).getByRole('button', { name: '画像を消す' }));
+
+    expect(await within(imageField()).findByRole('img', { name: CARD_IMAGE_LABEL })).toBeInTheDocument();
+    expect(within(imageField()).queryByRole('img', { name: '今の画像' })).not.toBeInTheDocument();
+    expect(preparationMocks.prepareCardImagePreview).toHaveBeenCalledWith({ data: 'OTHER-CARD-DATA', format: 'jpeg' });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(imageApiRequests(requests)).toEqual(['DELETE']);
+  });
+
+  it('今の画像がカード画像の場合、URL を変えると、今の画像を新しい URL のカード画像のプレビューに置き換える', async () => {
+    const { previewUrls } = stubFetch((url) => (url === OTHER_SHOP_URL ? cardImageReply('OTHER-CARD-DATA') : NO_CARD_IMAGE_REPLY));
+    renderEditDialog(createProductWithCurrentImage('card'));
+
+    await typeUrlAndLeave(OTHER_SHOP_URL);
+
+    expect(await within(imageField()).findByRole('img', { name: CARD_IMAGE_LABEL })).toBeInTheDocument();
+    expect(within(imageField()).queryByRole('img', { name: '今の画像' })).not.toBeInTheDocument();
+    expect(previewUrls()).toEqual([OTHER_SHOP_URL]);
+    expect(preparationMocks.prepareCardImagePreview).toHaveBeenCalledWith({ data: 'OTHER-CARD-DATA', format: 'jpeg' });
+  });
+
+  it('今の画像がカード画像の場合、新しい URL の画像を取りに行っている間は取得中を表示する', async () => {
+    const deferred = createDeferredReply();
+    stubFetch(() => deferred.promise);
+    renderEditDialog(createProductWithCurrentImage('card'));
+
+    await typeUrlAndLeave(OTHER_SHOP_URL);
+
+    expect(await within(imageField()).findByText(FETCHING_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('今の画像がカード画像で、新しい URL の画像を取れなかった場合、前の URL の今の画像を表示せず、取得できなかったことを表示する', async () => {
+    stubFetch(() => NO_CARD_IMAGE_REPLY);
+    renderEditDialog(createProductWithCurrentImage('card'));
+
+    await typeUrlAndLeave(OTHER_SHOP_URL);
+
+    expect(await within(imageField()).findByText(FETCH_FAILED_MESSAGE)).toBeInTheDocument();
+    expect(within(imageField()).queryByRole('img', { name: '今の画像' })).not.toBeInTheDocument();
+    expect(within(imageField()).queryByRole('img', { name: CARD_IMAGE_LABEL })).not.toBeInTheDocument();
+  });
+
+  it('今の画像がカード画像の場合、URL を変えて保存すると、新しい URL で商品を更新し、画像の API は呼ばない（カード画像はサーバーが取り直す）', async () => {
+    const { requests } = stubFetch((url) => (url === OTHER_SHOP_URL ? cardImageReply('OTHER-CARD-DATA') : NO_CARD_IMAGE_REPLY));
+    const onSaved = vi.fn();
+    renderEditDialog(createProductWithCurrentImage('card'), onSaved);
+    await typeUrlAndLeave(OTHER_SHOP_URL);
+    await within(imageField()).findByRole('img', { name: CARD_IMAGE_LABEL });
+
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const updated = requests.find((recorded) => recorded.method === 'PUT' && recorded.path === '/api/products/product-1');
+    expect(updated?.body).toEqual(expect.objectContaining({ url: OTHER_SHOP_URL }));
+    expect(imageApiRequests(requests)).toEqual([]);
+  });
+
+  it.each(['uploaded', 'card'] as const)('今の画像の種類が %s で URL を変えない場合、今の画像を表示したままにし、取りに行かない', async (imageKind) => {
+    const { previewUrls } = stubFetch();
+    renderEditDialog(createProductWithCurrentImage(imageKind));
+
+    await userEvent.click(urlInput());
+    await userEvent.tab();
+
+    expect(within(imageField()).getByRole('img', { name: '今の画像' })).toHaveAttribute('src', CURRENT_IMAGE_URL);
+    expect(previewUrls()).toEqual([]);
   });
 });

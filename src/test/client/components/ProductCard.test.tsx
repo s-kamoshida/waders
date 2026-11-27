@@ -6,6 +6,9 @@ import { ProductCard } from '../../../client/components/ProductCard.tsx';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import type { CategoryResponse } from '../../../shared/categoryContract.ts';
 
+/** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
+const NO_IMAGE_KIND = { imageKind: null } as const;
+
 const today = '2026-11-17';
 
 /** テスト用の商品を作る。 */
@@ -31,6 +34,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     eventStartsAt: null,
     eventEndsAt: null,
     imageUrl: null,
+    ...NO_IMAGE_KIND,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,

@@ -5,6 +5,8 @@ import {
   MAXIMUM_PRICE_YEN,
   MAXIMUM_PRODUCT_NAME_LENGTH,
   productInputSchema,
+  productListItemSchema,
+  productSchema,
 } from '../../shared/productContract.ts';
 
 /** 必須項目だけを持つ入力。 */
@@ -252,5 +254,46 @@ describe('開催日時と終了日時（PR #30 のレビュー）', () => {
 
   it('終了日時が開催日時と同じ場合は受け付ける', () => {
     expect(isValid({ ...minimumInput, eventStartsAt: '2026-11-20T09:00:00.000Z', eventEndsAt: '2026-11-20T09:00:00.000Z' })).toBe(true);
+  });
+});
+
+describe('API が返す商品の画像の種類（issue #51）', () => {
+  /** API が返す商品（画像の種類のほかの項目）。 */
+  const responseProduct = {
+    id: 'product-1',
+    name: 'アクションフィギュア',
+    releaseMonth: '2026-12',
+    status: 'considering',
+    cancelable: false,
+    price: null,
+    shippingFee: null,
+    orderDeadline: null,
+    url: 'https://shop.example.jp/item/1',
+    categoryId: null,
+    categoryName: null,
+    maker: null,
+    note: null,
+    location: null,
+    handlingFee: null,
+    travelExpense: null,
+    otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
+    imageUrl: '/api/products/product-1/image?v=1',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z',
+  };
+
+  it.each(['uploaded', 'card', null])('imageKind が %s の場合、検証に通り、その値を保つ', (imageKind) => {
+    expect(productSchema.parse({ ...responseProduct, imageKind })).toEqual(expect.objectContaining({ imageKind }));
+    expect(productListItemSchema.parse({ ...responseProduct, imageKind })).toEqual(expect.objectContaining({ imageKind }));
+  });
+
+  it.each([['ほかの文字列', 'other'], ['空の文字列', ''], ['数', 1]])('imageKind が%sの場合、拒否する', (_label, imageKind) => {
+    expect(productSchema.safeParse({ ...responseProduct, imageKind }).success).toBe(false);
+  });
+
+  it('imageKind がない場合、拒否する（サーバーは必ず返す）', () => {
+    expect(productSchema.safeParse(responseProduct).success).toBe(false);
   });
 });

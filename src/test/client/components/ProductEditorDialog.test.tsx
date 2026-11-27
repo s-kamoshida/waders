@@ -7,6 +7,9 @@ import type { CategoryResponse } from '../../../shared/categoryContract.ts';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import { stubFetchRoutes, type RecordedRequest } from '../testFetchStub.ts';
 
+/** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
+const NO_IMAGE_KIND = { imageKind: null } as const;
+
 // 画像の縮小（canvas）は jsdom では動かないため、縮小した結果を決まった値にする（issue #41）
 vi.mock('../../../client/productImagePreparation.ts', () => ({
   prepareProductImage: vi.fn(async (file: File) => {
@@ -63,6 +66,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     eventStartsAt: null,
     eventEndsAt: null,
     imageUrl: null,
+    ...NO_IMAGE_KIND,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
     ...overrides,

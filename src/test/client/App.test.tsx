@@ -8,6 +8,9 @@ import { App } from '../../client/App.tsx';
 import type { ProductListItem } from '../../shared/productContract.ts';
 import { stubFetchRoutes } from './testFetchStub.ts';
 
+/** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
+const NO_IMAGE_KIND = { imageKind: null } as const;
+
 /** 日本時間 2026-11-17 12:00。 */
 const currentTime = new Date('2026-11-17T03:00:00.000Z');
 
@@ -34,6 +37,7 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     eventStartsAt: null,
     eventEndsAt: null,
     imageUrl: null,
+    ...NO_IMAGE_KIND,
     createdAt: '2026-06-01T00:00:00.000Z',
     updatedAt: '2026-06-01T00:00:00.000Z',
     deliveryConfirmationPending: false,
