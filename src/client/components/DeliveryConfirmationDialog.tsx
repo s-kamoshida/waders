@@ -7,6 +7,7 @@
  *  - 「延期された」は新しい発売月（既定は当月。当月以降のみ）を入力させる
  *  - 回答した商品だけを送る。回答しなかった商品は確認待ちのまま残り、次に開いたときにまた表示する
  * すべて送れたら onCompleted、「あとで」を押したら送らずに onClose を呼ぶ。
+ * 見出しの行の「閉じる」ボタン（×）は「あとで」と同じ。送信中は押せない（issue #49）。
  */
 import { useId, useState } from 'react';
 import type { DeliveryConfirmationRequest, ProductListItem } from '../../shared/productContract.ts';
@@ -96,9 +97,14 @@ export function DeliveryConfirmationDialog({ products, currentMonth, onClose, on
           if (event.key === 'Escape' && !isSubmitting) onClose();
         }}
       >
-        <h2 id={`${idPrefix}-title`} className="dialog-title">
-          {SCREEN_MESSAGES.deliveryConfirmationTitle}
-        </h2>
+        <div className="dialog-header">
+          <h2 id={`${idPrefix}-title`} className="dialog-title">
+            {SCREEN_MESSAGES.deliveryConfirmationTitle}
+          </h2>
+          <button type="button" className="dialog-close-button" aria-label="閉じる" disabled={isSubmitting} onClick={onClose}>
+            ×
+          </button>
+        </div>
         <div className="dialog-body">
           {hasSendError && (
             <p role="alert" className="dialog-error">

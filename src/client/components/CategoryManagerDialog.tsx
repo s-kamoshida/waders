@@ -11,6 +11,7 @@
  *    チェックは押すたびに変えた項目だけをすぐ送り、名前は「費用の名前を変更」か Enter キーで送る（空にすると「その他費用」に戻す）
  *  - 定義に誤りがある場合は理由を表示し、変更の欄を出さない
  *  - 閉じるときに、変更したかどうかを呼び出し元に知らせる（表示中の一覧を読み込み直すため）
+ *  - 見出しの行の「閉じる」ボタン（×）はフッターの「閉じる」と同じ。変更を送っている間は押せない（issue #49）
  */
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import {
@@ -423,9 +424,14 @@ export function CategoryManagerDialog({ onClose }: CategoryManagerDialogProps) {
           if (event.key === 'Escape' && !isSubmitting) onClose(hasChanged);
         }}
       >
-        <h2 id={`${idPrefix}-title`} className="dialog-title">
-          {SCREEN_MESSAGES.categoryManagerTitle}
-        </h2>
+        <div className="dialog-header">
+          <h2 id={`${idPrefix}-title`} className="dialog-title">
+            {SCREEN_MESSAGES.categoryManagerTitle}
+          </h2>
+          <button type="button" className="dialog-close-button" aria-label="閉じる" disabled={isSubmitting} onClick={() => onClose(hasChanged)}>
+            ×
+          </button>
+        </div>
         <div className="dialog-body">
           {errorMessages.length > 0 && (
             <p role="alert" className="dialog-error">

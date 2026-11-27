@@ -19,6 +19,12 @@ export const SCREEN_MESSAGES = {
   productImageClipboardEmpty: 'クリップボードに画像がありません。',
   /** 画像の貼り付け欄の案内（空のときに表示する）（issue #47）。 */
   productImagePasteAreaHint: 'タップ/選択してから画像を貼り付け',
+  /** 画像の欄の注釈（MSG-I-016。issue #51）。 */
+  cardImageAnnotation: '購入先の URL を入れると、ページの画像を取得して使います。自分で選んだ画像があれば、そちらを使います。',
+  /** カード画像のプレビューを取りに行っている間（MSG-I-017。issue #51）。 */
+  cardImageFetching: 'ページの画像を取得しています…',
+  /** カード画像のプレビューを取れなかった場合（MSG-I-018。issue #51）。 */
+  cardImageFetchFailed: 'ページの画像を取得できませんでした。',
   productImageSaveFailed: '商品は保存しましたが、画像を保存できませんでした。',
   /** 「保存して続けて追加」で保存し、画像を保存できなかった場合。 */
   productAddedWithoutImage: (productName: string) => `「${productName}」を追加しましたが、画像を保存できませんでした。`,

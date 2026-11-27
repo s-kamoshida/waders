@@ -8,6 +8,8 @@ import { stubFetchRoutes } from '../testFetchStub.ts';
 
 /** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
 const NO_DISCOUNT = { discount: null } as const;
+/** 画像なし（issue #51 の画像の種類）。項目ができる前でも型に合うよう、フィクスチャには展開して加える。 */
+const NO_IMAGE_KIND = { imageKind: null } as const;
 
 // 画像の縮小（canvas）は jsdom では動かないため、縮小した結果を決まった値にする（issue #41）
 vi.mock('../../../client/productImagePreparation.ts', () => ({
@@ -46,6 +48,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     eventEndsAt: null,
     ...NO_DISCOUNT,
     imageUrl: null,
+    ...NO_IMAGE_KIND,
     createdAt,
     updatedAt: createdAt,
     ...overrides,

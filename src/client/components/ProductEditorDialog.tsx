@@ -17,6 +17,11 @@
  *  - 追加では、保存ボタンの横のプルダウンで保存の方法（「保存」「保存して続けて追加」）を選べる。選んだ方法はモーダルを
  *    開いている間保つ。「保存して続けて追加」では、保存した後もモーダルを開いたまま次の商品を入力できる（issue #16）
  *  - 画像を選び・差し替え・消せる。画像は商品を保存した後に送る（商品を保存できなければ送らない。issue #41）
+ *  - 購入先の URL を貼り付けたとき（すぐ）と、入力して欄を離れたときに、サーバーにカード画像を取ってもらい、画像の欄にプレビューする（issue #51）。
+ *    同じ URL では取り直さない（取った結果を覚えておく）。保存済みの URL のまま・空・形の誤りでは取りに行かない。
+ *    取りに行っている間に URL を変えた場合は、前の URL の結果を表示しない。取得中・取れなかった場合も保存はできる。
+ *    プレビューの画像は保存では送らない（カード画像は保存の後にサーバーが取りに行く。#42）
+ *  - 見出しの行の「閉じる」ボタン（×）は「キャンセル」と同じく、確認を出さずに保存せずに閉じる。保存中は押せない（issue #49）
  * 保存・削除に成功したら onSaved を、「保存して続けて追加」で保存したら onSavedAndContinued を呼ぶ。
  * 商品を保存できて画像を保存できなかった場合は、onSaved に { imageSaveFailed: true } を渡す（issue #41）。
  */
@@ -25,6 +30,8 @@ import {
   PRODUCT_STATUSES,
   collectFieldErrors,
   productInputSchema,
+  productUrlSchema,
+  type CardImagePreviewResponse,
   type ProductResponse,
   type ProductStatus,
 } from '../../shared/productContract.ts';
@@ -34,6 +41,7 @@ import {
   deleteProduct,
   deleteProductImage,
   updateProduct,
+  fetchCardImagePreview,
   uploadProductImage,
 } from '../productApiClient.ts';
 import type { CategoryControlledField, CategoryResponse } from '../../shared/categoryContract.ts';
@@ -46,7 +54,13 @@ import {
 } from '../productDisplay.ts';
 import { formatUndefinedCategoryLabel } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
-import { ProductImageField, type ProductImageChoice, type ProductImageFieldHandle } from './ProductImageField.tsx';
+import { prepareCardImagePreview } from '../productImagePreparation.ts';
+import {
+  ProductImageField,
+  type CardImagePreviewState,
+  type ProductImageChoice,
+  type ProductImageFieldHandle,
+} from './ProductImageField.tsx';
 
 /** モーダルの用途。追加の場合は発売月の既定値を、編集の場合は対象の商品を持つ。 */
 export type ProductEditorMode =
@@ -237,6 +251,15 @@ export function ProductEditorDialog({
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
   const [imageChoice, setImageChoice] = useState<ProductImageChoice>({ kind: 'unchanged' });
   const [isPreparingImage, setIsPreparingImage] = useState(false);
+  const [cardImagePreview, setCardImagePreview] = useState<CardImagePreviewState>({ kind: 'none' });
+  /** 保存済みの購入先の URL（編集。このままなら取りに行かない。issue #51）。 */
+  const savedUrl = mode.kind === 'edit' ? (mode.product.url ?? '') : '';
+  /** プレビューの対象の URL（最後に取りに行った・表示を決めた URL。issue #51）。 */
+  const previewUrlRef = useRef(savedUrl);
+  /** 取ったカード画像（URL ごと。同じ URL では取り直さない。issue #51）。 */
+  const cardImageCacheRef = useRef(new Map<string, CardImagePreviewResponse['cardImage']>());
+  /** URL の欄に文字を貼り付けた直後か（その後の入力の変化ですぐに取りに行く。issue #51）。 */
+  const urlPastedRef = useRef(false);
   /** モーダル全体で貼り付けた画像を画像の欄に渡すための参照（issue #45）。 */
   const imageFieldRef = useRef<ProductImageFieldHandle>(null);
   const saveMenuToggleRef = useRef<HTMLButtonElement>(null);
@@ -258,10 +281,56 @@ export function ProductEditorDialog({
     setSavedNotice(null);
   };
 
+  /** 取ったカード画像を読み込み、その URL がまだプレビューの対象なら表示する（issue #51）。 */
+  const showCardImagePreview = async (url: string, cardImage: CardImagePreviewResponse['cardImage']) => {
+    if (cardImage === null) {
+      setCardImagePreview({ kind: 'failed' });
+      return;
+    }
+    try {
+      const prepared = await prepareCardImagePreview(cardImage);
+      if (previewUrlRef.current === url) setCardImagePreview({ kind: 'ready', prepared });
+    } catch {
+      if (previewUrlRef.current === url) setCardImagePreview({ kind: 'failed' });
+    }
+  };
+
+  /**
+   * 購入先の URL のカード画像のプレビューを用意する（issue #51）。前と同じ URL なら何もしない。
+   * 空・形の誤り・保存済みの URL ではプレビューを消す。取ったことのある URL は、取り直さずに覚えた結果を使う。
+   */
+  const requestCardImagePreview = (value: string) => {
+    const url = value.trim();
+    if (url === previewUrlRef.current) return;
+    previewUrlRef.current = url;
+    if (url === savedUrl || !productUrlSchema.safeParse(url).success) {
+      setCardImagePreview({ kind: 'none' });
+      return;
+    }
+    const cache = cardImageCacheRef.current;
+    if (cache.has(url)) {
+      void showCardImagePreview(url, cache.get(url) ?? null);
+      return;
+    }
+    setCardImagePreview({ kind: 'fetching' });
+    fetchCardImagePreview(url).then(
+      (cardImage) => {
+        cache.set(url, cardImage);
+        if (previewUrlRef.current === url) void showCardImagePreview(url, cardImage);
+      },
+      () => {
+        // 失敗（通信の誤りなど）は覚えない（次に URL を入れたときに取り直せるように）
+        if (previewUrlRef.current === url) setCardImagePreview({ kind: 'failed' });
+      },
+    );
+  };
+
   /** 「保存して続けて追加」で保存した後、次の商品の入力に備える。 */
   const prepareNextProduct = (savedName: string, imageSaveFailed: boolean) => {
     setValues((current) => ({ ...current, ...CLEARED_FOR_NEXT_PRODUCT }));
     setImageChoice({ kind: 'unchanged' });
+    setCardImagePreview({ kind: 'none' });
+    previewUrlRef.current = '';
     setSavedNotice(
       imageSaveFailed ? SCREEN_MESSAGES.productAddedWithoutImage(savedName) : SCREEN_MESSAGES.productAddedAndContinue(savedName),
     );
@@ -420,9 +489,14 @@ export function ProductEditorDialog({
             void saveProduct(saveMethod === 'saveAndContinue');
           }}
         >
-          <h2 id={`${idPrefix}-title`} className="dialog-title">
-            {title}
-          </h2>
+          <div className="dialog-header">
+            <h2 id={`${idPrefix}-title`} className="dialog-title">
+              {title}
+            </h2>
+            <button type="button" className="dialog-close-button" aria-label="閉じる" disabled={isSubmitting} onClick={onClose}>
+              ×
+            </button>
+          </div>
           <div className="dialog-body">
             {generalError !== null && (
               <p role="alert" className="dialog-error">
@@ -600,7 +674,17 @@ export function ProductEditorDialog({
                 value={values.url}
                 aria-invalid={fieldErrors.url !== undefined}
                 aria-describedby={describedBy('url')}
-                onChange={(event) => updateValue('url', event.target.value)}
+                onPaste={(event) => {
+                  // 文字の貼り付けなら、その後の入力の変化ですぐに取りに行く（画像の貼り付けはモーダルが受け取る）
+                  urlPastedRef.current = event.clipboardData.getData('text') !== '';
+                }}
+                onChange={(event) => {
+                  updateValue('url', event.target.value);
+                  if (!urlPastedRef.current) return;
+                  urlPastedRef.current = false;
+                  requestCardImagePreview(event.target.value);
+                }}
+                onBlur={(event) => requestCardImagePreview(event.target.value)}
               />
               {renderFieldError('url')}
             </div>
@@ -608,6 +692,8 @@ export function ProductEditorDialog({
               ref={imageFieldRef}
               inputId={fieldId('image')}
               currentImageUrl={mode.kind === 'edit' ? mode.product.imageUrl : null}
+              currentImageKind={mode.kind === 'edit' ? mode.product.imageKind : null}
+              cardImagePreview={cardImagePreview}
               choice={imageChoice}
               onChoiceChange={(choice) => {
                 setImageChoice(choice);

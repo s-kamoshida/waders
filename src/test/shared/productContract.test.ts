@@ -6,7 +6,12 @@ import {
   MAXIMUM_PRODUCT_NAME_LENGTH,
   collectFieldErrors,
   productInputSchema,
+  productListItemSchema,
+  productSchema,
 } from '../../shared/productContract.ts';
+
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
 
 /** 必須項目だけを持つ入力。 */
 const minimumInput = { name: 'アクションフィギュア セカンド・フォーム', releaseMonth: '2026-12' };
@@ -327,5 +332,47 @@ describe('値引き（issue #50・BR-35）', () => {
 
   it('金額も値引きも空の場合は、今までどおり受け付ける', () => {
     expect(isValid({ ...minimumInput, price: null, shippingFee: 800, discount: null })).toBe(true);
+  });
+});
+
+describe('API が返す商品の画像の種類（issue #51）', () => {
+  /** API が返す商品（画像の種類のほかの項目）。 */
+  const responseProduct = {
+    id: 'product-1',
+    name: 'アクションフィギュア',
+    releaseMonth: '2026-12',
+    status: 'considering',
+    cancelable: false,
+    price: null,
+    shippingFee: null,
+    orderDeadline: null,
+    url: 'https://shop.example.jp/item/1',
+    categoryId: null,
+    categoryName: null,
+    maker: null,
+    note: null,
+    location: null,
+    handlingFee: null,
+    travelExpense: null,
+    otherExpense: null,
+    eventStartsAt: null,
+    eventEndsAt: null,
+    ...NO_DISCOUNT,
+    imageUrl: '/api/products/product-1/image?v=1',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z',
+  };
+
+  it.each(['uploaded', 'card', null])('imageKind が %s の場合、検証に通り、その値を保つ', (imageKind) => {
+    expect(productSchema.parse({ ...responseProduct, imageKind })).toEqual(expect.objectContaining({ imageKind }));
+    expect(productListItemSchema.parse({ ...responseProduct, imageKind })).toEqual(expect.objectContaining({ imageKind }));
+  });
+
+  it.each([['ほかの文字列', 'other'], ['空の文字列', ''], ['数', 1]])('imageKind が%sの場合、拒否する', (_label, imageKind) => {
+    expect(productSchema.safeParse({ ...responseProduct, imageKind }).success).toBe(false);
+  });
+
+  it('imageKind がない場合、拒否する（サーバーは必ず返す）', () => {
+    expect(productSchema.safeParse(responseProduct).success).toBe(false);
   });
 });
