@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ProductListItem, ProductResponse } from '../../shared/productContract.ts';
 import { CategoryFilterMenu, useCategoryFilter } from '../components/CategoryFilterMenu.tsx';
 import { NoticeToast, type Notice } from '../components/NoticeToast.tsx';
+import { ProductDetailDialog } from '../components/ProductDetailDialog.tsx';
 import { ProductEditorDialog, type ProductSavedResult } from '../components/ProductEditorDialog.tsx';
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { RestoreDialog } from '../components/RestoreDialog.tsx';
@@ -23,8 +24,8 @@ import { buildArchiveGroups, collectMakerSuggestions, formatArchiveSummary, spli
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 import { readStoredYearMode } from './ProductListPage.tsx';
 
-/** 開いているモーダル。 */
-type OpenDialog = { readonly kind: 'edit'; readonly product: ProductResponse } | { readonly kind: 'restore'; readonly product: ProductResponse };
+/** 開いているモーダル（detail は商品の詳細画面。issue #52）。 */
+type OpenDialog = { readonly kind: 'detail' | 'edit' | 'restore'; readonly product: ProductResponse };
 
 /** ArchivePage の引数。 */
 export type ArchivePageProps = {
@@ -110,9 +111,22 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
           today={today}
           onSelect={(selected) => {
             setNotice(null);
-            setOpenDialog({ kind: 'edit', product: selected });
+            setOpenDialog({ kind: 'detail', product: selected });
           }}
           categories={categoryFilter.categories ?? null}
+        />
+      )}
+
+      {openDialog?.kind === 'detail' && (
+        <ProductDetailDialog
+          key={openDialog.product.id}
+          product={openDialog.product}
+          categories={categoryFilter.categories ?? null}
+          onClose={() => setOpenDialog(null)}
+          onEditRequested={() => setOpenDialog({ kind: 'edit', product: openDialog.product })}
+          onDeleted={closeAndReload}
+          onStatusChanged={() => void loadProducts()}
+          onRestoreRequested={() => setOpenDialog({ kind: 'restore', product: openDialog.product })}
         />
       )}
 

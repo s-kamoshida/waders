@@ -17,6 +17,7 @@ import type { ProductListItem, ProductResponse } from '../../shared/productContr
 import { CategoryFilterMenu, useCategoryFilter } from '../components/CategoryFilterMenu.tsx';
 import { ProductEditorDialog, type ProductEditorMode, type ProductSavedResult } from '../components/ProductEditorDialog.tsx';
 import { NoticeToast, type Notice } from '../components/NoticeToast.tsx';
+import { ProductDetailDialog } from '../components/ProductDetailDialog.tsx';
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { fetchProducts, moveProductToReleaseMonth } from '../productApiClient.ts';
 import { formatDateInJapan, formatMonthInJapan } from '../productDisplay.ts';
@@ -72,6 +73,8 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
   const [hasLoadError, setHasLoadError] = useState(false);
   const [yearMode, setYearMode] = useState<YearMode>(readStoredYearMode);
   const [editorMode, setEditorMode] = useState<ProductEditorMode | null>(null);
+  /** 詳細画面で開いている商品（issue #52）。 */
+  const [detailProduct, setDetailProduct] = useState<ProductResponse | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   /** カード画像を待って読み直した回数（取りに行っている商品がなくなる・保存すると数え直す）。 */
   const cardImagePollCountRef = useRef(0);
@@ -126,6 +129,24 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
   const openEditor = (mode: ProductEditorMode) => {
     setNotice(null);
     setEditorMode(mode);
+  };
+
+  /** 商品の詳細画面を開く（issue #52）。ほかの操作を始めたので、移動の知らせは閉じる（issue #13）。 */
+  const openDetail = (product: ProductResponse) => {
+    setNotice(null);
+    setDetailProduct(product);
+  };
+
+  /** 詳細画面の「編集」。詳細画面の代わりに編集のモーダルを開く（保存・キャンセルの後は一覧に戻る。issue #52）。 */
+  const switchDetailToEditor = (product: ProductResponse) => {
+    setDetailProduct(null);
+    openEditor({ kind: 'edit', product });
+  };
+
+  /** 詳細画面から削除した。詳細画面を閉じて読み込み直す（issue #52）。 */
+  const handleDeletedFromDetail = () => {
+    setDetailProduct(null);
+    reloadAfterSave();
   };
 
   const changeYearMode = (nextYearMode: YearMode) => {
@@ -229,7 +250,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
           yearGroups={yearGroups}
           formatSummary={formatGroupSummary}
           today={today}
-          onSelect={(selected) => openEditor({ kind: 'edit', product: selected })}
+          onSelect={openDetail}
           onAddToMonth={(month) => openEditor({ kind: 'create', defaultReleaseMonth: month })}
           onMoveProduct={(product, month) => void moveProduct(product, month)}
           categories={categoryFilter.categories ?? null}
@@ -237,6 +258,18 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
       )}
 
       <NoticeToast notice={notice} onExpire={expireNotice} />
+
+      {detailProduct !== null && (
+        <ProductDetailDialog
+          key={detailProduct.id}
+          product={detailProduct}
+          categories={categoryFilter.categories ?? null}
+          onClose={() => setDetailProduct(null)}
+          onEditRequested={() => switchDetailToEditor(detailProduct)}
+          onDeleted={handleDeletedFromDetail}
+          onStatusChanged={reloadAfterSave}
+        />
+      )}
 
       {editorMode !== null && (
         <ProductEditorDialog
