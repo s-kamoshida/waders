@@ -653,6 +653,65 @@ describe('編集で今の画像がある商品の URL を変えた場合（issue
     expect(imageApiRequests(requests)).toEqual([]);
   });
 
+  it('今の画像がカード画像の商品を編集で開いた場合、今の画像を表示し、「画像を消す」ボタンは表示しない', () => {
+    stubFetch();
+    renderEditDialog(createProductWithCurrentImage('card'));
+
+    expect(within(imageField()).getByRole('img', { name: '今の画像' })).toHaveAttribute('src', CURRENT_IMAGE_URL);
+    expect(within(imageField()).queryByRole('button', { name: '画像を消す' })).not.toBeInTheDocument();
+  });
+
+  it('今の画像がアップロードした画像の商品を編集で開いた場合、今の画像と「画像を消す」ボタンを表示する', () => {
+    stubFetch();
+    renderEditDialog(createProductWithCurrentImage('uploaded'));
+
+    expect(within(imageField()).getByRole('img', { name: '今の画像' })).toHaveAttribute('src', CURRENT_IMAGE_URL);
+    expect(within(imageField()).getByRole('button', { name: '画像を消す' })).toBeInTheDocument();
+  });
+
+  it('今の画像がカード画像の商品で URL を変えて新しいプレビューを表示した場合も、「画像を消す」ボタンは表示しない', async () => {
+    stubFetch((url) => (url === OTHER_SHOP_URL ? cardImageReply('OTHER-CARD-DATA') : NO_CARD_IMAGE_REPLY));
+    renderEditDialog(createProductWithCurrentImage('card'));
+
+    await typeUrlAndLeave(OTHER_SHOP_URL);
+    await within(imageField()).findByRole('img', { name: CARD_IMAGE_LABEL });
+
+    expect(within(imageField()).queryByRole('button', { name: '画像を消す' })).not.toBeInTheDocument();
+  });
+
+  it('今の画像がカード画像の商品で画像を選んだ場合、選んだ画像と「画像を消す」ボタンを表示し、押すと今のカード画像の表示に戻り、保存で画像の API を呼ばない', async () => {
+    const { requests } = stubFetch();
+    const onSaved = vi.fn();
+    renderEditDialog(createProductWithCurrentImage('card'), onSaved);
+    await userEvent.upload(screen.getByLabelText('画像'), new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
+    expect(await within(imageField()).findByRole('img', { name: '選んだ画像' })).toBeInTheDocument();
+
+    await userEvent.click(within(imageField()).getByRole('button', { name: '画像を消す' }));
+
+    expect(within(imageField()).queryByRole('img', { name: '選んだ画像' })).not.toBeInTheDocument();
+    expect(within(imageField()).getByRole('img', { name: '今の画像' })).toHaveAttribute('src', CURRENT_IMAGE_URL);
+    expect(within(imageField()).queryByRole('button', { name: '画像を消す' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(imageApiRequests(requests)).toEqual([]);
+  });
+
+  it('今の画像がカード画像の商品で画像を選んで保存した場合、選んだ画像を送る', async () => {
+    const { requests } = stubFetch();
+    const onSaved = vi.fn();
+    renderEditDialog(createProductWithCurrentImage('card'), onSaved);
+    await userEvent.upload(screen.getByLabelText('画像'), new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
+    await within(imageField()).findByRole('img', { name: '選んだ画像' });
+
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(imageApiRequests(requests)).toEqual(['PUT']);
+    expect(requests.find((recorded) => recorded.method === 'PUT' && recorded.path === '/api/products/product-1/image')?.body).toEqual({
+      data: 'PREPARED-photo.jpg',
+    });
+  });
+
   it.each(['uploaded', 'card'] as const)('今の画像の種類が %s で URL を変えない場合、今の画像を表示したままにし、取りに行かない', async (imageKind) => {
     const { previewUrls } = stubFetch();
     renderEditDialog(createProductWithCurrentImage(imageKind));
