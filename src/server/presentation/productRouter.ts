@@ -10,6 +10,7 @@
  *  - POST   /api/products/:productId/restore                リストに戻す（200。issue #9）
  *  - POST   /api/products/:productId/delivery-confirmation  延期の確認への回答（200。issue #9）
  *  - PATCH  /api/products/:productId/release-month          発売月だけを変える（200。ドラッグアンドドロップ。issue #13）
+ *  - PATCH  /api/products/:productId/status                 ステータスだけを変える（200。詳細画面のプルダウン。issue #52）
  *  - PUT    /api/products/:productId/image  画像を付ける・差し替える（本文は { data: base64 }。200。issue #41）
  *  - DELETE /api/products/:productId/image  画像を消す（204。issue #41）
  *  - GET    /api/products/:productId/image  画像の中身（中身から判定した形式の Content-Type。issue #41）
@@ -42,6 +43,7 @@ import {
   productInputSchema,
   releaseMonthChangeRequestSchema,
   restoreRequestSchema,
+  statusChangeRequestSchema,
   type ApiErrorResponse,
   type CardImagePreviewResponse,
   type ProductResponse,
@@ -262,6 +264,12 @@ export function createProductRouter(productService: ProductService): express.Rou
     respondWithProductOperation(response, productService, () =>
       productService.moveProductToReleaseMonth(request.params.productId as ProductId, change.releaseMonth),
     );
+  });
+
+  router.patch('/:productId/status', (request, response) => {
+    const change = parseRequestBody(statusChangeRequestSchema, request.body, response);
+    if (change === undefined) return;
+    respondWithProductOperation(response, productService, () => productService.changeProductStatus(request.params.productId as ProductId, change));
   });
 
   router.post('/:productId/delivery-confirmation', (request, response) => {

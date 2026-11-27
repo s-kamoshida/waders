@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CATEGORY_FILTER_STORAGE_KEY, ProductListPage, YEAR_MODE_STORAGE_KEY } from '../../../client/pages/ProductListPage.tsx';
 import type { ProductResponse } from '../../../shared/productContract.ts';
+import { getFooterButton, getHeaderCloseButton } from '../dialogCloseButtonQueries.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
 /** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
@@ -185,11 +186,12 @@ describe('追加・編集のモーダル', () => {
     expect(within(dialog).getByLabelText('発売月')).toHaveValue('2026-11');
   });
 
-  it('商品を押した場合、その商品の編集のモーダルを開く', async () => {
+  it('商品を押して詳細画面の「編集」を押した場合、その商品の編集のモーダルを開く（issue #52 で詳細画面を挟む）', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '編集する商品' })] } }) });
     render(<ProductListPage currentTime={currentTime} />);
 
     await userEvent.click(await screen.findByRole('button', { name: /編集する商品/ }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('button', { name: '編集' }));
 
     const dialog = screen.getByRole('dialog', { name: '商品を編集' });
     expect(within(dialog).getByLabelText('商品名')).toHaveValue('編集する商品');
@@ -657,7 +659,7 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
   });
 
   it.each([
-    ['商品を押して編集のモーダルを開いた', async () => userEvent.click(screen.getByRole('button', { name: /1月の商品/ }))],
+    ['商品を押して詳細画面を開いた（issue #52）', async () => userEvent.click(screen.getByRole('button', { name: /1月の商品/ }))],
     ['＋ボタンで追加のモーダルを開いた', async () => userEvent.click(screen.getByRole('button', { name: '商品を追加' }))],
     ['月の見出しの＋で追加のモーダルを開いた', async () => userEvent.click(screen.getByRole('button', { name: '2026/12に商品を追加' }))],
     ['年のまとめ方を切り替えた', async () => userEvent.click(screen.getByLabelText('年度'))],
@@ -733,7 +735,7 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
       expect(listMoveRequests(requests)).toEqual([]);
     });
 
-    it('短く触れた場合は、今までどおり編集のモーダルを開く', async () => {
+    it('短く触れた場合は、詳細画面を開く（issue #52 より前は編集のモーダル）', async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       stubMovableRoutes();
       render(<ProductListPage currentTime={currentTime} />);
@@ -747,10 +749,10 @@ describe('ドラッグアンドドロップ（issue #13）', () => {
       fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 50, clientY: 300 });
       fireEvent.click(screen.getByRole('button', { name: /動かす商品/ }));
 
-      expect(screen.getByRole('dialog', { name: '商品を編集' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: '商品の詳細' })).toBeInTheDocument();
     });
 
-    it('長押しで掴んだ後に指を離した場合は、編集のモーダルを開かない', async () => {
+    it('長押しで掴んだ後に指を離した場合は、詳細画面も編集のモーダルも開かない', async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       stubMovableRoutes();
       render(<ProductListPage currentTime={currentTime} />);
@@ -1027,7 +1029,7 @@ describe('スマートフォンの幅でのリスト形式（issue #15）', () =
     expect(within(item).getByText(statusLabel)).toBeInTheDocument();
   });
 
-  it('リスト形式の場合も、商品を押すと編集のモーダルを開く', async () => {
+  it('リスト形式の場合も、商品を押すと詳細画面を開く（issue #52 より前は編集のモーダル）', async () => {
     stubScreenWidth(true);
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '編集する商品' })] } }) });
     render(<ProductListPage currentTime={currentTime} />);
@@ -1035,10 +1037,10 @@ describe('スマートフォンの幅でのリスト形式（issue #15）', () =
 
     await userEvent.click(screen.getByRole('button', { name: /編集する商品/ }));
 
-    expect(screen.getByRole('dialog', { name: '商品を編集' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '商品の詳細' })).toBeInTheDocument();
   });
 
-  it('リスト形式の場合も、購入先のリンクは新しいタブで開き、編集のモーダルは開かない', async () => {
+  it('リスト形式の場合も、購入先のリンクは新しいタブで開き、詳細画面も編集のモーダルも開かない', async () => {
     stubScreenWidth(true);
     stubFetchRoutes({
       'GET /api/products': () => ({ body: { products: [createProduct({ name: 'リンクのある商品', url: 'https://shop.example.jp/item/1' })] } }),
@@ -1224,5 +1226,123 @@ describe('カード画像の取得中の読み直し（issue #42）', () => {
 
     expect(countListRequests(requests)).toBeGreaterThan(1);
     expect(countListRequests(requests)).toBeLessThanOrEqual(16);
+  });
+});
+
+describe('商品の詳細画面（issue #52）', () => {
+  /** 一覧に 1 件の商品を出し、その商品の操作の応答を返すスタブを作る。 */
+  function stubDetailRoutes(extraRoutes: Parameters<typeof stubFetchRoutes>[0] = {}) {
+    const product = createProduct({ id: 'detail-1', name: '詳細を見る商品', status: 'reserved', price: 2500, shippingFee: 660, discount: 500 });
+    let products = [product];
+    const stub = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'PUT /api/products/detail-1': () => ({ body: product }),
+      'PATCH /api/products/detail-1/status': () => {
+        products = [{ ...product, status: 'purchased' }];
+        return { body: products[0] };
+      },
+      'DELETE /api/products/detail-1': () => {
+        products = [];
+        return { status: 204 };
+      },
+      ...extraRoutes,
+    });
+    return { ...stub, countListRequests: () => stub.requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products').length };
+  }
+
+  /** 商品を押して詳細画面を開き、そのモーダルを返す。 */
+  async function openDetail(): Promise<HTMLElement> {
+    await userEvent.click(await screen.findByRole('button', { name: /詳細を見る商品/ }));
+    return screen.getByRole('dialog', { name: '商品の詳細' });
+  }
+
+  it('商品を押した場合、編集のモーダルではなく、その商品の詳細画面を開き、値引き後の最終的な金額と内訳を表示する', async () => {
+    stubDetailRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const detail = await openDetail();
+
+    expect(within(detail).getByRole('heading', { name: '詳細を見る商品' })).toBeInTheDocument();
+    expect(within(detail).getByText('2,660円')).toBeInTheDocument();
+    expect(within(detail).getByText('（2,500円 ＋ 送料 660円 − 値引き 500円）')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '商品を編集' })).not.toBeInTheDocument();
+  });
+
+  it('一覧の商品の詳細画面には、「リストに戻す」を表示しない', async () => {
+    stubDetailRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const detail = await openDetail();
+
+    expect(within(detail).queryByRole('button', { name: 'リストに戻す' })).not.toBeInTheDocument();
+  });
+
+  it('詳細画面の閉じるボタン（×）を押した場合、詳細画面を閉じる', async () => {
+    stubDetailRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const detail = await openDetail();
+    await userEvent.click(getHeaderCloseButton(detail));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('「編集」を押した場合、詳細画面の代わりにその商品の編集のモーダルを開く', async () => {
+    stubDetailRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const detail = await openDetail();
+    await userEvent.click(within(detail).getByRole('button', { name: '編集' }));
+
+    expect(screen.queryByRole('dialog', { name: '商品の詳細' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('dialog', { name: '商品を編集' })).getByLabelText('商品名')).toHaveValue('詳細を見る商品');
+  });
+
+  it('編集のモーダルで保存した場合、一覧に戻り（詳細画面は開かない）、一覧を読み込み直す', async () => {
+    const { countListRequests } = stubDetailRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const detail = await openDetail();
+    await userEvent.click(within(detail).getByRole('button', { name: '編集' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(countListRequests()).toBe(2));
+  });
+
+  it('編集のモーダルでキャンセルした場合、一覧に戻る（詳細画面は開かない）', async () => {
+    stubDetailRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const detail = await openDetail();
+    await userEvent.click(within(detail).getByRole('button', { name: '編集' }));
+    await userEvent.click(getFooterButton(screen.getByRole('dialog', { name: '商品を編集' }), 'キャンセル'));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('詳細画面でステータスを変えた場合、詳細画面は開いたまま、一覧を読み込み直して新しいステータスで表示する', async () => {
+    const { countListRequests } = stubDetailRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const detail = await openDetail();
+    await userEvent.selectOptions(within(detail).getByRole('combobox', { name: 'ステータス' }), '購入済');
+
+    await waitFor(() => expect(countListRequests()).toBe(2));
+    expect(screen.getByRole('dialog', { name: '商品の詳細' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /詳細を見る商品/ }).closest('article')).toHaveClass('product-card--purchased'));
+  });
+
+  it('詳細画面から削除した場合、詳細画面を閉じ、一覧を読み込み直して商品を消す', async () => {
+    const { countListRequests } = stubDetailRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const detail = await openDetail();
+    await userEvent.click(within(detail).getByRole('button', { name: '削除' }));
+    await userEvent.click(screen.getByRole('button', { name: '削除する' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(countListRequests()).toBe(2));
+    expect(screen.queryByRole('button', { name: /詳細を見る商品/ })).not.toBeInTheDocument();
   });
 });

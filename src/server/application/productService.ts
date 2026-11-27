@@ -49,7 +49,7 @@ import {
 import type { CategoryDefinition } from '../infrastructure/categoryDefinitionFile.ts';
 import { createProductImageStorage } from '../infrastructure/productImageStorage.ts';
 import type { ProductRepository } from '../infrastructure/sqliteProductRepository.ts';
-import type { DeliveryConfirmationRequest, ProductImageKind, ProductInput } from '../../shared/productContract.ts';
+import type { DeliveryConfirmationRequest, ProductImageKind, ProductInput, StatusChangeRequest } from '../../shared/productContract.ts';
 
 /** 現在時刻を返す（テストで時刻を固定するため、直接 new Date() を呼ばない）。 */
 export type Clock = { now(): Date };
@@ -141,6 +141,13 @@ export type ProductService = {
    * @throws {RestoreReleaseMonthInPastError} 新しい発売月が当月より前の場合
    */
   moveProductToReleaseMonth(productId: ProductId, releaseMonth: string): Product;
+  /**
+   * ステータスだけを変える（詳細画面のプルダウン。issue #52、BR-37）。アーカイブされた商品も変えられる。
+   * キャンセル可否は指定したときだけ変える。ステータスもキャンセル可否も今と同じなら、何もせずに今の商品を返す（履歴も記録しない）。
+   * 変更は利用者の操作として変更履歴に記録する（ステータスが変わった場合）。
+   * @throws {ProductNotFoundError} 商品が存在しない場合
+   */
+  changeProductStatus(productId: ProductId, change: StatusChangeRequest): Product;
   /**
    * 延期の確認に回答し、回答を反映した商品を返す。延期の確認待ちを外す。
    * @throws {ProductNotFoundError} 商品が存在しない場合
@@ -476,6 +483,13 @@ export function createProductService(dependencies: ProductServiceDependencies): 
       if (releaseMonth === current.releaseMonth) return current;
       if (isProductArchived({ releaseMonth }, currentTime)) throw new RestoreReleaseMonthInPastError(releaseMonth);
       return updateByUser(current, { releaseMonth }, currentTime);
+    },
+
+    changeProductStatus(productId, change) {
+      const current = findProductOrThrow(productId);
+      const cancelable = change.cancelable ?? current.cancelable;
+      if (change.status === current.status && cancelable === current.cancelable) return current;
+      return updateByUser(current, { status: change.status, cancelable }, clock.now());
     },
 
     answerDeliveryConfirmation(productId, answer) {

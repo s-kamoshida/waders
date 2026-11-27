@@ -220,3 +220,56 @@ export function determineVisibleCategoryFields(
 export function resolveOtherExpenseLabel(categories: readonly CategoryResponse[] | null, categoryId: string | null): string {
   return categories?.find((candidate) => candidate.id === categoryId)?.otherExpenseLabel ?? DEFAULT_OTHER_EXPENSE_LABEL;
 }
+
+/** 曜日の表記（日曜から）。 */
+const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'] as const;
+
+/** 発売月（YYYY-MM）を「2026/12」の形にする（詳細画面。issue #52）。 */
+export function formatReleaseMonthLabel(releaseMonth: string): string {
+  return releaseMonth.replace('-', '/');
+}
+
+/** 日付（YYYY-MM-DD）を「2026/11/30」の形にする（詳細画面の受注期限。issue #52）。 */
+export function formatFullDate(date: string): string {
+  return date.replaceAll('-', '/');
+}
+
+/** UTC の日時（ISO 8601）を、日本時間で「2027/01/24（日）17:00」の形にする（詳細画面の開催日時・終了日時。issue #52）。 */
+export function formatJapanDateTimeWithWeekday(utcDateTime: string): string {
+  const parts = convertToJapanDateTimeParts(utcDateTime);
+  const weekday = WEEKDAY_LABELS[new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay()] ?? '';
+  const date = `${parts.year}/${String(parts.month).padStart(2, '0')}/${String(parts.day).padStart(2, '0')}`;
+  return `${date}（${weekday}）${formatClockTime(parts)}`;
+}
+
+/** 詳細画面の金額の表示。 */
+export type ProductAmountDescription = {
+  /** 最終的な金額（「2,660円」）。 */
+  readonly total: string;
+  /** 内訳（「（2,500円 ＋ 送料 660円 − 値引き 500円）」）。費用も値引きもなければ null。 */
+  readonly breakdown: string | null;
+};
+
+/**
+ * 詳細画面の金額を求める（issue #52）。最終的な金額は、金額＋送料・手数料・交通費（見込）・その他費用 − 値引き（0円未満にはしない）。
+ * 値がない・0円の費用と値引きは内訳に出さない。
+ * @param otherExpenseLabel その他費用の名前（カテゴリーで決めた名前）
+ * @returns 金額が未入力なら null
+ */
+export function describeProductAmount(product: ProductResponse, otherExpenseLabel: string): ProductAmountDescription | null {
+  if (product.price === null) return null;
+  const costs: [string, number | null][] = [
+    ['送料', product.shippingFee],
+    ['手数料', product.handlingFee],
+    ['交通費（見込）', product.travelExpense],
+    [otherExpenseLabel, product.otherExpense],
+  ];
+  const presentCosts = costs.flatMap(([label, amount]) => (amount === null || amount === 0 ? [] : [{ label, amount }]));
+  const discount = product.discount ?? 0;
+  const costTotal = presentCosts.reduce((total, cost) => total + cost.amount, product.price);
+  const total = formatYen(Math.max(0, costTotal - discount));
+  if (presentCosts.length === 0 && discount === 0) return { total, breakdown: null };
+  const costParts = presentCosts.map((cost) => ` ＋ ${cost.label} ${formatYen(cost.amount)}`).join('');
+  const discountPart = discount === 0 ? '' : ` − 値引き ${formatYen(discount)}`;
+  return { total, breakdown: `（${formatYen(product.price)}${costParts}${discountPart}）` };
+}

@@ -291,6 +291,15 @@ export const restoreRequestSchema = z.object({ releaseMonth: releaseMonthSchema 
 /** 発売月だけを変える（PATCH /api/products/:productId/release-month。ドラッグアンドドロップ。issue #13）の本文のスキーマ。 */
 export const releaseMonthChangeRequestSchema = z.object({ releaseMonth: releaseMonthSchema });
 
+/**
+ * ステータスだけを変える（PATCH /api/products/:productId/status。詳細画面のプルダウン。issue #52）の本文のスキーマ。
+ * cancelable は「予約済」「予約済（キャンセル可）」を選んだときだけ送り、省いた場合は今のキャンセル可否を変えない。
+ */
+export const statusChangeRequestSchema = z.object({ status: productStatusSchema, cancelable: z.boolean().optional() });
+
+/** ステータスだけを変えるの本文。 */
+export type StatusChangeRequest = z.infer<typeof statusChangeRequestSchema>;
+
 /** リストに戻すの本文。 */
 export type RestoreRequest = z.infer<typeof restoreRequestSchema>;
 

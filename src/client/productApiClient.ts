@@ -17,6 +17,7 @@ import {
   type ProductInput,
   type ProductListItem,
   type ProductResponse,
+  type StatusChangeRequest,
 } from '../shared/productContract.ts';
 import {
   categoryListResponseSchema,
@@ -147,6 +148,11 @@ export async function moveProductToReleaseMonth(productId: string, releaseMonth:
   return productSchema.parse(
     await sendApiRequest('PATCH', `/api/products/${encodeURIComponent(productId)}/release-month`, { releaseMonth }),
   );
+}
+
+/** ステータスだけを変える（詳細画面のプルダウン。issue #52）。 */
+export async function changeProductStatus(productId: string, change: StatusChangeRequest): Promise<ProductResponse> {
+  return productSchema.parse(await sendApiRequest('PATCH', `/api/products/${encodeURIComponent(productId)}/status`, change));
 }
 
 /** カテゴリーの API のパス（ID は URL に使えるよう符号化する）。 */

@@ -569,6 +569,171 @@ textarea {
   flex: 1;
 }
 
+/*
+ * 商品の詳細画面（SCR-09。issue #52）。
+ * 画像はモーダルの幅いっぱいに、切らずに収める（本文の余白の分だけ外に広げる）。金額は最終的な金額を大きく、内訳を添える
+ */
+.detail-media {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  width: calc(100% + 36px);
+  max-width: none;
+  aspect-ratio: 4 / 3;
+  margin: -14px -18px 0;
+  background: #eceef1;
+  color: #a3aab2;
+}
+
+/* 画像は枠に重ねて置き、切らずに収める（大きな画像で枠が広がらないように。カードの画像と同じ） */
+.detail-image {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.detail-placeholder {
+  width: 72px;
+  height: 72px;
+}
+
+.detail-heading {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.detail-status {
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.detail-status--considering {
+  background: var(--considering-line);
+}
+
+.detail-status--reserved {
+  background: #57606a;
+}
+
+.detail-status--cancelable {
+  background: var(--cancelable-line);
+}
+
+.detail-status--purchased {
+  background: var(--purchased-line);
+}
+
+.detail-status--unpurchased {
+  background: #ffffff;
+  color: var(--unpurchased-line);
+  border: 1px solid var(--unpurchased-line);
+}
+
+.detail-maker {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detail-name {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.detail-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--background);
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-total {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.detail-breakdown {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.detail-status-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-status-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.detail-status-field select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--text);
+}
+
+.detail-list {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 7.5em minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-row dt {
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.detail-row dd {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.detail-empty {
+  color: #a3aab2;
+}
+
+.detail-link {
+  color: var(--accent);
+}
+
+/* 備考は入力した改行を保つ */
+.detail-note {
+  white-space: pre-wrap;
+}
+
 .dialog-error {
   margin: 0;
   background: #fdecee;
