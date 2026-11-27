@@ -545,7 +545,7 @@ textarea {
   justify-self: start;
 }
 
-/* 画像の貼り付け欄（issue #45）。文字は入れさせず、空のときに案内を表示する */
+/* 画像の貼り付け欄（issue #45）。文字は入れさせず、空のときに案内（aria-placeholder。issue #47）を表示する */
 .product-image-paste-area {
   min-height: 44px;
   padding: 10px 12px;
@@ -561,7 +561,7 @@ textarea {
 }
 
 .product-image-paste-area:empty::before {
-  content: attr(data-placeholder);
+  content: attr(aria-placeholder);
 }
 
 .product-image-paste-area[aria-invalid="true"] {
@@ -790,11 +790,13 @@ textarea {
 /*
  * iOS Safari は文字が 16px 未満の入力欄をタップすると画面を拡大するため、スマートフォン・タッチ操作の端末では 16px にする。
  * 画面全体のズームは禁止しない（指での拡大はできるまま）（issue #16）
+ * 画像の貼り付け欄は編集できる要素（contenteditable）で、同じく拡大されるため含める（issue #47）
  */
 @media (max-width: 600px), (pointer: coarse) {
   input,
   select,
-  textarea {
+  textarea,
+  .product-image-paste-area {
     font-size: 16px;
   }
 }

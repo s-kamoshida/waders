@@ -1637,3 +1637,12 @@ describe('クリップボードの画像の貼り付け（issue #45）', () => {
     expect(requests[1]?.body).toEqual({ data: 'PREPARED-image.png' });
   });
 });
+
+describe('画像の貼り付け欄の案内（issue #47）', () => {
+  it('貼り付け欄に、「タップ/選択してから画像を貼り付け」と案内を表示する（入力欄の案内として読み上げられる）', () => {
+    stubFetchRoutes({});
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    expect(screen.getByRole('textbox', { name: '画像の貼り付け欄' })).toHaveAttribute('aria-placeholder', 'タップ/選択してから画像を貼り付け');
+  });
+});

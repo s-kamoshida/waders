@@ -17,6 +17,8 @@ export const SCREEN_MESSAGES = {
   productImageLoadFailed: '画像を読み込めませんでした。別の画像を選んでください。',
   /** 貼り付け欄に画像以外を貼り付けた場合の文言（issue #45）。 */
   productImageClipboardEmpty: 'クリップボードに画像がありません。',
+  /** 画像の貼り付け欄の案内（空のときに表示する）（issue #47）。 */
+  productImagePasteAreaHint: 'タップ/選択してから画像を貼り付け',
   productImageSaveFailed: '商品は保存しましたが、画像を保存できませんでした。',
   /** 「保存して続けて追加」で保存し、画像を保存できなかった場合。 */
   productAddedWithoutImage: (productName: string) => `「${productName}」を追加しましたが、画像を保存できませんでした。`,
