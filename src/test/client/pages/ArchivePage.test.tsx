@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArchivePage } from '../../../client/pages/ArchivePage.tsx';
-import { CATEGORY_FILTER_STORAGE_KEY, YEAR_MODE_STORAGE_KEY } from '../../../client/pages/ProductListPage.tsx';
+import { CATEGORY_FILTER_STORAGE_KEY } from '../../../client/pages/ProductListPage.tsx';
 import type { ProductListItem } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
@@ -17,6 +17,12 @@ vi.mock('../../../client/productImagePreparation.ts', () => ({
   prepareProductImage: vi.fn(async () => ({ data: 'PREPARED', width: 800, height: 600 })),
   drawProductImagePreview: vi.fn(),
 }));
+
+/**
+ * 以前（issue #8〜#58）に暦年・年度の選択を覚えていた、ブラウザの保存領域のキー。
+ * issue #58 で切り替えをなくした後も、古い端末にはこの値が残っているため、実装の定数ではなく値そのものを使う。
+ */
+const LEGACY_YEAR_MODE_STORAGE_KEY = 'waders.yearMode';
 
 /** 日本時間 2026-11-17 12:00。 */
 const currentTime = new Date('2026-11-17T03:00:00.000Z');
@@ -94,13 +100,38 @@ describe('アーカイブの表示', () => {
     expect(await screen.findByText('アーカイブされた商品はありません')).toBeInTheDocument();
   });
 
-  it('リストで選んだ年のまとめ方（年度）を使う', async () => {
-    localStorage.setItem(YEAR_MODE_STORAGE_KEY, 'fiscal');
-    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ releaseMonth: '2026-03' })] } }) });
+  it('年をまたぐ商品がある場合、1 月〜12 月の暦年でまとめ、「2026年」「2025年」と表記する（issue #58）', async () => {
+    const products = [
+      createProduct({ releaseMonth: '2026-04', price: 30000 }),
+      createProduct({ releaseMonth: '2026-03', price: 20000, shippingFee: 500 }),
+      createProduct({ releaseMonth: '2025-12', price: 10000 }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
 
     render(<ArchivePage currentTime={currentTime} />);
 
-    expect(await screen.findByRole('button', { name: /^FY25/ })).toBeInTheDocument();
+    await screen.findByRole('region', { name: '2026/04' });
+    expect(screen.getByRole('button', { name: /^2026年/ })).toHaveTextContent('2個（合計 50,500円）');
+    expect(screen.getByRole('button', { name: /^2025年/ })).toHaveTextContent('1個（合計 10,000円）');
+    expect(screen.queryByRole('button', { name: /^FY/ })).not.toBeInTheDocument();
+  });
+
+  it('端末に年度（fiscal）を選んだ記録が残っている場合も、年の見出しを暦年で表示し、個数と合計金額は暦年で数える（issue #58）', async () => {
+    localStorage.setItem(LEGACY_YEAR_MODE_STORAGE_KEY, 'fiscal');
+    const products = [
+      createProduct({ releaseMonth: '2026-04', price: 30000 }),
+      createProduct({ releaseMonth: '2026-03', price: 20000, shippingFee: 500 }),
+      createProduct({ releaseMonth: '2025-12', price: 10000 }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ArchivePage currentTime={currentTime} />);
+
+    await screen.findByRole('region', { name: '2026/04' });
+    expect(screen.getByRole('button', { name: /^2026年/ })).toHaveTextContent('2個（合計 50,500円）');
+    expect(screen.getByRole('button', { name: /^2025年/ })).toHaveTextContent('1個（合計 10,000円）');
+    expect(screen.queryByRole('button', { name: /^FY/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^2026\/03/ })).toHaveTextContent('1個（合計 20,500円）');
   });
 
   it('月の見出しに追加ボタンを表示しない（issue #16）', async () => {

@@ -8,8 +8,11 @@ import type { CategoryResponse } from '../shared/categoryContract.ts';
 import { sumProductCostsYen, type ProductResponse } from '../shared/productContract.ts';
 import { formatYen } from './productDisplay.ts';
 
-/** 年のまとめ方。calendar は暦年（1月〜12月）、fiscal は年度（4月〜翌3月）。 */
-export type YearMode = 'calendar' | 'fiscal';
+/**
+ * 年のまとめ方。暦年（1月〜12月）だけにした（issue #58。以前の年度 fiscal は廃止）。
+ * 以前の呼び出し方（`yearMode: 'calendar'`）をそのまま受け付けるために残している。値は年のまとめ方に影響しない。
+ */
+export type YearMode = 'calendar';
 
 /**
  * 見出しの集計。未購入を除いた個数と、金額・送料・手数料・交通費（見込）・その他費用の合計から値引きを引いた額
@@ -31,7 +34,7 @@ export type MonthGroup = {
 /** 年のグループ。 */
 export type YearGroup = {
   readonly key: string;
-  /** 表記（例: 2026年、FY26）。 */
+  /** 表記（例: 2026年）。 */
   readonly label: string;
   readonly months: readonly MonthGroup[];
   readonly summary: GroupSummary;
@@ -79,12 +82,10 @@ function summarizeProducts(products: readonly ProductResponse[]): GroupSummary {
   return { count: countedProducts.length, totalYen };
 }
 
-/** 年月が属する年のグループのキーと表記を求める。 */
-function identifyYear(month: string, yearMode: YearMode): { key: string; label: string } {
-  const [year = 0, monthNumber = 1] = month.split('-').map(Number);
-  if (yearMode === 'calendar') return { key: String(year), label: `${year}年` };
-  const fiscalYear = monthNumber >= 4 ? year : year - 1;
-  return { key: `FY${fiscalYear}`, label: `FY${String(fiscalYear).slice(-2)}` };
+/** 年月が属する暦年のグループのキーと表記（例: 2026年）を求める（issue #58）。 */
+function identifyYear(month: string): { key: string; label: string } {
+  const [year = 0] = month.split('-').map(Number);
+  return { key: String(year), label: `${year}年` };
 }
 
 /** 月のグループを作る。商品はその月のものに絞り、並び替える。 */
@@ -95,11 +96,11 @@ function buildMonthGroup(month: string, products: readonly ProductResponse[]): M
   return { month, label: month.replace('-', '/'), products: monthProducts, summary: summarizeProducts(monthProducts) };
 }
 
-/** 並べ終えた月のグループを、続いている同じ年ごとにまとめる。 */
-function groupMonthsByYear(monthGroups: readonly MonthGroup[], yearMode: YearMode): YearGroup[] {
+/** 並べ終えた月のグループを、続いている同じ暦年ごとにまとめる。 */
+function groupMonthsByYear(monthGroups: readonly MonthGroup[]): YearGroup[] {
   const yearGroups: { key: string; label: string; months: MonthGroup[] }[] = [];
   for (const monthGroup of monthGroups) {
-    const year = identifyYear(monthGroup.month, yearMode);
+    const year = identifyYear(monthGroup.month);
     const lastYearGroup = yearGroups.at(-1);
     if (lastYearGroup?.key === year.key) {
       lastYearGroup.months.push(monthGroup);
@@ -114,16 +115,16 @@ function groupMonthsByYear(monthGroups: readonly MonthGroup[], yearMode: YearMod
 }
 
 /**
- * 商品の一覧（リスト）を、年・月のグループに組み立てる。月は古い順で、商品のない月も含める。
+ * 商品の一覧（リスト）を、暦年・月のグループに組み立てる。月は古い順で、商品のない月も含める。
  * @param products 商品（順不同）
- * @param options currentMonth は日本時間の当月（YYYY-MM）、yearMode は年のまとめ方
+ * @param options currentMonth は日本時間の当月（YYYY-MM）。yearMode は省略してよく、指定しても暦年でまとめる（issue #58）
  */
 export function buildProductListGroups(
   products: readonly ProductResponse[],
-  options: { readonly currentMonth: string; readonly yearMode: YearMode },
+  options: { readonly currentMonth: string; readonly yearMode?: YearMode },
 ): YearGroup[] {
   const monthGroups = listMonthsToShow(products, options.currentMonth).map((month) => buildMonthGroup(month, products));
-  return groupMonthsByYear(monthGroups, options.yearMode);
+  return groupMonthsByYear(monthGroups);
 }
 
 /**
@@ -141,15 +142,13 @@ export function splitProductsByArchive<Item extends ProductResponse>(
 }
 
 /**
- * アーカイブの商品を、年・月のグループに組み立てる（issue #9）。月は新しい順で、商品のある月だけを含める。
+ * アーカイブの商品を、暦年・月のグループに組み立てる（issue #9）。月は新しい順で、商品のある月だけを含める。
  * 同じ月の中の並び順と集計は、リストと同じ規則にする。
+ * @param _options 以前の呼び出し方のために受け付ける。省略してよく、yearMode を指定しても暦年でまとめる（issue #58）
  */
-export function buildArchiveGroups(products: readonly ProductResponse[], options: { readonly yearMode: YearMode }): YearGroup[] {
+export function buildArchiveGroups(products: readonly ProductResponse[], _options: { readonly yearMode?: YearMode } = {}): YearGroup[] {
   const months = [...new Set(products.map((product) => product.releaseMonth))].sort().reverse();
-  return groupMonthsByYear(
-    months.map((month) => buildMonthGroup(month, products)),
-    options.yearMode,
-  );
+  return groupMonthsByYear(months.map((month) => buildMonthGroup(month, products)));
 }
 
 /** リストの見出しの集計を「3個（合計 44,000円見込）」の形にする。 */
