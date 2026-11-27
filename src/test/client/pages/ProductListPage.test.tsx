@@ -1346,3 +1346,67 @@ describe('商品の詳細画面（issue #52）', () => {
     expect(screen.queryByRole('button', { name: /詳細を見る商品/ })).not.toBeInTheDocument();
   });
 });
+
+describe('ステータス「キャンセル」の商品（issue #57）', () => {
+  /** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+  const CANCELED_STATUS = 'canceled' as string as ProductResponse['status'];
+
+  it('キャンセルの商品は、発売月が当月以降でもリストに表示せず、見出しの個数と合計金額にも含めない', async () => {
+    const products = [
+      createProduct({ name: '予約済の商品', releaseMonth: '2026-11', status: 'reserved', price: 13200 }),
+      createProduct({ name: '今月のキャンセルした商品', releaseMonth: '2026-11', status: CANCELED_STATUS, price: 9800 }),
+      createProduct({ name: '来年のキャンセルした商品', releaseMonth: '2027-01', status: CANCELED_STATUS, price: 5000 }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ProductListPage currentTime={currentTime} />);
+
+    expect(await screen.findByText('予約済の商品')).toBeInTheDocument();
+    expect(screen.queryByText('今月のキャンセルした商品')).not.toBeInTheDocument();
+    expect(screen.queryByText('来年のキャンセルした商品')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^2026\/11/ })).toHaveTextContent('1個（合計 13,200円見込）');
+    expect(screen.queryByRole('region', { name: '2027/01' })).not.toBeInTheDocument();
+  });
+
+  /** 一覧の商品と、ステータスの変更・編集の API を用意する。変えた後の一覧はキャンセルの商品を返す。 */
+  function stubCancelRoutes() {
+    const product = createProduct({ id: 'cancel-1', name: 'キャンセルする商品', releaseMonth: '2026-12', status: 'reserved', price: 5000 });
+    let products = [product];
+    const cancel = () => {
+      products = [{ ...product, status: CANCELED_STATUS }];
+      return { body: products[0] };
+    };
+    const stub = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'PATCH /api/products/cancel-1/status': cancel,
+      'PUT /api/products/cancel-1': cancel,
+    });
+    return { ...stub, countListRequests: () => stub.requests.filter((recorded) => recorded.method === 'GET' && recorded.path === '/api/products').length };
+  }
+
+  it('詳細画面で「キャンセル」を選んだ場合、{ status: canceled } を送り、一覧を読み込み直して、リストから消す', async () => {
+    const { requests, countListRequests } = stubCancelRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /キャンセルする商品/ }));
+    await userEvent.selectOptions(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('combobox', { name: 'ステータス' }), 'キャンセル');
+
+    await waitFor(() => expect(countListRequests()).toBe(2));
+    expect(requests.find((recorded) => recorded.method === 'PATCH')).toMatchObject({ path: '/api/products/cancel-1/status', body: { status: 'canceled' } });
+    await waitFor(() => expect(within(screen.getByRole('region', { name: '2026/12' })).queryByText('キャンセルする商品')).not.toBeInTheDocument());
+  });
+
+  it('編集のモーダルで「キャンセル」を選んで保存した場合、一覧を読み込み直して、リストから消す', async () => {
+    const { requests, countListRequests } = stubCancelRoutes();
+    render(<ProductListPage currentTime={currentTime} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /キャンセルする商品/ }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('button', { name: '編集' }));
+    await userEvent.selectOptions(within(screen.getByRole('dialog', { name: '商品を編集' })).getByLabelText('ステータス'), 'キャンセル');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(countListRequests()).toBe(2));
+    expect(requests.find((recorded) => recorded.method === 'PUT')).toMatchObject({ path: '/api/products/cancel-1', body: expect.objectContaining({ status: 'canceled' }) });
+    await waitFor(() => expect(screen.queryByText('キャンセルする商品')).not.toBeInTheDocument());
+  });
+});

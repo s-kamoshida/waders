@@ -372,8 +372,8 @@ describe('スキーマの移行（版数 1 から）', () => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
-  it('最新のスキーマの版数は 9 である（issue #50）', () => {
-    expect(LATEST_SCHEMA_VERSION).toBe(9);
+  it('最新のスキーマの版数は 10 である（issue #57）', () => {
+    expect(LATEST_SCHEMA_VERSION).toBe(10);
   });
 
   it('版数 1 の DB を開いた場合、最新の版数に移行し、既存の商品と履歴を保ち、確認待ちは空、メーカーと備考は未入力になる', () => {
@@ -941,14 +941,14 @@ describe('スキーマの移行（版数 8 → 9。issue #50）', () => {
     return { databaseFilePath, product };
   }
 
-  it('版数 8 の DB を開いた場合、版数 9 に移行し、既存の商品のすべての項目を保ち、値引きは null（値引きなし）になる', () => {
+  it('版数 8 の DB を開いた場合、最新の版数に移行し、既存の商品のすべての項目を保ち、値引きは null（値引きなし）になる', () => {
     const { databaseFilePath, product } = prepareVersionEightDatabase();
 
     const migratedDatabase = openProductDatabase(databaseFilePath);
     const migratedRepository = createSqliteProductRepository(migratedDatabase);
 
     const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
-    expect(version.user_version).toBe(9);
+    expect(version.user_version).toBe(LATEST_SCHEMA_VERSION);
     expect(migratedRepository.findProductById(product.id)).toEqual(product);
     expect(migratedRepository.findProductById(product.id)).toMatchObject({ discount: null });
     expect(migratedRepository.listProductHistory(product.id)).toHaveLength(2);
@@ -964,6 +964,168 @@ describe('スキーマの移行（版数 8 → 9。issue #50）', () => {
     expect(() => setDiscount(10_000_000)).toThrow(/CHECK constraint failed/);
     setDiscount(9_999_999);
     expect(createSqliteProductRepository(migratedDatabase).findProductById(product.id)).toMatchObject({ discount: 9_999_999 });
+    migratedDatabase.close();
+  });
+});
+
+describe('ステータス「キャンセル」とスキーマの移行（版数 9 → 10。issue #57）', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), 'waders-migration-'));
+  });
+
+  afterEach(() => {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  /** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+  const CANCELED_STATUS = 'canceled' as string as Product['status'];
+  const uploadedImageFileName = '0b6c2d0e-3f0a-4c55-9a8e-2f1d6c7b8a90.jpg';
+  const cardImageFileName = '5d1e7a2c-8b3f-4e6a-9c0d-1f2e3a4b5c6d.png';
+
+  /** 版数 9 の DB の商品（4 つのステータス）。値引き・カテゴリー・画像・延期の確認待ち・登録後の変更履歴も持つ。 */
+  const versionNineProducts = [
+    createProduct({ id: 'considering-1' as ProductId, status: 'considering', cancelable: false, discount: 500 }),
+    createProduct({ id: 'reserved-1' as ProductId, status: 'reserved', cancelable: true }),
+    createProduct({ id: 'purchased-1' as ProductId, status: 'purchased', categoryId: null, categoryName: null, ...FIELDS_ADDED_IN_VERSION_SIX }),
+    createProduct({ id: 'unpurchased-1' as ProductId, status: 'unpurchased', maker: null, note: null, price: null }),
+  ];
+
+  /** 版数 9 の DB を作り、商品・画像のファイルの名前・延期の確認待ち・変更履歴を書き込み、ファイルの場所を返す。 */
+  function prepareVersionNineDatabase(): string {
+    const databaseFilePath = join(temporaryDirectory, 'waders.sqlite');
+    const versionNineDatabase = new DatabaseSync(databaseFilePath);
+    versionNineDatabase.exec('PRAGMA foreign_keys = ON');
+    for (const migration of SCHEMA_MIGRATIONS.slice(0, 9)) versionNineDatabase.exec(migration);
+    versionNineDatabase.exec('PRAGMA user_version = 9');
+    const versionNineRepository = createSqliteProductRepository(versionNineDatabase);
+    for (const product of versionNineProducts) versionNineRepository.insertProduct(product);
+    versionNineRepository.setUploadedImageFileName('considering-1' as ProductId, uploadedImageFileName);
+    versionNineRepository.setCardImageFileName('reserved-1' as ProductId, cardImageFileName);
+    versionNineRepository.markDeliveryConfirmationPending('purchased-1' as ProductId);
+    const purchased = versionNineProducts[2];
+    if (purchased === undefined) throw new Error('購入済の商品がない');
+    versionNineRepository.updateProduct(
+      { ...purchased, status: 'purchased', releaseMonth: '2026-10', updatedAt: '2026-11-18T00:00:00.000Z' },
+      { changedAt: '2026-11-18T00:00:00.000Z', changeKind: 'automatic' },
+    );
+    versionNineDatabase.close();
+    return databaseFilePath;
+  }
+
+  /** 版数 9 の DB の商品（発売月を変えた購入済の商品を反映したもの）。 */
+  function listExpectedProducts(): Product[] {
+    return versionNineProducts.map((product) =>
+      product.id === 'purchased-1' ? { ...product, releaseMonth: '2026-10', updatedAt: '2026-11-18T00:00:00.000Z' } : product,
+    );
+  }
+
+  it('最初の移行（版数 1）のステータスの制約は、キャンセルを加える前の 4 つのままにする（古い移行の SQL を変えない）', () => {
+    expect(SCHEMA_MIGRATIONS[0]).toContain("status TEXT NOT NULL CHECK (status IN ('considering', 'reserved', 'purchased', 'unpurchased'))");
+  });
+
+  it('版数 9 の DB を開いた場合、版数 10 に移行し、既存の商品のすべての項目・画像のファイルの名前・延期の確認待ち・変更履歴を保つ', () => {
+    const databaseFilePath = prepareVersionNineDatabase();
+    const beforeDatabase = new DatabaseSync(databaseFilePath);
+    const beforeRepository = createSqliteProductRepository(beforeDatabase);
+    const historiesBefore = versionNineProducts.map((product) => beforeRepository.listProductHistory(product.id));
+    beforeDatabase.close();
+
+    const migratedDatabase = openProductDatabase(databaseFilePath);
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    const version = migratedDatabase.prepare('PRAGMA user_version').get() as { user_version: number };
+    expect(version.user_version).toBe(10);
+    expect(migratedRepository.listProducts()).toEqual(listExpectedProducts());
+    expect(versionNineProducts.map((product) => migratedRepository.listProductHistory(product.id))).toEqual(historiesBefore);
+    expect(migratedRepository.listProductHistory('purchased-1' as ProductId).at(-1)).toMatchObject({
+      changeKind: 'automatic',
+      field: 'releaseMonth',
+      valueBefore: '2026-12',
+      valueAfter: '2026-10',
+    });
+    expect(migratedRepository.findUploadedImageFileName('considering-1' as ProductId)).toBe(uploadedImageFileName);
+    expect(migratedRepository.findCardImageFileName('reserved-1' as ProductId)).toBe(cardImageFileName);
+    expect(migratedRepository.listDeliveryConfirmationPendingProductIds()).toEqual(['purchased-1']);
+    migratedDatabase.close();
+  });
+
+  it('版数 10 に移行した後は、キャンセルの商品を登録でき、ほかのステータスからキャンセルに変えて履歴に記録できる', () => {
+    const migratedDatabase = openProductDatabase(prepareVersionNineDatabase());
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+    const canceledProduct = createProduct({ id: 'canceled-1' as ProductId, status: CANCELED_STATUS });
+    const reserved = migratedRepository.findProductById('reserved-1' as ProductId);
+    if (reserved === undefined) throw new Error('予約済の商品がない');
+
+    migratedRepository.insertProduct(canceledProduct);
+    migratedRepository.updateProduct(
+      { ...reserved, status: CANCELED_STATUS, updatedAt: '2026-11-19T00:00:00.000Z' },
+      { changedAt: '2026-11-19T00:00:00.000Z', changeKind: 'user' },
+    );
+
+    expect(migratedRepository.findProductById(canceledProduct.id)).toEqual(canceledProduct);
+    expect(migratedRepository.findProductById('reserved-1' as ProductId)?.status).toBe('canceled');
+    expect(migratedRepository.listProductHistory('reserved-1' as ProductId).at(-1)).toEqual({
+      changedAt: '2026-11-19T00:00:00.000Z',
+      changeKind: 'user',
+      field: 'status',
+      valueBefore: 'reserved',
+      valueAfter: 'canceled',
+    });
+    migratedDatabase.close();
+  });
+
+  it('新しい DB でも、キャンセルの商品を登録できる', () => {
+    const canceledProduct = createProduct({ status: CANCELED_STATUS });
+
+    repository.insertProduct(canceledProduct);
+
+    expect(repository.findProductById(canceledProduct.id)).toEqual(canceledProduct);
+  });
+
+  it.each(['cancelled', 'Canceled', ''])('版数 10 に移行した後も、ステータスの一覧にない値（%s）は DB が拒否する（CHECK 制約）', (status) => {
+    const migratedDatabase = openProductDatabase(prepareVersionNineDatabase());
+
+    expect(() => migratedDatabase.prepare("UPDATE products SET status = ? WHERE id = 'reserved-1'").run(status)).toThrow(/CHECK constraint failed/);
+    migratedDatabase.close();
+  });
+
+  it('版数 10 に移行した後も、ステータス以外の項目の制約（CHECK・型・カテゴリーの組）を DB が確かめる', () => {
+    const migratedDatabase = openProductDatabase(prepareVersionNineDatabase());
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+    const insertInvalid = (overrides: Record<string, unknown>) => () =>
+      migratedRepository.insertProduct({ ...createProduct({ id: 'invalid-1' as ProductId }), ...overrides } as Product);
+
+    expect(insertInvalid({ name: '' })).toThrow(/CHECK constraint failed/);
+    expect(insertInvalid({ releaseMonth: '2026-13' })).toThrow(/CHECK constraint failed/);
+    expect(insertInvalid({ price: 10_000_000 })).toThrow(/CHECK constraint failed/);
+    expect(insertInvalid({ discount: -1 })).toThrow(/CHECK constraint failed/);
+    expect(insertInvalid({ eventStartsAt: '2026-12-20T09:00:00.000Z', eventEndsAt: '2026-12-20T08:00:00.000Z' })).toThrow(/CHECK constraint failed/);
+    expect(insertInvalid({ price: '二万円' })).toThrow(/cannot store TEXT value in INTEGER column/);
+    expect(insertInvalid({ categoryId: 'scale', categoryName: null })).toThrow(/category_id と category/);
+    expect(() => migratedRepository.setUploadedImageFileName('reserved-1' as ProductId, '../outside.jpg')).toThrow(/CHECK constraint failed/);
+    expect(migratedRepository.findProductById('invalid-1' as ProductId)).toBeUndefined();
+    migratedDatabase.close();
+  });
+
+  it('版数 10 に移行した後も、商品を削除すると変更履歴と延期の確認待ちも消える（外部キーを保つ）', () => {
+    const migratedDatabase = openProductDatabase(prepareVersionNineDatabase());
+    const migratedRepository = createSqliteProductRepository(migratedDatabase);
+
+    expect(migratedDatabase.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    expect(migratedRepository.deleteProduct('purchased-1' as ProductId)).toBe(true);
+
+    expect(migratedRepository.listProductHistory('purchased-1' as ProductId)).toEqual([]);
+    expect(migratedRepository.listDeliveryConfirmationPendingProductIds()).toEqual([]);
+    expect(() =>
+      migratedDatabase
+        .prepare(
+          `INSERT INTO product_history (product_id, changed_at, change_kind, field, value_before, value_after)
+           VALUES ('missing', '2026-11-19T00:00:00.000Z', 'user', 'status', NULL, 'considering')`,
+        )
+        .run(),
+    ).toThrow(/FOREIGN KEY constraint failed/);
     migratedDatabase.close();
   });
 });

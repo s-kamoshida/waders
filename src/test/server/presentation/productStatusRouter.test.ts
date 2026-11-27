@@ -156,3 +156,49 @@ describe('PATCH /api/products/:productId/status（issue #52 の詳細画面か�
     expect(findStoredProduct(product.id)?.status).toBe('considering');
   });
 });
+
+describe('ステータス「キャンセル」の API（issue #57）', () => {
+  it('PATCH /api/products/:productId/status で canceled を指定した場合、キャンセルにし、200 と商品を返し、利用者の操作として履歴に記録する', async () => {
+    const product = await createProductThroughApi({ status: 'reserved' });
+
+    const response = await request(harness.application).patch(`/api/products/${product.id}/status`).send({ status: 'canceled' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ status: 'canceled' });
+    expect(findStoredProduct(product.id)?.status).toBe('canceled');
+    expect(listChangesAfterRegistration(product.id)).toEqual([
+      expect.objectContaining({ changeKind: 'user', field: 'status', valueBefore: 'reserved', valueAfter: 'canceled' }),
+    ]);
+  });
+
+  it('PUT /api/products/:productId（編集）で canceled を指定した場合、キャンセルにして 200 を返す', async () => {
+    const product = await createProductThroughApi({ status: 'considering' });
+
+    const response = await request(harness.application)
+      .put(`/api/products/${product.id}`)
+      .send({ name: 'アクションフィギュア', releaseMonth: '2026-12', price: 5000, status: 'canceled' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ status: 'canceled' });
+  });
+
+  it('GET /api/products は、キャンセルの商品も返す（リストとアーカイブの振り分けは画面で行う）', async () => {
+    const product = await createProductThroughApi({ status: 'reserved', releaseMonth: '2027-01' });
+    await request(harness.application).patch(`/api/products/${product.id}/status`).send({ status: 'canceled' });
+
+    const response = await request(harness.application).get('/api/products');
+
+    expect(response.status).toBe(200);
+    expect(response.body.products).toEqual([expect.objectContaining({ id: product.id, status: 'canceled', releaseMonth: '2027-01' })]);
+  });
+
+  it('PATCH /api/products/:productId/status で一覧にないステータス（cancelled）を指定した場合、400 と VALIDATION_ERROR を返し、変えない', async () => {
+    const product = await createProductThroughApi({ status: 'reserved' });
+
+    const response = await request(harness.application).patch(`/api/products/${product.id}/status`).send({ status: 'cancelled' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    expect(findStoredProduct(product.id)?.status).toBe('reserved');
+  });
+});

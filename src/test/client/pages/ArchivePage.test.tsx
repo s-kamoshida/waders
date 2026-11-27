@@ -319,3 +319,101 @@ describe('アーカイブの商品の詳細画面（issue #52）', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /届いた商品/ }).closest('article')).toHaveClass('product-card--unpurchased'));
   });
 });
+
+describe('ステータス「キャンセル」の商品（issue #57）', () => {
+  /** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+  const CANCELED_STATUS = 'canceled' as string as ProductListItem['status'];
+
+  it('発売月が当月以降のキャンセルの商品も、アーカイブの発売月の位置に、キャンセルの見せ方で表示する', async () => {
+    const products = [
+      createProduct({ name: '来年のキャンセルした商品', releaseMonth: '2027-01', status: CANCELED_STATUS }),
+      createProduct({ name: '今月のキャンセルした商品', releaseMonth: '2026-11', status: CANCELED_STATUS }),
+      createProduct({ name: '10月に届いた商品', releaseMonth: '2026-10', status: 'purchased' }),
+      createProduct({ name: '今月の予約済の商品', releaseMonth: '2026-11', status: 'reserved' }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ArchivePage currentTime={currentTime} />);
+
+    const january = await screen.findByRole('region', { name: '2027/01' });
+    expect(within(january).getByText('来年のキャンセルした商品')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '2026/11' })).getByText('今月のキャンセルした商品')).toBeInTheDocument();
+    expect(screen.queryByText('今月の予約済の商品')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'))).toEqual(['2027/01', '2026/11', '2026/10']);
+    const canceledCard = screen.getByRole('button', { name: /来年のキャンセルした商品/ }).closest('article');
+    expect(canceledCard).toHaveClass('product-card--canceled');
+    expect(within(canceledCard as HTMLElement).getByText('キャンセル')).toBeInTheDocument();
+  });
+
+  it('アーカイブの見出しの個数と合計金額に、キャンセルの商品を含めない', async () => {
+    const products = [
+      createProduct({ name: '届いた商品', releaseMonth: '2026-10', status: 'purchased', price: 22000, shippingFee: 800 }),
+      createProduct({ name: 'キャンセルした商品', releaseMonth: '2026-10', status: CANCELED_STATUS, price: 18700, shippingFee: 600 }),
+      createProduct({ name: '来年のキャンセルした商品', releaseMonth: '2027-01', status: CANCELED_STATUS, price: 9800 }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ArchivePage currentTime={currentTime} />);
+
+    await screen.findByRole('region', { name: '2026/10' });
+    expect(screen.getByRole('button', { name: /2026\/10/ })).toHaveTextContent('1個（合計 22,800円）');
+    expect(screen.getByRole('button', { name: /2027\/01/ })).toHaveTextContent('0個（合計 0円）');
+  });
+
+  it('同じ月の中では、キャンセルの商品を未購入の後に並べる', async () => {
+    const products = [
+      createProduct({ name: 'キャンセルした商品', releaseMonth: '2026-10', status: CANCELED_STATUS }),
+      createProduct({ name: '買わなかった商品', releaseMonth: '2026-10', status: 'unpurchased' }),
+      createProduct({ name: '届いた商品', releaseMonth: '2026-10', status: 'purchased' }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+
+    render(<ArchivePage currentTime={currentTime} />);
+
+    const october = await screen.findByRole('region', { name: '2026/10' });
+    const names = Array.from(october.querySelectorAll('.product-card-name')).map((element) => element.textContent);
+    expect(names).toEqual(['届いた商品', '買わなかった商品', 'キャンセルした商品']);
+  });
+
+  it('発売月が当月以降のキャンセルの商品を、詳細画面の「リストに戻す」で戻した場合、一覧を読み込み直し、アーカイブから消える', async () => {
+    const canceledProduct = createProduct({ id: 'canceled-1', name: 'キャンセルした商品', releaseMonth: '2027-01', status: CANCELED_STATUS });
+    let products = [canceledProduct];
+    const { requests } = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'POST /api/products/canceled-1/restore': (body) => {
+        const releaseMonth = (body as { releaseMonth: string }).releaseMonth;
+        products = [{ ...canceledProduct, status: 'considering', releaseMonth }];
+        return { body: products[0] };
+      },
+    });
+    render(<ArchivePage currentTime={currentTime} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /キャンセルした商品/ }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('button', { name: 'リストに戻す' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'リストに戻す' })).getByRole('button', { name: '戻す' }));
+
+    expect(await screen.findByText('アーカイブされた商品はありません')).toBeInTheDocument();
+    expect(requests.find((recorded) => recorded.method === 'POST')).toMatchObject({
+      path: '/api/products/canceled-1/restore',
+      body: { releaseMonth: '2027-01' },
+    });
+  });
+
+  it('発売月が当月以降のキャンセルの商品を、詳細画面で検討中に変えた場合、一覧を読み込み直し、アーカイブから消える', async () => {
+    const canceledProduct = createProduct({ id: 'canceled-1', name: 'キャンセルした商品', releaseMonth: '2027-01', status: CANCELED_STATUS });
+    let products = [canceledProduct];
+    stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'PATCH /api/products/canceled-1/status': () => {
+        products = [{ ...canceledProduct, status: 'considering' }];
+        return { body: products[0] };
+      },
+    });
+    render(<ArchivePage currentTime={currentTime} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /キャンセルした商品/ }));
+    await userEvent.selectOptions(within(screen.getByRole('dialog', { name: '商品の詳細' })).getByRole('combobox', { name: 'ステータス' }), '検討中');
+
+    expect(await screen.findByText('アーカイブされた商品はありません')).toBeInTheDocument();
+  });
+});

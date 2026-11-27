@@ -9,7 +9,10 @@ import {
   splitProductsByArchive,
   summarizeCategoryUsage,
 } from '../../client/productList.ts';
-import type { ProductResponse } from '../../shared/productContract.ts';
+import type { ProductResponse, ProductStatus } from '../../shared/productContract.ts';
+
+/** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+const CANCELED_STATUS = 'canceled' as string as ProductStatus;
 
 /** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
 const NO_DISCOUNT = { discount: null } as const;
@@ -392,5 +395,71 @@ describe('カテゴリーの使われ方の集計（カテゴリーの管理。i
 
   it('定義にないカテゴリーの商品がない場合、定義にないカテゴリーは空にする', () => {
     expect(summarizeCategoryUsage(categories, [createProduct(), createProduct({ categoryId: 'action', categoryName: '可動フィギュア' })]).undefinedCategories).toEqual([]);
+  });
+});
+
+describe('ステータス「キャンセル」（issue #57）', () => {
+  it('キャンセルの商品は、発売月が当月以降でもアーカイブに振り分け、リストには振り分けない', () => {
+    const canceledThisMonth = createProduct({ releaseMonth: '2026-11', status: CANCELED_STATUS });
+    const canceledNextYear = createProduct({ releaseMonth: '2027-03', status: CANCELED_STATUS });
+    const canceledLastMonth = createProduct({ releaseMonth: '2026-10', status: CANCELED_STATUS });
+    const reserved = createProduct({ releaseMonth: '2026-12', status: 'reserved' });
+
+    const { active, archived } = splitProductsByArchive([canceledThisMonth, canceledNextYear, canceledLastMonth, reserved], '2026-11');
+
+    expect(active.map((product) => product.id)).toEqual([reserved.id]);
+    expect(archived.map((product) => product.id)).toEqual([canceledThisMonth.id, canceledNextYear.id, canceledLastMonth.id]);
+  });
+
+  it('アーカイブでは、キャンセルの商品を発売月の位置（新しい月から順）に表示する', () => {
+    const canceledNextYear = createProduct({ releaseMonth: '2027-03', status: CANCELED_STATUS });
+    const purchased = createProduct({ releaseMonth: '2026-10', status: 'purchased' });
+
+    const groups = buildArchiveGroups([purchased, canceledNextYear], { yearMode: 'calendar' });
+
+    expect(groups.map((group) => [group.label, group.months.map((month) => month.month)])).toEqual([
+      ['2027年', ['2027-03']],
+      ['2026年', ['2026-10']],
+    ]);
+  });
+
+  it('同じ月の中では、キャンセルの商品を未購入の後に並べ、キャンセルの中は登録順にする', () => {
+    const firstCanceled = createProduct({ releaseMonth: '2026-10', status: CANCELED_STATUS });
+    const unpurchased = createProduct({ releaseMonth: '2026-10', status: 'unpurchased' });
+    const secondCanceled = createProduct({ releaseMonth: '2026-10', status: CANCELED_STATUS, cancelable: true });
+    const purchased = createProduct({ releaseMonth: '2026-10', status: 'purchased' });
+    const considering = createProduct({ releaseMonth: '2026-10', status: 'considering' });
+
+    const [yearGroup] = buildArchiveGroups([firstCanceled, unpurchased, secondCanceled, purchased, considering], { yearMode: 'calendar' });
+
+    expect(yearGroup?.months[0]?.products.map((product) => product.id)).toEqual([
+      purchased.id,
+      considering.id,
+      unpurchased.id,
+      firstCanceled.id,
+      secondCanceled.id,
+    ]);
+  });
+
+  it('アーカイブの見出しの個数と合計金額に、キャンセルの商品を含めない（値引きがあっても、ほかの商品の合計から引かない）', () => {
+    const purchased = createProduct({ releaseMonth: '2026-10', status: 'purchased', price: 22000, shippingFee: 800 });
+    const canceled = createProduct({ releaseMonth: '2026-10', status: CANCELED_STATUS, price: 18700, shippingFee: 600, handlingFee: 330, ...withDiscount(1000) });
+    const canceledOtherYear = createProduct({ releaseMonth: '2027-01', status: CANCELED_STATUS, price: 5000 });
+
+    const groups = buildArchiveGroups([purchased, canceled, canceledOtherYear], { yearMode: 'calendar' });
+
+    expect(groups.find((group) => group.key === '2026')?.months[0]?.summary).toEqual({ count: 1, totalYen: 22800 });
+    expect(groups.find((group) => group.key === '2026')?.summary).toEqual({ count: 1, totalYen: 22800 });
+    expect(groups.find((group) => group.key === '2027')?.summary).toEqual({ count: 0, totalYen: 0 });
+  });
+
+  it('リストの見出しの個数と合計金額にも、キャンセルの商品を含めない（リストに渡された場合も数えない）', () => {
+    const reserved = createProduct({ releaseMonth: '2026-11', status: 'reserved', price: 13200 });
+    const canceled = createProduct({ releaseMonth: '2026-11', status: CANCELED_STATUS, price: 9800 });
+
+    const groups = buildProductListGroups([reserved, canceled], { currentMonth: '2026-11', yearMode: 'calendar' });
+
+    expect(groups[0]?.months[0]?.summary).toEqual({ count: 1, totalYen: 13200 });
+    expect(groups[0]?.summary).toEqual({ count: 1, totalYen: 13200 });
   });
 });

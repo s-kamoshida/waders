@@ -7,7 +7,7 @@ import {
   RestoreReleaseMonthInPastError,
   type ProductId,
 } from '../../../server/domain/product.ts';
-import { productInputSchema } from '../../../shared/productContract.ts';
+import { productInputSchema, statusChangeRequestSchema, type StatusChangeRequest } from '../../../shared/productContract.ts';
 import { createWebApplicationTestHarness, type WebApplicationTestHarness } from '../presentation/webApplicationTestHarness.ts';
 
 /** 日本時間の日時を UTC の Date にする。 */
@@ -31,6 +31,11 @@ function registerProduct(overrides: Record<string, unknown> = {}) {
   return harness.productService.createProduct(
     productInputSchema.parse({ name: 'アクションフィギュア', releaseMonth: '2026-11', ...overrides }),
   );
+}
+
+/** ステータスだけを変える本文を作る（キャンセル（issue #57）を実装の前でも型チェックを通すため、検証して作る）。 */
+function productStatusChange(status: string): StatusChangeRequest {
+  return statusChangeRequestSchema.parse({ status });
 }
 
 /** 商品の最新の状態を一覧から取得する（一覧の取得で自動遷移が反映される）。 */
@@ -236,5 +241,126 @@ describe('アーカイブされた商品の編集', () => {
     );
 
     expect(findListedProduct(product.id)?.deliveryConfirmationPending).toBe(false);
+  });
+});
+
+describe('ステータス「キャンセル」（issue #57、BR-38）', () => {
+  /** 登録時を除いた、ステータスの変更履歴を返す。 */
+  function listStatusChanges(productId: ProductId) {
+    return harness.productRepository.listProductHistory(productId).filter((entry) => entry.field === 'status' && entry.valueBefore !== null);
+  }
+
+  it.each(['considering', 'reserved', 'purchased', 'unpurchased'])(
+    '%s の商品を詳細画面のプルダウンでキャンセルにした場合、キャンセルにし、利用者の操作として履歴に記録する',
+    (status) => {
+      const product = registerProduct({ status, releaseMonth: '2026-12' });
+      harness.setCurrentTime(japanTime('2026-11-18T09:00'));
+
+      const changed = harness.productService.changeProductStatus(product.id, productStatusChange('canceled'));
+
+      expect(changed.status).toBe('canceled');
+      expect(harness.productRepository.findProductById(product.id)?.status).toBe('canceled');
+      expect(listStatusChanges(product.id)).toEqual([
+        { changedAt: japanTime('2026-11-18T09:00').toISOString(), changeKind: 'user', field: 'status', valueBefore: status, valueAfter: 'canceled' },
+      ]);
+    },
+  );
+
+  it('編集でキャンセルにした場合、キャンセルにし、利用者の操作として履歴に記録する', () => {
+    const product = registerProduct({ status: 'reserved', releaseMonth: '2026-12' });
+
+    const updated = harness.productService.updateProduct(
+      product.id,
+      productInputSchema.parse({ name: 'アクションフィギュア', releaseMonth: '2026-12', status: 'canceled' }),
+    );
+
+    expect(updated.status).toBe('canceled');
+    expect(listStatusChanges(product.id)).toEqual([expect.objectContaining({ changeKind: 'user', valueBefore: 'reserved', valueAfter: 'canceled' })]);
+  });
+
+  it('キャンセルの商品は、別のステータスへ手で戻せる', () => {
+    const product = registerProduct({ status: 'canceled', releaseMonth: '2026-12' });
+
+    expect(harness.productService.changeProductStatus(product.id, productStatusChange('reserved')).status).toBe('reserved');
+  });
+
+  it.each([
+    ['検討中で受注期限と発売月を超過した', { status: 'considering', releaseMonth: '2026-11', orderDeadline: '2026-11-20' }],
+    ['予約済で発売月を超過した', { status: 'reserved', releaseMonth: '2026-11' }],
+  ])('キャンセルにした商品は、%s場合も、一覧を取得したときに自動では変えず、延期の確認待ちにもしない', (_label, fields) => {
+    const product = registerProduct(fields);
+    harness.productService.changeProductStatus(product.id, productStatusChange('canceled'));
+    harness.setCurrentTime(japanTime('2026-12-01T00:00'));
+
+    expect(findListedProduct(product.id)).toMatchObject({ status: 'canceled', deliveryConfirmationPending: false });
+    expect(harness.productRepository.listProductHistory(product.id).some((entry) => entry.changeKind === 'automatic')).toBe(false);
+  });
+
+  it('延期の確認を待っている商品をキャンセルにした場合（詳細画面のプルダウン）、延期の確認待ちを外す', () => {
+    const product = registerProduct({ status: 'reserved', releaseMonth: '2026-11' });
+    harness.setCurrentTime(japanTime('2026-12-01T00:00'));
+    harness.productService.listProducts();
+
+    harness.productService.changeProductStatus(product.id, productStatusChange('canceled'));
+
+    expect(findListedProduct(product.id)).toMatchObject({ status: 'canceled', deliveryConfirmationPending: false });
+  });
+
+  it('発売月が当月以降のキャンセルの商品も、アーカイブされた商品として「リストに戻す」ができ、ステータスは検討中にする', () => {
+    const product = registerProduct({ status: 'reserved', releaseMonth: '2027-01' });
+    harness.productService.changeProductStatus(product.id, productStatusChange('canceled'));
+    harness.setCurrentTime(japanTime('2026-11-18T09:00'));
+
+    const restored = harness.productService.restoreProduct(product.id, '2027-02');
+
+    expect(restored).toMatchObject({ status: 'considering', releaseMonth: '2027-02' });
+    expect(harness.productRepository.findProductById(product.id)).toMatchObject({ status: 'considering', releaseMonth: '2027-02' });
+    expect(harness.productRepository.listProductHistory(product.id).slice(-2)).toEqual([
+      expect.objectContaining({ changeKind: 'user', field: 'status', valueBefore: 'canceled', valueAfter: 'considering' }),
+      expect.objectContaining({ changeKind: 'user', field: 'releaseMonth', valueBefore: '2027-01', valueAfter: '2027-02' }),
+    ]);
+  });
+
+  it('発売月が当月以降のキャンセルの商品を、同じ発売月のままリストに戻す場合も、ステータスを検討中にする', () => {
+    const product = registerProduct({ status: 'canceled', releaseMonth: '2026-12' });
+
+    expect(harness.productService.restoreProduct(product.id, '2026-12')).toMatchObject({ status: 'considering', releaseMonth: '2026-12' });
+  });
+
+  it('自動で購入済になってからキャンセルにした商品をリストに戻す場合も、ステータスは検討中にする', () => {
+    const product = registerProduct({ status: 'reserved', releaseMonth: '2026-11' });
+    harness.setCurrentTime(japanTime('2026-12-01T00:00'));
+    harness.productService.listProducts();
+    harness.productService.changeProductStatus(product.id, productStatusChange('canceled'));
+
+    expect(harness.productService.restoreProduct(product.id, '2026-12').status).toBe('considering');
+  });
+
+  it('キャンセルの商品をリストに戻す場合も、新しい発売月が当月より前なら RestoreReleaseMonthInPastError にし、変えない', () => {
+    const product = registerProduct({ status: 'canceled', releaseMonth: '2026-12' });
+
+    expect(() => harness.productService.restoreProduct(product.id, '2026-10')).toThrow(RestoreReleaseMonthInPastError);
+    expect(harness.productRepository.findProductById(product.id)).toMatchObject({ status: 'canceled', releaseMonth: '2026-12' });
+  });
+
+  it('発売月が当月以降のキャンセルの商品も、アーカイブされた商品として、発売月は編集やドラッグアンドドロップでは変えられない（「リストに戻す」で変える）', () => {
+    const product = registerProduct({ status: 'canceled', releaseMonth: '2026-12' });
+
+    expect(() =>
+      harness.productService.updateProduct(
+        product.id,
+        productInputSchema.parse({ name: 'アクションフィギュア', releaseMonth: '2027-01', status: 'canceled' }),
+      ),
+    ).toThrow(ArchivedReleaseMonthChangeError);
+    expect(() => harness.productService.moveProductToReleaseMonth(product.id, '2027-01')).toThrow(ArchivedReleaseMonthChangeError);
+    expect(harness.productRepository.findProductById(product.id)?.releaseMonth).toBe('2026-12');
+  });
+
+  it('延期の確認で「買わなかった」と答えた場合は、今までどおり未購入にする（キャンセルにはしない）', () => {
+    const product = registerProduct({ status: 'reserved', releaseMonth: '2026-11' });
+    harness.setCurrentTime(japanTime('2026-12-01T00:00'));
+    harness.productService.listProducts();
+
+    expect(harness.productService.answerDeliveryConfirmation(product.id, { answer: 'notPurchased' }).status).toBe('unpurchased');
   });
 });

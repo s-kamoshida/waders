@@ -279,7 +279,7 @@ describe('詳細画面の金額（issue #52）', () => {
 });
 
 describe('詳細画面からのステータスの変更（issue #52）', () => {
-  it('ステータスのプルダウンで、検討中・予約済・予約済（キャンセル可）・購入済・未購入を選べ、今のステータスが選ばれている', () => {
+  it('ステータスのプルダウンで、検討中・予約済・予約済（キャンセル可）・購入済・未購入・キャンセルを選べ、今のステータスが選ばれている（キャンセルは issue #57）', () => {
     stubFetchRoutes({});
     renderDetail(createProduct({ status: 'reserved', cancelable: true }));
 
@@ -290,6 +290,7 @@ describe('詳細画面からのステータスの変更（issue #52）', () => {
       '予約済（キャンセル可）',
       '購入済',
       '未購入',
+      'キャンセル',
     ]);
     expect(select).toHaveDisplayValue('予約済（キャンセル可）');
   });
@@ -450,5 +451,57 @@ describe('詳細画面の操作（issue #52）', () => {
     expect(getHeaderCloseButton(getDetailDialog())).toBeDisabled();
     expect(within(getDetailDialog()).getByRole('button', { name: '編集' })).toBeDisabled();
     expect(within(getDetailDialog()).getByRole('button', { name: '削除' })).toBeDisabled();
+  });
+});
+
+describe('詳細画面のステータス「キャンセル」（issue #57）', () => {
+  /** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+  const CANCELED_STATUS = 'canceled' as string as ProductListItem['status'];
+
+  /** プルダウンの選択肢の表記の一覧。 */
+  function listStatusOptionTexts(): (string | null)[] {
+    const select = within(getDetailDialog()).getByRole('combobox', { name: 'ステータス' });
+    return within(select).getAllByRole('option').map((option) => option.textContent);
+  }
+
+  it.each([
+    ['検討中', { status: 'considering', cancelable: false }],
+    ['予約済', { status: 'reserved', cancelable: false }],
+    ['予約済（キャンセル可）', { status: 'reserved', cancelable: true }],
+    ['購入済', { status: 'purchased', cancelable: false }],
+    ['未購入', { status: 'unpurchased', cancelable: false }],
+  ] as const)('%s の商品で「キャンセル」を選んだ場合、その場で PATCH /api/products/:productId/status に { status: canceled } を送り、onStatusChanged に新しい商品を渡す', async (_label, fields) => {
+    const changed = createProduct({ ...fields, status: CANCELED_STATUS });
+    const { requests } = stubFetchRoutes({ 'PATCH /api/products/product-1/status': () => ({ body: changed }) });
+    const { onStatusChanged } = renderDetail(createProduct(fields));
+
+    expect(listStatusOptionTexts()).toContain('キャンセル');
+    await userEvent.selectOptions(within(getDetailDialog()).getByRole('combobox', { name: 'ステータス' }), 'キャンセル');
+
+    await waitFor(() => expect(onStatusChanged).toHaveBeenCalledWith(expect.objectContaining({ id: 'product-1', status: 'canceled' })));
+    expect(requests).toEqual([
+      { method: 'PATCH', path: '/api/products/product-1/status', body: { status: 'canceled' }, contentType: 'application/json' },
+    ]);
+  });
+
+  it('キャンセルの商品の場合、ステータスを「キャンセル」と表示し（キャンセルの見た目のクラス）、プルダウンでも「キャンセル」が選ばれている', () => {
+    stubFetchRoutes({});
+    renderDetail(createProduct({ status: CANCELED_STATUS, cancelable: true }));
+
+    const badge = within(getDetailDialog()).queryByText('キャンセル', { selector: ':not(option)' });
+    expect(badge).toHaveClass('detail-status--canceled');
+    expect(within(getDetailDialog()).getByRole('combobox', { name: 'ステータス' })).toHaveDisplayValue('キャンセル');
+  });
+
+  it('キャンセルの商品で、ほかのステータス（検討中）を選んだ場合、そのステータスを送る', async () => {
+    const { requests } = stubFetchRoutes({ 'PATCH /api/products/product-1/status': () => ({ body: createProduct({ status: 'considering' }) }) });
+    renderDetail(createProduct({ status: CANCELED_STATUS }));
+
+    expect(within(getDetailDialog()).getByRole('combobox', { name: 'ステータス' })).toHaveDisplayValue('キャンセル');
+    await userEvent.selectOptions(within(getDetailDialog()).getByRole('combobox', { name: 'ステータス' }), '検討中');
+
+    await waitFor(() => expect(requests).toEqual([
+      { method: 'PATCH', path: '/api/products/product-1/status', body: { status: 'considering' }, contentType: 'application/json' },
+    ]));
   });
 });

@@ -160,3 +160,26 @@ describe('右上の閉じるボタン（issue #49）', () => {
     expect(requests).toEqual([]);
   });
 });
+
+describe('キャンセルの商品をリストに戻す（issue #57）', () => {
+  /** キャンセル（issue #57）。実装の前でも型チェックを通すため、文字列から変換して使う。 */
+  const CANCELED_STATUS = 'canceled' as string as ProductResponse['status'];
+
+  it('発売月が当月以降のキャンセルの商品の場合、新しい発売月の既定はその商品の発売月にする', () => {
+    stubFetchRoutes({});
+    render(
+      <RestoreDialog product={{ ...product, status: CANCELED_STATUS, releaseMonth: '2027-01' }} currentMonth="2026-11" onClose={vi.fn()} onRestored={vi.fn()} />,
+    );
+
+    expect(screen.getByLabelText('新しい発売月')).toHaveValue('2027-01');
+  });
+
+  it('発売月が当月より前のキャンセルの商品の場合、新しい発売月の既定は今までどおり当月にする', () => {
+    stubFetchRoutes({});
+    render(
+      <RestoreDialog product={{ ...product, status: CANCELED_STATUS, releaseMonth: '2026-10' }} currentMonth="2026-11" onClose={vi.fn()} onRestored={vi.fn()} />,
+    );
+
+    expect(screen.getByLabelText('新しい発売月')).toHaveValue('2026-11');
+  });
+});

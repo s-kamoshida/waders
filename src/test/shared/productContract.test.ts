@@ -4,10 +4,12 @@ import {
   MAXIMUM_NOTE_LENGTH,
   MAXIMUM_PRICE_YEN,
   MAXIMUM_PRODUCT_NAME_LENGTH,
+  PRODUCT_STATUSES,
   collectFieldErrors,
   productInputSchema,
   productListItemSchema,
   productSchema,
+  statusChangeRequestSchema,
 } from '../../shared/productContract.ts';
 
 /** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
@@ -87,8 +89,54 @@ describe('ステータス', () => {
     expect(isValid({ ...minimumInput, status })).toBe(true);
   });
 
-  it('要件にないステータス（キャンセル）の場合、拒否する', () => {
+  it('要件にないステータス（綴りの違う cancelled）の場合、拒否する', () => {
     expect(isValid({ ...minimumInput, status: 'cancelled' })).toBe(false);
+  });
+});
+
+describe('ステータス「キャンセル」（issue #57）', () => {
+  it('商品の入力で canceled を受け付ける', () => {
+    expect(productInputSchema.safeParse({ ...minimumInput, status: 'canceled' })).toMatchObject({ success: true, data: { status: 'canceled' } });
+  });
+
+  it('ステータスの一覧の最後（未購入の後）に canceled がある', () => {
+    expect(PRODUCT_STATUSES).toEqual(['considering', 'reserved', 'purchased', 'unpurchased', 'canceled']);
+  });
+
+  it('ステータスだけを変える本文（詳細画面のプルダウン）で canceled を受け付ける', () => {
+    expect(statusChangeRequestSchema.safeParse({ status: 'canceled' }).success).toBe(true);
+  });
+
+  it('API が返す商品で canceled を受け付ける', () => {
+    const product = {
+      id: 'product-1',
+      name: 'キャンセルした商品',
+      releaseMonth: '2026-12',
+      status: 'canceled',
+      cancelable: false,
+      price: null,
+      shippingFee: null,
+      orderDeadline: null,
+      url: null,
+      categoryId: null,
+      categoryName: null,
+      maker: null,
+      note: null,
+      location: null,
+      handlingFee: null,
+      travelExpense: null,
+      otherExpense: null,
+      eventStartsAt: null,
+      eventEndsAt: null,
+      ...NO_DISCOUNT,
+      imageUrl: null,
+      imageKind: null,
+      createdAt: '2026-11-17T01:00:00.000Z',
+      updatedAt: '2026-11-17T01:00:00.000Z',
+    };
+
+    expect(productSchema.safeParse(product).success).toBe(true);
+    expect(productListItemSchema.safeParse(product).success).toBe(true);
   });
 });
 
