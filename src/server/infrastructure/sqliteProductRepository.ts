@@ -24,7 +24,6 @@ import {
   MAXIMUM_NOTE_LENGTH,
   MAXIMUM_PRICE_YEN,
   MAXIMUM_PRODUCT_NAME_LENGTH,
-  PRODUCT_STATUSES,
   productStatusSchema,
 } from '../../shared/productContract.ts';
 import type {
@@ -35,7 +34,22 @@ import type {
   ProductId,
 } from '../domain/product.ts';
 
-const statusList = PRODUCT_STATUSES.map((status) => `'${status}'`).join(', ');
+/**
+ * 版数 1 の時点のステータスの一覧（CHECK 制約の SQL）。
+ * 以前は今の一覧（PRODUCT_STATUSES）から作っていたが、一覧に値を加えると古い移行の SQL が変わってしまうため、
+ * 当時の 4 つに固定する（issue #57）。版数 1 の SQL の結果はこれまでと同じ。
+ */
+const VERSION_ONE_STATUS_LIST = "'considering', 'reserved', 'purchased', 'unpurchased'";
+
+/** 版数 10 のステータスの一覧（CHECK 制約の SQL。キャンセルを加えた。issue #57）。後の版で一覧を変えても、この SQL は変えない。 */
+const VERSION_TEN_STATUS_LIST = "'considering', 'reserved', 'purchased', 'unpurchased', 'canceled'";
+
+/** 版数 9 までに products の表にある列（版数 10 で表を作り直すときに、この順で写す）。 */
+const VERSION_NINE_PRODUCT_COLUMNS = [
+  'id', 'name', 'release_month', 'status', 'cancelable', 'price', 'shipping_fee', 'order_deadline', 'url', 'category', 'created_at', 'updated_at',
+  'maker', 'note', 'category_id', 'location', 'handling_fee', 'travel_expense', 'other_expense', 'event_starts_at', 'event_ends_at',
+  'uploaded_image_file_name', 'card_image_file_name', 'discount',
+].join(', ');
 
 /** 画像のファイルの名前（乱数の UUID と拡張子。productImageStorage.ts で作る）にあてはまる GLOB の型。拡張子は付けない。 */
 const imageFileNameStemPattern =
@@ -59,7 +73,7 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
       release_month GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]'
       AND CAST(substr(release_month, 6, 2) AS INTEGER) BETWEEN 1 AND 12
     ),
-    status TEXT NOT NULL CHECK (status IN (${statusList})),
+    status TEXT NOT NULL CHECK (status IN (${VERSION_ONE_STATUS_LIST})),
     cancelable INTEGER NOT NULL CHECK (cancelable IN (0, 1)),
     price INTEGER CHECK (price IS NULL OR price BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
     shipping_fee INTEGER CHECK (shipping_fee IS NULL OR shipping_fee BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
@@ -165,6 +179,69 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
   // 金額と送料などの合計以下という決まり（BR-35）は入力の検証で確かめ、DB では値の範囲だけを制約にする
   `
   ALTER TABLE products ADD COLUMN discount INTEGER CHECK (discount IS NULL OR discount BETWEEN 0 AND ${MAXIMUM_PRICE_YEN});
+  `,
+  // 版数 10: ステータス「キャンセル」（issue #57、BR-38）。SQLite は CHECK 制約を変えられないため、products の表を作り直す
+  // （新しい表を作って写し、古い表を消して名前を変える）。列・制約・並び（rowid）は版数 9 と同じにし、ステータスの CHECK だけを変える。
+  // 表を消すと、その表のトリガー（カテゴリーの組）も消えるため作り直す。変更履歴・延期の確認待ちの外部キーは名前で products を指すため、
+  // 作り直した表をそのまま指す（移行の間は外部キーを止める。migrateSchema）
+  `
+  CREATE TABLE products_version_ten (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND ${MAXIMUM_PRODUCT_NAME_LENGTH}),
+    release_month TEXT NOT NULL CHECK (
+      release_month GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]'
+      AND CAST(substr(release_month, 6, 2) AS INTEGER) BETWEEN 1 AND 12
+    ),
+    status TEXT NOT NULL CHECK (status IN (${VERSION_TEN_STATUS_LIST})),
+    cancelable INTEGER NOT NULL CHECK (cancelable IN (0, 1)),
+    price INTEGER CHECK (price IS NULL OR price BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    shipping_fee INTEGER CHECK (shipping_fee IS NULL OR shipping_fee BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    order_deadline TEXT CHECK (
+      order_deadline IS NULL
+      OR (order_deadline GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]' AND date(order_deadline) = order_deadline)
+    ),
+    url TEXT CHECK (url IS NULL OR url GLOB 'http://*' OR url GLOB 'https://*'),
+    category TEXT CHECK (category IS NULL OR length(category) BETWEEN 1 AND ${MAXIMUM_CATEGORY_NAME_LENGTH}),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    maker TEXT CHECK (maker IS NULL OR length(maker) BETWEEN 1 AND ${MAXIMUM_MAKER_LENGTH}),
+    note TEXT CHECK (note IS NULL OR length(note) BETWEEN 1 AND ${MAXIMUM_NOTE_LENGTH}),
+    category_id TEXT CHECK (category_id IS NULL OR length(category_id) BETWEEN 1 AND ${MAXIMUM_CATEGORY_ID_LENGTH}),
+    location TEXT CHECK (location IS NULL OR length(location) BETWEEN 1 AND ${MAXIMUM_LOCATION_LENGTH}),
+    handling_fee INTEGER CHECK (handling_fee IS NULL OR handling_fee BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    travel_expense INTEGER CHECK (travel_expense IS NULL OR travel_expense BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    other_expense INTEGER CHECK (other_expense IS NULL OR other_expense BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    event_starts_at TEXT CHECK (event_starts_at IS NULL OR event_starts_at GLOB '${utcDateTimePattern}'),
+    event_ends_at TEXT CHECK (
+      event_ends_at IS NULL
+      OR (event_ends_at GLOB '${utcDateTimePattern}' AND (event_starts_at IS NULL OR event_ends_at >= event_starts_at))
+    ),
+    uploaded_image_file_name TEXT CHECK (
+      uploaded_image_file_name IS NULL
+      OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.jpg'
+      OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.png'
+      OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.webp'
+    ),
+    card_image_file_name TEXT CHECK (
+      card_image_file_name IS NULL
+      OR card_image_file_name GLOB '${imageFileNameStemPattern}.jpg'
+      OR card_image_file_name GLOB '${imageFileNameStemPattern}.png'
+      OR card_image_file_name GLOB '${imageFileNameStemPattern}.webp'
+    ),
+    discount INTEGER CHECK (discount IS NULL OR discount BETWEEN 0 AND ${MAXIMUM_PRICE_YEN})
+  ) STRICT;
+
+  INSERT INTO products_version_ten (rowid, ${VERSION_NINE_PRODUCT_COLUMNS})
+    SELECT rowid, ${VERSION_NINE_PRODUCT_COLUMNS} FROM products;
+  DROP TABLE products;
+  ALTER TABLE products_version_ten RENAME TO products;
+
+  CREATE TRIGGER products_category_pair_on_insert BEFORE INSERT ON products
+    WHEN (NEW.category_id IS NULL) <> (NEW.category IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'category_id と category は両方あるか両方ないかのどちらかにする'); END;
+  CREATE TRIGGER products_category_pair_on_update BEFORE UPDATE ON products
+    WHEN (NEW.category_id IS NULL) <> (NEW.category IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'category_id と category は両方あるか両方ないかのどちらかにする'); END;
   `,
 ];
 
@@ -349,12 +426,23 @@ function migrateSchema(database: DatabaseSync): void {
       `DB のスキーマの版数（${currentVersion}）が、このアプリの版数（${LATEST_SCHEMA_VERSION}）より新しいため開けません。アプリを更新してください。`,
     );
   }
-  for (let version = currentVersion; version < LATEST_SCHEMA_VERSION; version += 1) {
-    const migration = SCHEMA_MIGRATIONS[version] ?? '';
-    runInTransaction(database, () => {
-      database.exec(migration);
-      database.exec(`PRAGMA user_version = ${version + 1}`);
-    });
+  if (currentVersion === LATEST_SCHEMA_VERSION) return;
+  // 表を作り直す移行（版数 10。issue #57）で、古い表を消したときに変更履歴などが連鎖して消えないよう、移行の間は外部キーを止める。
+  // 外部キーの切り替えはトランザクションの中ではできないため、トランザクションの外で行い、各移行の最後に外部キーの整合を確かめる
+  database.exec('PRAGMA foreign_keys = OFF');
+  try {
+    for (let version = currentVersion; version < LATEST_SCHEMA_VERSION; version += 1) {
+      const migration = SCHEMA_MIGRATIONS[version] ?? '';
+      runInTransaction(database, () => {
+        database.exec(migration);
+        if (database.prepare('PRAGMA foreign_key_check').all().length > 0) {
+          throw new Error(`DB のスキーマの移行（版数 ${version + 1}）で、外部キーの整合が取れなくなりました。`);
+        }
+        database.exec(`PRAGMA user_version = ${version + 1}`);
+      });
+    }
+  } finally {
+    database.exec('PRAGMA foreign_keys = ON');
   }
 }
 

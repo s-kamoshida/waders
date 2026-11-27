@@ -66,9 +66,10 @@ const STATUS_LABELS: Readonly<Record<ProductStatus, string>> = {
   reserved: '予約済',
   purchased: '購入済',
   unpurchased: '未購入',
+  canceled: 'キャンセル',
 };
 
-/** ステータスの表記。予約済でキャンセル可の場合は「予約済（キャンセル可）」。 */
+/** ステータスの表記。予約済でキャンセル可の場合は「予約済（キャンセル可）」。キャンセルはキャンセル可否に関係なく「キャンセル」（issue #57）。 */
 export function getStatusLabel(status: ProductStatus, cancelable: boolean): string {
   if (status === 'reserved' && cancelable) return '予約済（キャンセル可）';
   return STATUS_LABELS[status];

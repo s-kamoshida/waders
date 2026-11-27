@@ -45,13 +45,14 @@ export type ProductDetailDialogProps = {
 /** プルダウンの選択肢の値。予約済（キャンセル可）は、ステータスとは別の値で表す。 */
 type StatusOptionValue = ProductStatus | 'reservedCancelable';
 
-/** プルダウンの選択肢（検討中・予約済・予約済（キャンセル可）・購入済・未購入）。 */
+/** プルダウンの選択肢（検討中・予約済・予約済（キャンセル可）・購入済・未購入・キャンセル（issue #57））。 */
 const STATUS_OPTIONS: readonly { readonly value: StatusOptionValue; readonly change: StatusChangeRequest }[] = [
   { value: 'considering', change: { status: 'considering' } },
   { value: 'reserved', change: { status: 'reserved', cancelable: false } },
   { value: 'reservedCancelable', change: { status: 'reserved', cancelable: true } },
   { value: 'purchased', change: { status: 'purchased' } },
   { value: 'unpurchased', change: { status: 'unpurchased' } },
+  { value: 'canceled', change: { status: 'canceled' } },
 ];
 
 /** 商品のステータスに対応する選択肢の値。 */

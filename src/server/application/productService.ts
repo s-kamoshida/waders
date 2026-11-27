@@ -37,7 +37,7 @@ import {
 import {
   clearPassedOrderDeadlineOfConsidering,
   determineAutomaticTransition,
-  determineStatusBeforeAutomaticTransition,
+  determineRestoredStatus,
   isProductArchived,
 } from '../domain/productStatusTransition.ts';
 import {
@@ -126,7 +126,8 @@ export type ProductService = {
   /** 裏で取りに行っているカード画像の取得が、すべて終わるのを待つ（テスト・終了の前に使う。issue #42）。 */
   waitForPendingCardImageFetches(): Promise<void>;
   /**
-   * アーカイブされた商品をリストに戻す。ステータスは自動遷移の前に戻し、発売月を新しい月にし、延期の確認待ちを外す。
+   * アーカイブされた商品をリストに戻す。ステータスは自動遷移の前に戻し（キャンセルの商品は検討中にする。issue #57）、
+   * 発売月を新しい月にし、延期の確認待ちを外す。
    * @param releaseMonth 新しい発売月（当月以降）
    * @throws {ProductNotFoundError} 商品が存在しない場合
    * @throws {ProductNotArchivedError} 商品がアーカイブされていない場合
@@ -144,6 +145,7 @@ export type ProductService = {
   moveProductToReleaseMonth(productId: ProductId, releaseMonth: string): Product;
   /**
    * ステータスだけを変える（詳細画面のプルダウン。issue #52、BR-37）。アーカイブされた商品も変えられる。
+   * キャンセルにした場合は、延期の確認待ちを外す（issue #57、BR-38）。
    * キャンセル可否は指定したときだけ変える。ステータスもキャンセル可否も今と同じなら、何もせずに今の商品を返す（履歴も記録しない）。
    * 変更は利用者の操作として変更履歴に記録する（ステータスが変わった場合）。
    * @throws {ProductNotFoundError} 商品が存在しない場合
@@ -476,7 +478,7 @@ export function createProductService(dependencies: ProductServiceDependencies): 
       const currentTime = clock.now();
       if (!isProductArchived(current, currentTime)) throw new ProductNotArchivedError(productId);
       if (isProductArchived({ releaseMonth }, currentTime)) throw new RestoreReleaseMonthInPastError(releaseMonth);
-      const status = determineStatusBeforeAutomaticTransition(productRepository.listProductHistory(productId), current.status);
+      const status = determineRestoredStatus(productRepository.listProductHistory(productId), current.status);
       return productRepository.runInTransaction(() => {
         productRepository.clearDeliveryConfirmationPending(productId);
         return updateByUser(current, { status, releaseMonth }, currentTime);
@@ -496,7 +498,11 @@ export function createProductService(dependencies: ProductServiceDependencies): 
       const current = findProductOrThrow(productId);
       const cancelable = change.cancelable ?? current.cancelable;
       if (change.status === current.status && cancelable === current.cancelable) return current;
-      return updateByUser(current, { status: change.status, cancelable }, clock.now());
+      return productRepository.runInTransaction(() => {
+        // キャンセルにした商品には、延期の確認（届いたかどうか）を聞かない（issue #57、BR-38）
+        if (change.status === 'canceled') productRepository.clearDeliveryConfirmationPending(productId);
+        return updateByUser(current, { status: change.status, cancelable }, clock.now());
+      });
     },
 
     answerDeliveryConfirmation(productId, answer) {

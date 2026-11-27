@@ -19,6 +19,7 @@
   --purchased-background: #e3e5e8;
   --purchased-line: #9aa1a9;
   --unpurchased-line: #c4314b;
+  --canceled-line: #8c959f;
 }
 
 * {
@@ -283,6 +284,20 @@ textarea {
   opacity: 0.45;
 }
 
+/* キャンセルは未購入（赤い破線）・購入済（グレーの背景）と見分けがつくよう、灰色の破線の枠と薄い画像で表す（取り消し線は付けない。issue #57） */
+.product-card--canceled {
+  --card-background: #ffffff;
+  --card-line: var(--canceled-line);
+  border: 2px dashed var(--canceled-line);
+  border-left-width: 5px;
+  color: var(--muted);
+}
+
+.product-card--canceled .product-card-placeholder,
+.product-card--canceled .product-card-image {
+  opacity: 0.45;
+}
+
 .product-card-main {
   /* 余った高さをボタン（押せる範囲）が受け持ち、購入先のリンクをカードの下端にそろえる（issue #16） */
   flex: 1 0 auto;
@@ -333,6 +348,12 @@ textarea {
 
 .product-card--reserved .product-card-status {
   background: #57606a;
+}
+
+.product-card--canceled .product-card-status {
+  background: #ffffff;
+  color: var(--muted);
+  border: 1px dashed var(--canceled-line);
 }
 
 .product-card--unpurchased .product-card-status {
@@ -629,6 +650,12 @@ textarea {
 
 .detail-status--purchased {
   background: var(--purchased-line);
+}
+
+.detail-status--canceled {
+  background: #ffffff;
+  color: var(--muted);
+  border: 1px dashed var(--canceled-line);
 }
 
 .detail-status--unpurchased {
