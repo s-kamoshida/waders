@@ -10,9 +10,12 @@ export const SCREEN_MESSAGES = {
   productDeleteFailed: '削除できませんでした。時間をおいて、もう一度お試しください。',
   /** 詳細画面でステータスを変更できなかった場合（MSG-E-019。issue #52）。 */
   productStatusChangeFailed: 'ステータスを変更できませんでした。時間をおいて、もう一度お試しください。',
-  /** 詳細画面のカテゴリー未設定・値がない項目の表示（issue #52）。 */
+  /** 詳細画面のカテゴリー未設定の表示（issue #52）。 */
   detailCategoryUnset: '未設定',
-  detailValueEmpty: '未入力',
+  /** 詳細画面の値がない項目・金額が未入力の表示（全角の「－」U+FF0D。issue #63）。 */
+  detailValueEmpty: '－',
+  /** 値がない表示の読み上げ（「－」だけでは意味が伝わらないため。issue #63）。 */
+  detailValueEmptyLabel: '未入力',
   emptyMonth: '商品はありません',
   deleteConfirmationTitle: '商品を削除しますか？',
   deleteConfirmationNote: '削除した商品は元に戻せません。',

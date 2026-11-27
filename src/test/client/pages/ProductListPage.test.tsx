@@ -1268,6 +1268,20 @@ describe('商品の詳細画面（issue #52）', () => {
     expect(screen.queryByRole('dialog', { name: '商品を編集' })).not.toBeInTheDocument();
   });
 
+  it('金額が未入力の商品の場合、カードは今までどおり「金額未入力」と表示し、詳細画面の金額は「－」と示す（読み上げでは「未入力」。issue #63）', async () => {
+    const product = createProduct({ id: 'detail-1', name: '詳細を見る商品', price: null, shippingFee: 800 });
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [product] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const card = await screen.findByRole('button', { name: /詳細を見る商品/ });
+    expect(within(card).getByText('金額未入力')).toBeInTheDocument();
+
+    const detail = await openDetail();
+    const marks = within(detail).getAllByRole('img', { name: '未入力' });
+    expect(marks.some((mark) => mark.textContent === '－' && mark.closest('dd') === null)).toBe(true);
+    expect(detail).not.toHaveTextContent('未入力');
+  });
+
   it('一覧の商品の詳細画面には、「リストに戻す」を表示しない', async () => {
     stubDetailRoutes();
     render(<ProductListPage currentTime={currentTime} />);
