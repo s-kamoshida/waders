@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProductEditorDialog } from '../../../client/components/ProductEditorDialog.tsx';
 import type { CategoryResponse } from '../../../shared/categoryContract.ts';
 import type { ProductResponse } from '../../../shared/productContract.ts';
-import { stubFetchRoutes } from '../testFetchStub.ts';
+import { stubFetchRoutes, type RecordedRequest } from '../testFetchStub.ts';
 
 // 画像の縮小（canvas）は jsdom では動かないため、縮小した結果を決まった値にする（issue #41）
 vi.mock('../../../client/productImagePreparation.ts', () => ({
@@ -14,7 +14,17 @@ vi.mock('../../../client/productImagePreparation.ts', () => ({
     return { data: `PREPARED-${file.name}`, width: 800, height: 600 };
   }),
   drawProductImagePreview: vi.fn(),
+  // 取ったカード画像の読み込み（issue #51。このファイルのテストではプレビューの API が取れない応答を返すため使わない）
+  prepareCardImagePreview: vi.fn(async (cardImage: { readonly data: string }) => ({ data: cardImage.data, width: 1200, height: 630 })),
 }));
+
+/**
+ * カード画像のプレビューの要求（issue #51。URL を入れて欄を離れると送る）を除いた、記録されたリクエスト。
+ * プレビューの振る舞いは ProductEditorDialogCardImagePreview.test.tsx で確かめる。
+ */
+function withoutCardImagePreviewRequests(requests: readonly RecordedRequest[]): RecordedRequest[] {
+  return requests.filter((recorded) => recorded.path !== '/api/products/card-image-preview');
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -96,7 +106,7 @@ describe('商品の追加', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(requests).toEqual([
+    expect(withoutCardImagePreviewRequests(requests)).toEqual([
       {
         method: 'POST',
         path: '/api/products',
@@ -570,7 +580,7 @@ describe('連続追加（issue #16）', () => {
 
     await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
     expect(onSaved).not.toHaveBeenCalled();
-    expect(requests).toHaveLength(1);
+    expect(withoutCardImagePreviewRequests(requests)).toHaveLength(1);
     expect(screen.getByRole('dialog', { name: '商品を追加' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('「1つ目の商品」を追加しました。');
   });
@@ -613,7 +623,7 @@ describe('連続追加（issue #16）', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
 
     await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalledTimes(2));
-    expect(requests[1]?.body).toEqual({
+    expect(withoutCardImagePreviewRequests(requests)[1]?.body).toEqual({
       name: '2つ目の商品',
       releaseMonth: '2027-01',
       status: 'reserved',
