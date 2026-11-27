@@ -16,6 +16,7 @@
  *  - 追加では、保存ボタンの横のプルダウンで保存の方法（「保存」「保存して続けて追加」）を選べる。選んだ方法はモーダルを
  *    開いている間保つ。「保存して続けて追加」では、保存した後もモーダルを開いたまま次の商品を入力できる（issue #16）
  *  - 画像を選び・差し替え・消せる。画像は商品を保存した後に送る（商品を保存できなければ送らない。issue #41）
+ *  - 見出しの行の「閉じる」ボタン（×）は「キャンセル」と同じく、確認を出さずに保存せずに閉じる。保存中は押せない（issue #49）
  * 保存・削除に成功したら onSaved を、「保存して続けて追加」で保存したら onSavedAndContinued を呼ぶ。
  * 商品を保存できて画像を保存できなかった場合は、onSaved に { imageSaveFailed: true } を渡す（issue #41）。
  */
@@ -413,9 +414,14 @@ export function ProductEditorDialog({
             void saveProduct(saveMethod === 'saveAndContinue');
           }}
         >
-          <h2 id={`${idPrefix}-title`} className="dialog-title">
-            {title}
-          </h2>
+          <div className="dialog-header">
+            <h2 id={`${idPrefix}-title`} className="dialog-title">
+              {title}
+            </h2>
+            <button type="button" className="dialog-close-button" aria-label="閉じる" disabled={isSubmitting} onClick={onClose}>
+              ×
+            </button>
+          </div>
           <div className="dialog-body">
             {generalError !== null && (
               <p role="alert" className="dialog-error">

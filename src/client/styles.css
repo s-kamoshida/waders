@@ -494,6 +494,61 @@ textarea {
   font-size: 16px;
 }
 
+/*
+ * 見出しの行（見出しと閉じるボタン（×））。モーダルの中をスクロールしても上端に残す（issue #49）。
+ * スクロールするのは今までどおりモーダル全体（.dialog）で、見出しの行だけを貼り付ける（issue #21 のスクロールの決まりは変えない）
+ */
+.dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 6px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.dialog-header .dialog-title {
+  flex: 1;
+  min-width: 0;
+  padding-right: 0;
+  border-bottom: none;
+}
+
+/* 閉じるボタン（×）。指で押しやすいよう 44px 角にする。PC でも表示する（issue #49） */
+.dialog-close-button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dialog-close-button:hover:not(:disabled) {
+  background: var(--background);
+  color: var(--text);
+}
+
+.dialog-close-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.dialog-close-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .dialog-body {
   display: grid;
   gap: 12px;
