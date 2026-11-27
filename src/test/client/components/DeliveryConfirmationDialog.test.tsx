@@ -6,6 +6,9 @@ import { DeliveryConfirmationDialog } from '../../../client/components/DeliveryC
 import type { ProductListItem } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -32,6 +35,7 @@ function createAwaitingProduct(id: string, name: string): ProductListItem {
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    ...NO_DISCOUNT,
     imageUrl: null,
     createdAt: '2026-06-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',

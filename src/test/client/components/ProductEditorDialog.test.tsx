@@ -7,6 +7,9 @@ import type { CategoryResponse } from '../../../shared/categoryContract.ts';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
+
 // 画像の縮小（canvas）は jsdom では動かないため、縮小した結果を決まった値にする（issue #41）
 vi.mock('../../../client/productImagePreparation.ts', () => ({
   prepareProductImage: vi.fn(async (file: File) => {
@@ -52,6 +55,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    ...NO_DISCOUNT,
     imageUrl: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
@@ -114,6 +118,7 @@ describe('商品の追加', () => {
           maker: null,
           note: null,
           ...EMPTY_TICKET_FIELDS,
+          discount: null,
         },
       },
     ]);
@@ -143,6 +148,7 @@ describe('商品の追加', () => {
       maker: null,
       note: null,
       ...EMPTY_TICKET_FIELDS,
+      discount: null,
     });
   });
 
@@ -626,6 +632,7 @@ describe('連続追加（issue #16）', () => {
       maker: null,
       note: null,
       ...EMPTY_TICKET_FIELDS,
+      discount: null,
     });
   });
 
@@ -828,6 +835,7 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
         otherExpense: 600,
         eventStartsAt: null,
         eventEndsAt: null,
+        discount: null,
       });
     });
 
@@ -1644,5 +1652,251 @@ describe('画像の貼り付け欄の案内（issue #47）', () => {
     render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
 
     expect(screen.getByRole('textbox', { name: '画像の貼り付け欄' })).toHaveAttribute('aria-placeholder', 'タップ/選択してから画像を貼り付け');
+  });
+});
+
+describe('値引き（issue #50・BR-35）', () => {
+  /** 値引きが合計を超える場合の文言（MSG-V-031）。 */
+  const DISCOUNT_EXCEEDS_TOTAL_MESSAGE = '値引きは、金額と送料などの合計以下で入力してください。';
+  /** 金額が空のまま値引きを入れた場合の文言（MSG-V-032）。 */
+  const DISCOUNT_WITHOUT_PRICE_MESSAGE = '値引きを入力する場合は、金額も入力してください。';
+  /** 送料などを使わず、場所と費用を使うカテゴリー。 */
+  const ticketCategory: CategoryResponse = {
+    id: 'ticket',
+    name: '電子チケット',
+    fields: ['location', 'handlingFee', 'travelExpense', 'otherExpense'],
+    otherExpenseLabel: 'ドリンク代',
+  };
+  /** 選べる項目を何も使わないカテゴリー。 */
+  const bareCategory: CategoryResponse = { id: 'bare', name: '項目なし', fields: [], otherExpenseLabel: 'その他費用' };
+  const categories = [figureCategory, ticketCategory, bareCategory];
+
+  /** 値引きを指定する。createProduct の引数に展開して渡す。 */
+  const withDiscount = (discount: number | null) => ({ discount });
+
+  /** 追加のモーダルを表示する。 */
+  function renderCreateDialog(props: { onSaved?: () => void; onSavedAndContinued?: () => void; categories?: readonly CategoryResponse[] | null } = {}) {
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
+        onClose={vi.fn()}
+        onSaved={props.onSaved ?? vi.fn()}
+        onSavedAndContinued={props.onSavedAndContinued}
+        categories={props.categories === undefined ? categories : props.categories}
+      />,
+    );
+  }
+
+  /** 編集のモーダルを表示する。 */
+  function renderEditDialog(product: ProductResponse, onSaved: () => void = vi.fn()) {
+    render(<ProductEditorDialog mode={{ kind: 'edit', product }} onClose={vi.fn()} onSaved={onSaved} categories={categories} />);
+  }
+
+  describe('入力欄', () => {
+    it('追加の場合、「値引き」の欄を空で表示する', () => {
+      stubFetchRoutes({});
+      renderCreateDialog();
+
+      expect(screen.getByLabelText('値引き')).toHaveValue(null);
+    });
+
+    it.each(['未設定', 'スケールフィギュア', '電子チケット', '項目なし'])(
+      'カテゴリーが「%s」の場合も、「値引き」の欄を表示する（カテゴリーに関係なく常に表示する）',
+      async (categoryName) => {
+        stubFetchRoutes({});
+        renderCreateDialog();
+
+        await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), categoryName);
+
+        expect(screen.getByLabelText('値引き')).toBeInTheDocument();
+      },
+    );
+
+    it('カテゴリーの定義を読めない場合も、「値引き」の欄を表示する', () => {
+      stubFetchRoutes({});
+      renderCreateDialog({ categories: null });
+
+      expect(screen.getByLabelText('値引き')).toBeInTheDocument();
+    });
+
+    it('編集の場合、保存済みの値引きを表示する', () => {
+      stubFetchRoutes({});
+      renderEditDialog(createProduct({ price: 5000, ...withDiscount(500) }));
+
+      expect(screen.getByLabelText('値引き')).toHaveValue(500);
+    });
+
+    it('値引きのない商品を編集する場合、「値引き」の欄は空で表示する', () => {
+      stubFetchRoutes({});
+      renderEditDialog(createProduct({ price: 5000, ...withDiscount(null) }));
+
+      expect(screen.getByLabelText('値引き')).toHaveValue(null);
+    });
+  });
+
+  describe('保存', () => {
+    it('値引きを入力して追加した場合、値引きを送る', async () => {
+      const { requests } = stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct() }) });
+      const onSaved = vi.fn();
+      renderCreateDialog({ onSaved });
+
+      await userEvent.type(screen.getByLabelText('商品名'), '値引きのある商品');
+      await userEvent.type(screen.getByLabelText('金額（税込）'), '5000');
+      await userEvent.type(screen.getByLabelText('値引き'), '500');
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      expect(requests[0]).toMatchObject({ method: 'POST', path: '/api/products', body: { price: 5000, discount: 500 } });
+    });
+
+    it('値引きが金額を超えても、送料を含めた合計以下の場合（ポイントで送料まで払う場合）、保存して値引きを送る', async () => {
+      const { requests } = stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct() }) });
+      const onSaved = vi.fn();
+      renderCreateDialog({ onSaved });
+
+      await userEvent.type(screen.getByLabelText('商品名'), '送料までポイントで払う商品');
+      await userEvent.type(screen.getByLabelText('金額（税込）'), '1000');
+      await userEvent.type(screen.getByLabelText('送料（税込）'), '800');
+      await userEvent.type(screen.getByLabelText('値引き'), '1800');
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      expect(requests[0]?.body).toMatchObject({ price: 1000, shippingFee: 800, discount: 1800 });
+    });
+
+    it('編集で値引きを変えて保存した場合、変えた値引きを PUT で送る', async () => {
+      const { requests } = stubFetchRoutes({ 'PUT /api/products/product-1': () => ({ body: createProduct() }) });
+      const onSaved = vi.fn();
+      renderEditDialog(createProduct({ price: 5000, shippingFee: 800, ...withDiscount(500) }), onSaved);
+
+      await userEvent.clear(screen.getByLabelText('値引き'));
+      await userEvent.type(screen.getByLabelText('値引き'), '1200');
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      expect(requests[0]).toMatchObject({ method: 'PUT', path: '/api/products/product-1', body: { discount: 1200 } });
+    });
+
+    it('編集で値引きを消して保存した場合、値引きなし（null）として送る', async () => {
+      const { requests } = stubFetchRoutes({ 'PUT /api/products/product-1': () => ({ body: createProduct() }) });
+      const onSaved = vi.fn();
+      renderEditDialog(createProduct({ price: 5000, ...withDiscount(500) }), onSaved);
+
+      await userEvent.clear(screen.getByLabelText('値引き'));
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      expect(requests[0]?.body).toMatchObject({ price: 5000, discount: null });
+    });
+  });
+
+  describe('入力の誤り', () => {
+    it('値引きが金額と送料などの合計を超える場合、値引きの欄の下に文言を表示し、送信しない', async () => {
+      const { requests } = stubFetchRoutes({});
+      renderCreateDialog();
+
+      await userEvent.type(screen.getByLabelText('商品名'), '値引きが多すぎる商品');
+      await userEvent.type(screen.getByLabelText('金額（税込）'), '1000');
+      await userEvent.type(screen.getByLabelText('送料（税込）'), '800');
+      await userEvent.type(screen.getByLabelText('値引き'), '1801');
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      expect(screen.getByText(DISCOUNT_EXCEEDS_TOTAL_MESSAGE)).toBeInTheDocument();
+      expect(screen.getByLabelText('値引き')).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByLabelText('値引き')).toHaveAccessibleDescription(DISCOUNT_EXCEEDS_TOTAL_MESSAGE);
+      expect(requests).toEqual([]);
+    });
+
+    it('金額が空のまま値引きを入れた場合、値引きの欄の下に文言を表示し、送信しない', async () => {
+      const { requests } = stubFetchRoutes({});
+      renderCreateDialog();
+
+      await userEvent.type(screen.getByLabelText('商品名'), '金額のない商品');
+      await userEvent.type(screen.getByLabelText('値引き'), '500');
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      expect(screen.getByText(DISCOUNT_WITHOUT_PRICE_MESSAGE)).toBeInTheDocument();
+      expect(screen.getByLabelText('値引き')).toHaveAccessibleDescription(DISCOUNT_WITHOUT_PRICE_MESSAGE);
+      expect(requests).toEqual([]);
+    });
+
+    it('値引きが上限の金額を超える場合、金額と同じ文言を表示し、送信しない', async () => {
+      const { requests } = stubFetchRoutes({});
+      renderCreateDialog();
+
+      await userEvent.type(screen.getByLabelText('商品名'), '商品');
+      await userEvent.type(screen.getByLabelText('金額（税込）'), '9999999');
+      await userEvent.type(screen.getByLabelText('送料（税込）'), '9999999');
+      await userEvent.type(screen.getByLabelText('値引き'), '10000000');
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      expect(screen.getByLabelText('値引き')).toHaveAccessibleDescription('金額は 9,999,999 円以下で入力してください。');
+      expect(requests).toEqual([]);
+    });
+
+    it('カテゴリーを選び直して表示しなくなった送料は、値引きと比べる合計に含めない（未入力として送るため）', async () => {
+      const { requests } = stubFetchRoutes({});
+      renderCreateDialog();
+
+      await userEvent.type(screen.getByLabelText('商品名'), 'ライブ 東京公演');
+      await userEvent.type(screen.getByLabelText('金額（税込）'), '1000');
+      await userEvent.type(screen.getByLabelText('送料（税込）'), '800');
+      await userEvent.selectOptions(screen.getByLabelText('カテゴリー'), '電子チケット');
+      await userEvent.type(screen.getByLabelText('値引き'), '1500');
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      expect(screen.getByText(DISCOUNT_EXCEEDS_TOTAL_MESSAGE)).toBeInTheDocument();
+      expect(requests).toEqual([]);
+    });
+
+    it('サーバーが値引きの誤りを返した場合、値引きの欄の下にその文言を表示する', async () => {
+      stubFetchRoutes({
+        'POST /api/products': () => ({
+          status: 400,
+          body: { error: { code: 'VALIDATION_ERROR', message: '入力に誤りがあります。', fieldErrors: { discount: DISCOUNT_EXCEEDS_TOTAL_MESSAGE } } },
+        }),
+      });
+      const onSaved = vi.fn();
+      renderCreateDialog({ onSaved });
+
+      await userEvent.type(screen.getByLabelText('商品名'), '商品');
+      await userEvent.type(screen.getByLabelText('金額（税込）'), '5000');
+      await userEvent.type(screen.getByLabelText('値引き'), '500');
+      await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+      expect(await screen.findByText(DISCOUNT_EXCEEDS_TOTAL_MESSAGE)).toBeInTheDocument();
+      expect(screen.getByLabelText('値引き')).toHaveAccessibleDescription(DISCOUNT_EXCEEDS_TOTAL_MESSAGE);
+      expect(onSaved).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('保存して続けて追加', () => {
+    /** 保存ボタンの横のプルダウンで「保存して続けて追加」を選ぶ。 */
+    async function chooseSaveAndContinue() {
+      await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+      await userEvent.click(screen.getByRole('menuitemradio', { name: '保存して続けて追加' }));
+    }
+
+    it('続けて追加する場合、値引きの欄を空に戻し、次の商品は値引きなし（null）として送る', async () => {
+      const { requests } = stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct() }) });
+      const onSavedAndContinued = vi.fn();
+      renderCreateDialog({ onSavedAndContinued });
+
+      await userEvent.type(screen.getByLabelText('商品名'), '1つ目の商品');
+      await userEvent.type(screen.getByLabelText('金額（税込）'), '5000');
+      await userEvent.type(screen.getByLabelText('値引き'), '500');
+      await chooseSaveAndContinue();
+      await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
+      await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalledTimes(1));
+
+      expect(requests[0]?.body).toMatchObject({ discount: 500 });
+      expect(screen.getByLabelText('値引き')).toHaveValue(null);
+
+      await userEvent.type(screen.getByLabelText('商品名'), '2つ目の商品');
+      await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
+      await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalledTimes(2));
+
+      expect(requests[1]?.body).toMatchObject({ name: '2つ目の商品', price: null, discount: null });
+    });
   });
 });

@@ -7,6 +7,9 @@ import { CATEGORY_FILTER_STORAGE_KEY, YEAR_MODE_STORAGE_KEY } from '../../../cli
 import type { ProductListItem } from '../../../shared/productContract.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
+
 // 画像の縮小（canvas）は jsdom では動かないため、縮小した結果を決まった値にする（issue #41）
 vi.mock('../../../client/productImagePreparation.ts', () => ({
   prepareProductImage: vi.fn(async () => ({ data: 'PREPARED', width: 800, height: 600 })),
@@ -42,6 +45,7 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    ...NO_DISCOUNT,
     imageUrl: null,
     createdAt,
     updatedAt: createdAt,

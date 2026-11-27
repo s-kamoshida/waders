@@ -8,6 +8,9 @@ import { App } from '../../client/App.tsx';
 import type { ProductListItem } from '../../shared/productContract.ts';
 import { stubFetchRoutes } from './testFetchStub.ts';
 
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
+
 /** 日本時間 2026-11-17 12:00。 */
 const currentTime = new Date('2026-11-17T03:00:00.000Z');
 
@@ -33,6 +36,7 @@ function createProduct(overrides: Partial<ProductListItem> = {}): ProductListIte
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    ...NO_DISCOUNT,
     imageUrl: null,
     createdAt: '2026-06-01T00:00:00.000Z',
     updatedAt: '2026-06-01T00:00:00.000Z',

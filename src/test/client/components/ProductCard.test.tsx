@@ -6,6 +6,9 @@ import { ProductCard } from '../../../client/components/ProductCard.tsx';
 import type { ProductResponse } from '../../../shared/productContract.ts';
 import type { CategoryResponse } from '../../../shared/categoryContract.ts';
 
+/** 値引きなし（issue #50）。既存の商品・テストの既定の値として、フィクスチャに展開して加える。 */
+const NO_DISCOUNT = { discount: null } as const;
+
 const today = '2026-11-17';
 
 /** テスト用の商品を作る。 */
@@ -30,6 +33,7 @@ function createProduct(overrides: Partial<ProductResponse> = {}): ProductRespons
     otherExpense: null,
     eventStartsAt: null,
     eventEndsAt: null,
+    ...NO_DISCOUNT,
     imageUrl: null,
     createdAt: '2026-11-01T00:00:00.000Z',
     updatedAt: '2026-11-01T00:00:00.000Z',
@@ -236,6 +240,54 @@ describe('場所と費用・カテゴリーごとの入力項目（issue #26・#
 
     expect(screen.getByText('送料無料')).toBeInTheDocument();
     expect(screen.getByText('その他費用 600円')).toBeInTheDocument();
+  });
+});
+
+describe('値引き（issue #50）', () => {
+  /** 値引きを指定する。createProduct の引数に展開して渡す。 */
+  const withDiscount = (discount: number | null) => ({ discount });
+
+  it.each(['grid', 'list'] as const)('値引きがある場合（%s）、金額は値引き後の金額だけを表示し、値引き前の金額と値引きの額は表示しない', (layout) => {
+    render(<ProductCard product={createProduct({ price: 5000, shippingFee: 800, ...withDiscount(500) })} today={today} onSelect={vi.fn()} layout={layout} />);
+
+    expect(screen.getByText('4,500円')).toBeInTheDocument();
+    expect(screen.queryByText('5,000円')).not.toBeInTheDocument();
+    expect(screen.queryByText(/(^|[^,\d])500円/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/値引き/)).not.toBeInTheDocument();
+  });
+
+  it.each(['grid', 'list'] as const)('値引きが金額を超える場合（%s。送料までポイントで払った場合）、金額を「0円」と表示する', (layout) => {
+    render(<ProductCard product={createProduct({ price: 1000, shippingFee: 800, ...withDiscount(1800) })} today={today} onSelect={vi.fn()} layout={layout} />);
+
+    expect(screen.getByText('0円')).toBeInTheDocument();
+    expect(screen.queryByText(/-/)).not.toBeInTheDocument();
+  });
+
+  it('値引きが金額と同じ場合、金額を「0円」と表示する', () => {
+    render(<ProductCard product={createProduct({ price: 1000, ...withDiscount(1000) })} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.getByText('0円')).toBeInTheDocument();
+  });
+
+  it('値引きがあっても、送料の表示は今までどおり送料の額で示す', () => {
+    render(<ProductCard product={createProduct({ price: 5000, shippingFee: 800, ...withDiscount(500) })} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.getByText('送料 800円')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['null', null],
+    ['0 円', 0],
+  ])('値引きが %s の場合、今までどおり金額を表示する', (_label, discount) => {
+    render(<ProductCard product={createProduct({ price: 5000, ...withDiscount(discount) })} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.getByText('5,000円')).toBeInTheDocument();
+  });
+
+  it('金額が未入力の場合、今までどおり「金額未入力」と表示する', () => {
+    render(<ProductCard product={createProduct({ price: null, ...withDiscount(null) })} today={today} onSelect={vi.fn()} />);
+
+    expect(screen.getByText('金額未入力')).toBeInTheDocument();
   });
 });
 
