@@ -1639,10 +1639,10 @@ describe('クリップボードの画像の貼り付け（issue #45）', () => {
 });
 
 describe('画像の貼り付け欄の案内（issue #47）', () => {
-  it('貼り付け欄に、「タップ/選択してから画像をペースト」と案内を表示する（入力欄の案内として読み上げられる）', () => {
+  it('貼り付け欄に、「タップ/選択してから画像を貼り付け」と案内を表示する（入力欄の案内として読み上げられる）', () => {
     stubFetchRoutes({});
     render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
 
-    expect(screen.getByRole('textbox', { name: '画像の貼り付け欄' })).toHaveAttribute('aria-placeholder', 'タップ/選択してから画像をペースト');
+    expect(screen.getByRole('textbox', { name: '画像の貼り付け欄' })).toHaveAttribute('aria-placeholder', 'タップ/選択してから画像を貼り付け');
   });
 });
