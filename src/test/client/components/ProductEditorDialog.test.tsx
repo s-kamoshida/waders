@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProductEditorDialog } from '../../../client/components/ProductEditorDialog.tsx';
 import type { CategoryResponse } from '../../../shared/categoryContract.ts';
 import type { ProductResponse } from '../../../shared/productContract.ts';
+import { getHeaderCloseButton, holdFetchRoute } from '../dialogCloseButtonQueries.ts';
 import { stubFetchRoutes } from '../testFetchStub.ts';
 
 // 画像の縮小（canvas）は jsdom では動かないため、縮小した結果を決まった値にする（issue #41）
@@ -1644,5 +1645,101 @@ describe('画像の貼り付け欄の案内（issue #47）', () => {
     render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
 
     expect(screen.getByRole('textbox', { name: '画像の貼り付け欄' })).toHaveAttribute('aria-placeholder', 'タップ/選択してから画像を貼り付け');
+  });
+});
+
+describe('右上の閉じるボタン（issue #49）', () => {
+  it.each([
+    ['追加', { kind: 'create', defaultReleaseMonth: '2026-11' } as const, '商品を追加'],
+    ['編集', { kind: 'edit', product: createProduct() } as const, '商品を編集'],
+  ])('%sの場合、見出しの行に「閉じる」ボタン（×）を表示する', (_label, mode, title) => {
+    stubFetchRoutes({});
+    render(<ProductEditorDialog mode={mode} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    expect(getHeaderCloseButton(screen.getByRole('dialog', { name: title }))).toBeEnabled();
+  });
+
+  it('アーカイブされた商品の編集の場合も、見出しの行に「閉じる」ボタン（×）を表示する', () => {
+    stubFetchRoutes({});
+    render(
+      <ProductEditorDialog mode={{ kind: 'edit', product: createProduct() }} onClose={vi.fn()} onSaved={vi.fn()} onRestoreRequested={vi.fn()} />,
+    );
+
+    expect(getHeaderCloseButton(screen.getByRole('dialog', { name: '商品を編集' }))).toBeEnabled();
+  });
+
+  it('追加で入力してから「閉じる」ボタン（×）を押した場合、キャンセルと同じく確認を出さず、送信せずに onClose を呼ぶ', async () => {
+    const { requests } = stubFetchRoutes({});
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={onClose} onSaved={onSaved} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), '入力途中の商品');
+    await userEvent.click(getHeaderCloseButton(screen.getByRole('dialog', { name: '商品を追加' })));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('編集で値を変えてから「閉じる」ボタン（×）を押した場合、キャンセルと同じく送信せずに onClose を呼ぶ', async () => {
+    const { requests } = stubFetchRoutes({});
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'edit', product: createProduct() }} onClose={onClose} onSaved={onSaved} />);
+
+    await userEvent.clear(screen.getByLabelText('商品名'));
+    await userEvent.type(screen.getByLabelText('商品名'), '名前を変えた商品');
+    await userEvent.click(getHeaderCloseButton(screen.getByRole('dialog', { name: '商品を編集' })));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+  });
+
+  it('画像を選んでから「閉じる」ボタン（×）を押した場合、画像も送らずに onClose を呼ぶ', async () => {
+    const { requests } = stubFetchRoutes({});
+    const onClose = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'edit', product: createProduct() }} onClose={onClose} onSaved={vi.fn()} />);
+
+    await userEvent.upload(screen.getByLabelText('画像'), new File(['image'], 'figure.jpg', { type: 'image/jpeg' }));
+    await screen.findByRole('button', { name: '画像を消す' });
+    await userEvent.click(getHeaderCloseButton(screen.getByRole('dialog', { name: '商品を編集' })));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(requests).toEqual([]);
+  });
+
+  it('保存中の場合、「閉じる」ボタン（×）とキャンセルは押せず、×・キャンセル・Esc キーのいずれでも閉じない', async () => {
+    const { fetchMock } = stubFetchRoutes({});
+    holdFetchRoute(fetchMock, 'POST /api/products');
+    const onClose = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={onClose} onSaved={vi.fn()} />);
+    const dialog = screen.getByRole('dialog', { name: '商品を追加' });
+
+    await userEvent.type(screen.getByLabelText('商品名'), '保存中の商品');
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeDisabled());
+    const closeButton = getHeaderCloseButton(dialog);
+    expect(closeButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'キャンセル' })).toBeDisabled();
+    await userEvent.click(closeButton);
+    await userEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('モーダルの中で Esc キーを押した場合、今までどおり送信せずに onClose を呼ぶ', async () => {
+    const { requests } = stubFetchRoutes({});
+    const onClose = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={onClose} onSaved={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), '入力途中の商品');
+    await userEvent.keyboard('{Escape}');
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(requests).toEqual([]);
   });
 });
