@@ -58,6 +58,8 @@ export type ProductGroupListProps = {
   readonly yearGroups: readonly YearGroup[];
   /** 発売月が未定の商品のまとまり（issue #62）。渡すと、年・月のグループの下に表示する。省くと表示しない。 */
   readonly undeterminedGroup?: UndeterminedGroup;
+  /** 発売月未定のまとまりの見出しの集計の後ろに付ける注釈（リストの「※検討中を含む」。issue #69）。省くと付けない。 */
+  readonly undeterminedSummaryNote?: string;
   /** 見出しの集計の表記。 */
   readonly formatSummary: (summary: GroupSummary) => string;
   /** 日本時間の今日の日付（受注期限の警告の判定に使う）。 */
@@ -82,6 +84,7 @@ export type ProductGroupListProps = {
 export function ProductGroupList({
   yearGroups,
   undeterminedGroup,
+  undeterminedSummaryNote,
   formatSummary,
   today,
   onSelect,
@@ -120,7 +123,12 @@ export function ProductGroupList({
     >
       <span className="group-caret" aria-hidden="true" />
       <span className="group-label">{monthGroup.label}</span>{' '}
-      <span className="group-summary">{formatSummary(monthGroup.summary)}</span>
+      <span className="group-summary">
+        {formatSummary(monthGroup.summary)}
+        {monthGroup.month === null && undeterminedSummaryNote !== undefined && (
+          <span className="group-summary-note">{undeterminedSummaryNote}</span>
+        )}
+      </span>
     </button>
   );
 

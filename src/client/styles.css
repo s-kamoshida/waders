@@ -196,6 +196,16 @@ textarea {
   font-size: 13px;
 }
 
+/* 見出しの名前（「発売月未定」など）は途中で折り返さない。集計の注釈（issue #69）は、折り返すならまとめて次の行に送る */
+.group-label {
+  flex: none;
+  white-space: nowrap;
+}
+
+.group-summary-note {
+  display: inline-block;
+}
+
 .group-caret::before {
   content: "▼";
   display: inline-block;
