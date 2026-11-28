@@ -1012,7 +1012,7 @@ textarea {
   justify-self: start;
 }
 
-/* 月の見出しの追加ボタン（issue #16） */
+/* 月の見出し（issue #16 の追加ボタンは、issue #68 で並びの最後の追加のカードに移した） */
 .month-heading {
   display: flex;
   align-items: center;
@@ -1024,7 +1024,7 @@ textarea {
   min-width: 0;
 }
 
-/* 発売月が未定の商品のまとまり（issue #62）。年と同じ階層の見出しに、月と同じ追加ボタンを置く */
+/* 発売月が未定の商品のまとまり（issue #62）。年と同じ階層の見出し */
 .undetermined-heading {
   display: flex;
   align-items: center;
@@ -1036,21 +1036,29 @@ textarea {
   min-width: 0;
 }
 
-.month-add-button {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--surface);
+/* 並びの最後の追加のカード（issue #68）。点線の枠の中央に「＋」だけを置く。並べる形式では同じ行のカードと同じ高さになる */
+.product-add-card {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
   color: var(--accent);
-  font-size: 16px;
+  font-size: 28px;
   line-height: 1;
   cursor: pointer;
 }
 
-.month-add-button:hover {
+.product-add-card:hover {
   border-color: var(--accent);
+  background: var(--surface);
+}
+
+/* スマートフォンのリスト形式では、横幅いっぱいの 1 行にする */
+.product-list .product-add-card {
+  min-height: 48px;
+  font-size: 22px;
 }
 
 /* 「保存して続けて追加」で保存したことの表示（issue #16） */

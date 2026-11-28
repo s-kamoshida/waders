@@ -83,19 +83,20 @@ describe('一覧の表示', () => {
     const november = await screen.findByRole('region', { name: '2026/11' });
     expect(within(november).getByText('11月の予約商品')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^2026\/11 / })).toHaveTextContent('1個（合計 19,800円見込）');
-    expect(within(screen.getByRole('region', { name: '2026/12' })).getByText('商品はありません')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '2026/12' })).getByRole('button', { name: '2026/12に商品を追加' })).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: '2027/01' })).getByText('1月の予約商品')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^2026年/ })).toHaveTextContent('1個（合計 19,800円見込）');
     expect(screen.getByRole('button', { name: /^2027年/ })).toHaveTextContent('1個（合計 31,600円見込）');
   });
 
-  it('商品が 1 件もない場合、当月を「商品はありません」として表示する', async () => {
+  it('商品が 1 件もない場合、当月を追加の空のカードだけで表示する（「商品はありません」の代わり。issue #68）', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [] } }) });
 
     render(<ProductListPage currentTime={currentTime} />);
 
     const november = await screen.findByRole('region', { name: '2026/11' });
-    expect(within(november).getByText('商品はありません')).toBeInTheDocument();
+    expect(within(november).getByRole('button', { name: '2026/11に商品を追加' })).toBeInTheDocument();
+    expect(within(november).queryByText('商品はありません')).not.toBeInTheDocument();
   });
 
   it('読み込みに失敗した場合、失敗したことを表示する', async () => {
@@ -255,7 +256,7 @@ describe('追加・編集のモーダル', () => {
 });
 
 describe('月ごとの追加ボタン（issue #16）', () => {
-  it('月の見出しの追加ボタンを押した場合、発売月がその月の追加のモーダルを開く（商品のない月も含む）', async () => {
+  it('月の追加のカードを押した場合、発売月がその月の追加のモーダルを開く（商品のない月も含む。issue #68 で見出しから並びの最後に移した）', async () => {
     stubFetchRoutes({
       'GET /api/products': () => ({ body: { products: [createProduct({ releaseMonth: '2027-02' })] } }),
     });
@@ -268,15 +269,14 @@ describe('月ごとの追加ボタン（issue #16）', () => {
     expect(within(dialog).getByLabelText('発売月')).toHaveValue('2027-01');
   });
 
-  it('月の見出しを折りたたんでも、その月の追加ボタンは押せる', async () => {
+  it('月を折りたたんだ場合、その月の追加のカードも隠す（issue #68。それまでは見出しの追加ボタンを折りたたんでも押せた）', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct()] } }) });
     render(<ProductListPage currentTime={currentTime} />);
     await screen.findByText('商品 ' + String(createdCount));
 
     await userEvent.click(screen.getByRole('button', { name: /^2026\/11 / }));
-    await userEvent.click(screen.getByRole('button', { name: '2026/11に商品を追加' }));
 
-    expect(within(screen.getByRole('dialog', { name: '商品を追加' })).getByLabelText('発売月')).toHaveValue('2026-11');
+    expect(screen.queryByRole('button', { name: '2026/11に商品を追加' })).not.toBeInTheDocument();
   });
 });
 
@@ -1511,15 +1511,16 @@ describe('発売月が未定の商品（issue #62）', () => {
     expect(names[1]).toContain('未定の検討中の商品');
   });
 
-  it('未定の商品がない場合も、「発売月未定」のまとまりを表示する（ドラッグの移動先と追加のため）', async () => {
+  it('未定の商品がない場合も、「発売月未定」のまとまりを表示する（ドラッグの移動先と追加のため。中は追加の空のカードだけ。issue #68）', async () => {
     stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '12月の商品', releaseMonth: '2026-12' })] } }) });
     render(<ProductListPage currentTime={currentTime} />);
 
     const undeterminedGroup = await screen.findByRole('region', { name: '発売月未定' });
-    expect(within(undeterminedGroup).getByText('商品はありません')).toBeInTheDocument();
+    expect(within(undeterminedGroup).getByRole('button', { name: '発売月未定に商品を追加' })).toBeInTheDocument();
+    expect(within(undeterminedGroup).queryByText('商品はありません')).not.toBeInTheDocument();
   });
 
-  it('未定のまとまりの見出しの＋を押した場合、発売月を未定にした状態で追加のモーダルを開き、保存すると発売月を null で送る', async () => {
+  it('未定のまとまりの追加のカード（issue #68 で見出しから移した）を押した場合、発売月を未定にした状態で追加のモーダルを開き、保存すると発売月を null で送る', async () => {
     const added = createProduct({ name: '追加した未定の商品', releaseMonth: UNDETERMINED_RELEASE_MONTH });
     const { requests } = stubFetchRoutes({
       'GET /api/products': () => ({ body: { products: [] } }),
@@ -1587,6 +1588,101 @@ describe('発売月が未定の商品（issue #62）', () => {
     const detail = screen.getByRole('dialog', { name: '商品の詳細' });
     const term = within(detail).getByText('発売月', { selector: 'dt' });
     expect(term.nextElementSibling).toHaveTextContent(/^未定$/);
+  });
+});
+
+describe('追加の空のカード（issue #68）', () => {
+  /** 画面の幅を偽装する。isPhoneWidth が true なら横幅 600px 以下として扱う。 */
+  function stubScreenWidth(isPhoneWidth: boolean) {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(max-width: 600px)' ? isPhoneWidth : false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+  }
+
+  /** 2026/11 の商品 2 件と、未定の商品 1 件。 */
+  function createProducts(): ProductResponse[] {
+    return [
+      createProduct({ name: '11月の商品 A', releaseMonth: '2026-11' }),
+      createProduct({ name: '11月の商品 B', releaseMonth: '2026-11', status: 'considering' }),
+      createProduct({ name: '未定の商品', releaseMonth: null as unknown as string }),
+    ];
+  }
+
+  it('月と発売月未定の見出しには、追加ボタンを置かない', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('11月の商品 A');
+
+    for (const heading of screen.getAllByRole('heading')) {
+      expect(within(heading).queryByRole('button', { name: /に商品を追加$/ })).not.toBeInTheDocument();
+    }
+  });
+
+  it.each([
+    ['PC の幅', false],
+    ['スマートフォンの幅', true],
+  ])('%sでは、各月の追加のカードを、その月の商品の並びの最後（最後の商品より後）に置く', async (_label, isPhoneWidth) => {
+    stubScreenWidth(isPhoneWidth);
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    const november = await screen.findByRole('region', { name: '2026/11' });
+
+    const addButton = within(november).getByRole('button', { name: '2026/11に商品を追加' });
+    const cards = within(november).getAllByRole('article');
+    const lastCard = cards.at(-1);
+    if (lastCard === undefined) throw new Error('カードがない');
+    expect(lastCard.compareDocumentPosition(addButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lastCard.parentElement).toBe(addButton.closest('.product-grid, .product-list'));
+  });
+
+  it('発売月未定のまとまりでも、追加のカードを商品の並びの最後に置く', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    const undeterminedGroup = await screen.findByRole('region', { name: '発売月未定' });
+
+    const addButton = within(undeterminedGroup).getByRole('button', { name: '発売月未定に商品を追加' });
+    const lastCard = within(undeterminedGroup).getAllByRole('article').at(-1);
+    if (lastCard === undefined) throw new Error('カードがない');
+    expect(lastCard.compareDocumentPosition(addButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('追加のカードは「＋」だけを表示し、ドラッグできない', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    const november = await screen.findByRole('region', { name: '2026/11' });
+
+    const addButton = within(november).getByRole('button', { name: '2026/11に商品を追加' });
+    expect(addButton).toHaveTextContent(/^＋$/);
+    expect(addButton.closest('[draggable="true"]')).toBeNull();
+  });
+
+  it('商品を別の月の追加のカードの上に落とした場合も、その月に移動する', async () => {
+    let products = [createProduct({ id: 'moving', name: '動かす商品', releaseMonth: '2026-11' }), createProduct({ name: '1月の商品', releaseMonth: '2027-01' })];
+    const { requests } = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'PATCH /api/products/moving/release-month': (body) => {
+        const releaseMonth = (body as { releaseMonth: string }).releaseMonth;
+        products = products.map((product) => (product.id === 'moving' ? { ...product, releaseMonth } : product));
+        return { body: products[0] };
+      },
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('動かす商品');
+    const card = screen.getByRole('button', { name: /動かす商品/ }).closest('article');
+    if (card === null) throw new Error('カードがない');
+    const target = screen.getByRole('button', { name: '2026/12に商品を追加' });
+
+    fireEvent.dragStart(card);
+    fireEvent.dragEnter(target);
+    fireEvent.dragOver(target);
+    fireEvent.drop(target);
+    fireEvent.dragEnd(card);
+
+    await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'PATCH')).toHaveLength(1));
+    expect(requests.find((recorded) => recorded.method === 'PATCH')?.body).toEqual({ releaseMonth: '2026-12' });
   });
 });
 

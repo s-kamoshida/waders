@@ -3,7 +3,7 @@
  *
  * 所属: クライアント（画面の部品）
  * 責務: 組み立て済みの年・月のグループを、折りたためる見出し（個数と合計金額）と商品のカードで表示する。
- * 見出しの集計の表記（見込みか実績か）と、月の見出しの追加ボタンを置くか（リストだけ。issue #16）、
+ * 見出しの集計の表記（見込みか実績か）と、月の並びの最後に追加のカードを置くか（リストだけ。issue #16・#68）、
  * ドラッグアンドドロップで発売月を移動できるか（リストだけ。issue #13）は呼び出し側が決める。
  * 商品は、スマートフォンの幅（横幅 600px 以下）では 1 行に 1 件のリスト形式、それより広い幅ではカードのグリッドで並べる（issue #15）。
  * カードにはカテゴリーの定義と並べ方を渡す（リスト形式では開催日時の代わりに開催期間を示す。PR #30 のレビュー）。
@@ -66,7 +66,10 @@ export type ProductGroupListProps = {
   readonly today: string;
   /** 商品を押したときに呼ぶ。 */
   readonly onSelect: (product: ProductResponse) => void;
-  /** 渡すと、月の見出しの右端に追加ボタンを置き、押したときにその月（YYYY-MM。未定のまとまりは null）を渡して呼ぶ。 */
+  /**
+   * 渡すと、各月（未定のまとまりを含む）の商品の並びの最後に「＋」だけの追加のカードを置き（issue #68。それまでは月の見出しの右端）、
+   * 押したときにその月（YYYY-MM。未定のまとまりは null）を渡して呼ぶ。0 件の月は「商品はありません」の代わりにこのカードだけを表示する。
+   */
   readonly onAddToMonth?: (month: string | null) => void;
   /**
    * 渡すと、商品をドラッグアンドドロップで別の月に移動できる。別の月に落としたときに、新しい発売月
@@ -129,12 +132,12 @@ export function ProductGroupList({
     </button>
   );
 
-  /** 月のまとまりの見出しの追加ボタン（onAddToMonth を渡した場合だけ）。 */
-  const renderAddButton = (monthGroup: MonthGroup | UndeterminedGroup) =>
+  /** 月のまとまりの並びの最後に置く、「＋」だけの追加のカード（onAddToMonth を渡した場合だけ。issue #68）。 */
+  const renderAddCard = (monthGroup: MonthGroup | UndeterminedGroup) =>
     onAddToMonth !== undefined && (
       <button
         type="button"
-        className="month-add-button"
+        className="product-add-card"
         aria-label={`${monthGroup.label}に商品を追加`}
         onClick={() => onAddToMonth(monthGroup.month)}
       >
@@ -142,9 +145,10 @@ export function ProductGroupList({
       </button>
     );
 
-  /** 月のまとまりの商品の並び。商品がなければ「商品はありません」。 */
-  const renderProducts = (products: readonly ProductResponse[]) => {
-    if (products.length === 0) return <p className="empty-month">{SCREEN_MESSAGES.emptyMonth}</p>;
+  /** 月のまとまりの商品の並びと、最後の追加のカード。追加のカードを置かず（アーカイブ）商品もなければ「商品はありません」。 */
+  const renderProducts = (monthGroup: MonthGroup | UndeterminedGroup) => {
+    const { products } = monthGroup;
+    if (products.length === 0 && onAddToMonth === undefined) return <p className="empty-month">{SCREEN_MESSAGES.emptyMonth}</p>;
     return (
       <div className={productContainerClassName}>
         {products.map((product) => (
@@ -159,6 +163,7 @@ export function ProductGroupList({
             layout={isPhoneWidth ? 'list' : 'grid'}
           />
         ))}
+        {renderAddCard(monthGroup)}
       </div>
     );
   };
@@ -184,11 +189,8 @@ export function ProductGroupList({
             const isMonthExpanded = !collapsedMonths.has(convertReleaseMonthToDropTargetKey(monthGroup.month));
             return (
               <section key={monthGroup.month} {...getMonthSectionProps(monthGroup, 'month-group')}>
-                <h3 className="month-heading">
-                  {renderToggle(monthGroup, isMonthExpanded)}
-                  {renderAddButton(monthGroup)}
-                </h3>
-                {isMonthExpanded && renderProducts(monthGroup.products)}
+                <h3 className="month-heading">{renderToggle(monthGroup, isMonthExpanded)}</h3>
+                {isMonthExpanded && renderProducts(monthGroup)}
               </section>
             );
           })}
@@ -203,11 +205,8 @@ export function ProductGroupList({
       {groups}
       {undeterminedGroup !== undefined && (
         <section {...getMonthSectionProps(undeterminedGroup, 'year-group undetermined-group')}>
-          <h2 className="year-heading undetermined-heading">
-            {renderToggle(undeterminedGroup, isUndeterminedExpanded)}
-            {renderAddButton(undeterminedGroup)}
-          </h2>
-          {isUndeterminedExpanded && renderProducts(undeterminedGroup.products)}
+          <h2 className="year-heading undetermined-heading">{renderToggle(undeterminedGroup, isUndeterminedExpanded)}</h2>
+          {isUndeterminedExpanded && renderProducts(undeterminedGroup)}
         </section>
       )}
       {dragAndDrop.grabbedProductId !== null && (
