@@ -36,19 +36,28 @@ export function formatPriceLabel(price: number | null): string {
 }
 
 /**
- * カード・リストに表示する金額（値引き後の金額）を求める（issue #50）。
- * 値引きが金額を超える場合（送料などまでポイントで払った場合）は 0 円にする。
- * @returns 金額が未入力なら null、値引きがなければ金額のまま
+ * カード・リストに表示する金額（送料込み・値引き後の金額）を求める（値引きは issue #50、送料込みは issue #70。BR-41）。
+ * 金額＋送料−値引き。値引きが金額と送料の合計を超える場合は 0 円にする。手数料などの費用は含めない（別に示すため）。
+ * @returns 金額が未入力なら null（送料があっても）
  */
-export function calculateDiscountedPrice(price: number | null, discount: number | null): number | null {
-  if (price === null) return null;
-  return Math.max(0, price - (discount ?? 0));
+export function calculateCardPrice(product: Pick<ProductResponse, 'price' | 'shippingFee' | 'discount'>): number | null {
+  if (product.price === null) return null;
+  return Math.max(0, product.price + (product.shippingFee ?? 0) - (product.discount ?? 0));
 }
 
 /** 送料の表記。未入力と 0 円は「送料無料」、それ以外は「送料 800円」。 */
 export function formatShippingLabel(shippingFee: number | null): string {
   if (shippingFee === null || shippingFee === 0) return '送料無料';
   return `送料 ${formatYen(shippingFee)}`;
+}
+
+/**
+ * カード・リストの送料の表記（issue #70。BR-41）。金額に送料を含めて示すため、1 円以上は「送料800円を含む」とする。
+ * 未入力と 0 円は formatShippingLabel と同じく「送料無料」。
+ */
+export function formatCardShippingLabel(shippingFee: number | null): string {
+  if (shippingFee === null || shippingFee === 0) return formatShippingLabel(shippingFee);
+  return `送料${formatYen(shippingFee)}を含む`;
 }
 
 /** 購入先の名前として、URL のドメインを返す。URL が未入力・不正なら null。 */

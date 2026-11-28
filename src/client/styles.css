@@ -363,6 +363,8 @@ textarea {
 }
 
 .product-card-body {
+  /* 余った高さを本文が受け持ち、最後の行の金額を下端にそろえる（issue #70） */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -379,6 +381,7 @@ textarea {
 }
 
 .product-card-price {
+  margin-top: auto;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
