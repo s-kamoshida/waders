@@ -971,7 +971,7 @@ describe('スマートフォンの幅でのリスト形式（issue #15）', () =
     expect(findProductContainer('2026/11')).toHaveClass('product-list');
   });
 
-  it('リスト形式の場合、各行の左端（商品名より前）に共通のアイコンを表示し、ステータス・メーカー・商品名・金額・送料・備考の印・購入先を表示する', async () => {
+  it('リスト形式の場合、各行の左端（商品名より前）に共通のアイコンを表示し、ステータス・メーカー・商品名・金額（送料込み。issue #70）・送料・備考の印・購入先を表示する', async () => {
     stubScreenWidth(true);
     const product = createProduct({
       name: '全部入りの商品',
@@ -992,8 +992,8 @@ describe('スマートフォンの幅でのリスト形式（issue #15）', () =
     expect((icon?.compareDocumentPosition(within(item).getByText('全部入りの商品')) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(item).getByText('予約済')).toBeInTheDocument();
     expect(within(item).getByText('メーカーA')).toBeInTheDocument();
-    expect(within(item).getByText('24,200円')).toBeInTheDocument();
-    expect(within(item).getByText('送料 800円')).toBeInTheDocument();
+    expect(within(item).getByText('25,000円')).toBeInTheDocument();
+    expect(within(item).getByText('送料800円を含む')).toBeInTheDocument();
     expect(within(item).getByRole('img', { name: '備考あり' })).toHaveTextContent('📝');
     expect(within(item).queryByText('初回特典付き')).not.toBeInTheDocument();
     expect(within(item).getByRole('link', { name: 'shop.example.jp' })).toBeInTheDocument();
