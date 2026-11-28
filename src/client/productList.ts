@@ -16,7 +16,7 @@ import { SCREEN_MESSAGES } from './screenMessages.ts';
 export type YearMode = 'calendar';
 
 /**
- * 見出しの集計。未購入とキャンセル（issue #57）を除いた個数と、金額・送料・手数料・交通費（見込）・その他費用の合計から値引きを引いた額
+ * 見出しの集計。検討中（issue #69。発売月未定のまとまりでは含める）・未購入・キャンセル（issue #57）を除いた個数と、金額・送料・手数料・交通費（見込）・その他費用の合計から値引きを引いた額
  * （金額が未入力の商品は個数だけに含める。手数料などは issue #26、値引きは issue #50）。
  */
 export type GroupSummary = { readonly count: number; readonly totalYen: number };
@@ -53,8 +53,12 @@ function rankProduct(product: ProductResponse): number {
   return 5;
 }
 
-/** 見出しの個数と合計金額に含めるか。未購入とキャンセル（払っていないため。issue #57）は含めない。 */
-function isCountedInSummary(product: ProductResponse): boolean {
+/**
+ * 見出しの個数と合計金額に含めるか。未購入とキャンセル（払っていないため。issue #57）は含めない。
+ * 検討中（買うと決めていないため。issue #69）は、includesConsidering が true（発売月未定のまとまり）のときだけ含める。
+ */
+function isCountedInSummary(product: ProductResponse, includesConsidering: boolean): boolean {
+  if (product.status === 'considering') return includesConsidering;
   return product.status !== 'unpurchased' && product.status !== 'canceled';
 }
 
@@ -99,9 +103,12 @@ function calculateProductTotalYen(product: ProductResponse): number {
   return Math.max(0, totalYen - (product.discount ?? 0));
 }
 
-/** 商品の見出しの集計を求める。 */
-function summarizeProducts(products: readonly ProductResponse[]): GroupSummary {
-  const countedProducts = products.filter(isCountedInSummary);
+/**
+ * 商品の見出しの集計を求める。
+ * @param includesConsidering 検討中の商品を数えるか（発売月未定のまとまりだけ true。issue #69）
+ */
+function summarizeProducts(products: readonly ProductResponse[], includesConsidering = false): GroupSummary {
+  const countedProducts = products.filter((product) => isCountedInSummary(product, includesConsidering));
   const totalYen = countedProducts.reduce((total, product) => total + calculateProductTotalYen(product), 0);
   return { count: countedProducts.length, totalYen };
 }
@@ -126,7 +133,8 @@ function buildMonthGroup(month: string, products: readonly ProductResponse[]): M
 }
 
 /**
- * 発売月が未定の商品のまとまりを作る（issue #62、BR-40）。並び順と集計は月のグループと同じ規則にする。
+ * 発売月が未定の商品のまとまりを作る（issue #62、BR-40）。並び順は月のグループと同じ規則にする。
+ * 集計は、月のグループと違い検討中も含める（issue #69。見出しに「※検討中を含む」と注釈を付ける）。
  * 年の見出しの集計には含めない（年・月のグループとは別に、その下に表示する）。
  * @param products 商品（順不同。発売月のある商品は除く）
  */
@@ -136,7 +144,7 @@ export function buildUndeterminedGroup(products: readonly ProductResponse[]): Un
     month: null,
     label: SCREEN_MESSAGES.undeterminedReleaseMonthGroup,
     products: undeterminedProducts,
-    summary: summarizeProducts(undeterminedProducts),
+    summary: summarizeProducts(undeterminedProducts, true),
   };
 }
 

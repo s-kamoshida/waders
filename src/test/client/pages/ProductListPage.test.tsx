@@ -1589,3 +1589,57 @@ describe('発売月が未定の商品（issue #62）', () => {
     expect(term.nextElementSibling).toHaveTextContent(/^未定$/);
   });
 });
+
+describe('見出しの集計から検討中を除く（issue #69）', () => {
+  /** 発売月の未定（null）。 */
+  const UNDETERMINED_RELEASE_MONTH = null as unknown as string;
+
+  it('月と年の見出しの個数と合計金額に、検討中の商品を含めない', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({ name: '予約した商品', releaseMonth: '2026-12', status: 'reserved', price: 10000 }),
+            createProduct({ name: '検討中の商品', releaseMonth: '2026-12', status: 'considering', price: 24200 }),
+          ],
+        },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('検討中の商品');
+
+    expect(screen.getByRole('button', { name: /^2026\/12 / })).toHaveTextContent('1個（合計 10,000円見込）');
+    expect(screen.getByRole('button', { name: /^2026年 / })).toHaveTextContent('1個（合計 10,000円見込）');
+  });
+
+  it('発売月未定のまとまりの見出しは、検討中の商品も含めて数え、「※検討中を含む」と注釈を付ける', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: {
+          products: [
+            createProduct({ name: '未定の予約済の商品', releaseMonth: UNDETERMINED_RELEASE_MONTH, status: 'reserved', price: 5000 }),
+            createProduct({ name: '未定の検討中の商品', releaseMonth: UNDETERMINED_RELEASE_MONTH, status: 'considering', price: 3000 }),
+          ],
+        },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('未定の検討中の商品');
+
+    expect(screen.getByRole('button', { name: /^発売月未定 / })).toHaveTextContent('2個（合計 8,000円見込）※検討中を含む');
+  });
+
+  it('月の見出しには「※検討中を含む」の注釈を付けない', async () => {
+    stubFetchRoutes({
+      'GET /api/products': () => ({
+        body: { products: [createProduct({ name: '検討中の商品', releaseMonth: '2026-12', status: 'considering', price: 3000 })] },
+      }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('検討中の商品');
+
+    expect(screen.getByRole('button', { name: /^2026\/12 / })).toHaveTextContent('0個（合計 0円見込）');
+    expect(screen.getByRole('button', { name: /^2026\/12 / })).not.toHaveTextContent('検討中を含む');
+    expect(screen.getByRole('button', { name: /^2026年 / })).not.toHaveTextContent('検討中を含む');
+  });
+});
