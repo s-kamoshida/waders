@@ -124,7 +124,7 @@ export async function fetchCardImagePreview(url: string): Promise<CardImagePrevi
 }
 
 /** アーカイブされた商品を、新しい発売月でリストに戻す（issue #9）。 */
-export async function restoreProduct(productId: string, releaseMonth: string): Promise<ProductResponse> {
+export async function restoreProduct(productId: string, releaseMonth: string | null): Promise<ProductResponse> {
   return productSchema.parse(await sendApiRequest('POST', `/api/products/${encodeURIComponent(productId)}/restore`, { releaseMonth }));
 }
 
@@ -144,7 +144,7 @@ export async function fetchCategories(): Promise<CategoryResponse[]> {
 }
 
 /** 発売月だけを変える（ドラッグアンドドロップ。issue #13）。 */
-export async function moveProductToReleaseMonth(productId: string, releaseMonth: string): Promise<ProductResponse> {
+export async function moveProductToReleaseMonth(productId: string, releaseMonth: string | null): Promise<ProductResponse> {
   return productSchema.parse(
     await sendApiRequest('PATCH', `/api/products/${encodeURIComponent(productId)}/release-month`, { releaseMonth }),
   );

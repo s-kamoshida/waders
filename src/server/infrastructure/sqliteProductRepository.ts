@@ -243,6 +243,71 @@ export const SCHEMA_MIGRATIONS: readonly string[] = [
     WHEN (NEW.category_id IS NULL) <> (NEW.category IS NULL)
     BEGIN SELECT RAISE(ABORT, 'category_id と category は両方あるか両方ないかのどちらかにする'); END;
   `,
+  // 版数 11: 発売月の未定（issue #62、BR-40）。未定を NULL で持つため、release_month の NOT NULL を外す。
+  // 版数 10 と同じく products の表を作り直す（列・制約・並び・トリガーは版数 10 と同じにし、release_month だけを変える）。
+  // 変更履歴の value_after は NOT NULL のままにし、未定は 'undetermined' で記録する（NULL は「登録時で変更前がない」を表すため）
+  `
+  CREATE TABLE products_version_eleven (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND ${MAXIMUM_PRODUCT_NAME_LENGTH}),
+    release_month TEXT CHECK (
+      release_month IS NULL
+      OR (
+        release_month GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]'
+        AND CAST(substr(release_month, 6, 2) AS INTEGER) BETWEEN 1 AND 12
+      )
+    ),
+    status TEXT NOT NULL CHECK (status IN (${VERSION_TEN_STATUS_LIST})),
+    cancelable INTEGER NOT NULL CHECK (cancelable IN (0, 1)),
+    price INTEGER CHECK (price IS NULL OR price BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    shipping_fee INTEGER CHECK (shipping_fee IS NULL OR shipping_fee BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    order_deadline TEXT CHECK (
+      order_deadline IS NULL
+      OR (order_deadline GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]' AND date(order_deadline) = order_deadline)
+    ),
+    url TEXT CHECK (url IS NULL OR url GLOB 'http://*' OR url GLOB 'https://*'),
+    category TEXT CHECK (category IS NULL OR length(category) BETWEEN 1 AND ${MAXIMUM_CATEGORY_NAME_LENGTH}),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    maker TEXT CHECK (maker IS NULL OR length(maker) BETWEEN 1 AND ${MAXIMUM_MAKER_LENGTH}),
+    note TEXT CHECK (note IS NULL OR length(note) BETWEEN 1 AND ${MAXIMUM_NOTE_LENGTH}),
+    category_id TEXT CHECK (category_id IS NULL OR length(category_id) BETWEEN 1 AND ${MAXIMUM_CATEGORY_ID_LENGTH}),
+    location TEXT CHECK (location IS NULL OR length(location) BETWEEN 1 AND ${MAXIMUM_LOCATION_LENGTH}),
+    handling_fee INTEGER CHECK (handling_fee IS NULL OR handling_fee BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    travel_expense INTEGER CHECK (travel_expense IS NULL OR travel_expense BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    other_expense INTEGER CHECK (other_expense IS NULL OR other_expense BETWEEN 0 AND ${MAXIMUM_PRICE_YEN}),
+    event_starts_at TEXT CHECK (event_starts_at IS NULL OR event_starts_at GLOB '${utcDateTimePattern}'),
+    event_ends_at TEXT CHECK (
+      event_ends_at IS NULL
+      OR (event_ends_at GLOB '${utcDateTimePattern}' AND (event_starts_at IS NULL OR event_ends_at >= event_starts_at))
+    ),
+    uploaded_image_file_name TEXT CHECK (
+      uploaded_image_file_name IS NULL
+      OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.jpg'
+      OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.png'
+      OR uploaded_image_file_name GLOB '${imageFileNameStemPattern}.webp'
+    ),
+    card_image_file_name TEXT CHECK (
+      card_image_file_name IS NULL
+      OR card_image_file_name GLOB '${imageFileNameStemPattern}.jpg'
+      OR card_image_file_name GLOB '${imageFileNameStemPattern}.png'
+      OR card_image_file_name GLOB '${imageFileNameStemPattern}.webp'
+    ),
+    discount INTEGER CHECK (discount IS NULL OR discount BETWEEN 0 AND ${MAXIMUM_PRICE_YEN})
+  ) STRICT;
+
+  INSERT INTO products_version_eleven (rowid, ${VERSION_NINE_PRODUCT_COLUMNS})
+    SELECT rowid, ${VERSION_NINE_PRODUCT_COLUMNS} FROM products;
+  DROP TABLE products;
+  ALTER TABLE products_version_eleven RENAME TO products;
+
+  CREATE TRIGGER products_category_pair_on_insert BEFORE INSERT ON products
+    WHEN (NEW.category_id IS NULL) <> (NEW.category IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'category_id と category は両方あるか両方ないかのどちらかにする'); END;
+  CREATE TRIGGER products_category_pair_on_update BEFORE UPDATE ON products
+    WHEN (NEW.category_id IS NULL) <> (NEW.category IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'category_id と category は両方あるか両方ないかのどちらかにする'); END;
+  `,
 ];
 
 /** 最新のスキーマの版数。 */
@@ -330,7 +395,7 @@ type ImageFileNameColumn = 'uploaded_image_file_name' | 'card_image_file_name';
 const productRowSchema = z.object({
   id: z.string(),
   name: z.string(),
-  release_month: z.string(),
+  release_month: z.string().nullable(),
   status: productStatusSchema,
   cancelable: z.union([z.literal(0), z.literal(1)]),
   price: z.number().int().nullable(),
@@ -463,6 +528,14 @@ export function openProductDatabase(databaseFilePath: string): DatabaseSync {
   return database;
 }
 
+/** 変更履歴で、発売月の未定を表す値（issue #62、BR-40）。変更前の null は「登録時で変更前がない」を表すため、別の値にする。 */
+const UNDETERMINED_RELEASE_MONTH_HISTORY_VALUE = 'undetermined';
+
+/** 発売月を変更履歴に記録する値にする。未定（null）は UNDETERMINED_RELEASE_MONTH_HISTORY_VALUE にする。 */
+function convertReleaseMonthToHistoryValue(releaseMonth: string | null): string {
+  return releaseMonth ?? UNDETERMINED_RELEASE_MONTH_HISTORY_VALUE;
+}
+
 /**
  * SQLite を使う商品の保存の操作を作る。
  * @param database openProductDatabase で開いた DB
@@ -543,7 +616,7 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
           );
         const registration: ProductChange = { changedAt: product.createdAt, changeKind: 'user' };
         recordHistory(product.id, registration, 'status', null, product.status);
-        recordHistory(product.id, registration, 'releaseMonth', null, product.releaseMonth);
+        recordHistory(product.id, registration, 'releaseMonth', null, convertReleaseMonthToHistoryValue(product.releaseMonth));
       });
     },
 
@@ -590,7 +663,8 @@ export function createSqliteProductRepository(database: DatabaseSync): ProductRe
           );
         if (current.status !== product.status) recordHistory(product.id, change, 'status', current.status, product.status);
         if (current.releaseMonth !== product.releaseMonth) {
-          recordHistory(product.id, change, 'releaseMonth', current.releaseMonth, product.releaseMonth);
+          const valueBefore = convertReleaseMonthToHistoryValue(current.releaseMonth);
+          recordHistory(product.id, change, 'releaseMonth', valueBefore, convertReleaseMonthToHistoryValue(product.releaseMonth));
         }
         return true;
       });

@@ -21,6 +21,7 @@ export type AutomaticTransition = {
  *  - 予約済: 発売月を超過した（日本時間の翌月 1 日 0:00 になった）ら購入済にし、延期の確認を待つ
  *  - 検討中: 受注期限を超過した（日本時間の翌日 0:00 になった）か、発売月を超過したら未購入にする。延期の確認は待たない
  *  - 購入済・未購入・キャンセル: 変えない（キャンセルは自動遷移の対象外。issue #57、BR-38）
+ * 発売月が未定（null）の商品は、発売月を超過したとは扱わない（受注期限による切り替えだけが起きる。issue #62、BR-40）。
  * @returns 変える場合は遷移の結果、変えない場合は null
  */
 export function determineAutomaticTransition(
@@ -51,14 +52,16 @@ export function clearPassedOrderDeadlineOfConsidering<T extends Pick<Product, 's
   return { ...product, orderDeadline: null };
 }
 
-/** 発売月が当月（日本時間）より前か（発売月を超過したか）。 */
-function isReleaseMonthBeforeCurrentMonth(releaseMonth: string, currentTime: Date): boolean {
+/** 発売月が当月（日本時間）より前か（発売月を超過したか）。未定（null）は超過しない（issue #62、BR-40）。 */
+function isReleaseMonthBeforeCurrentMonth(releaseMonth: string | null, currentTime: Date): boolean {
+  if (releaseMonth === null) return false;
   return releaseMonth < formatMonthInJapan(currentTime);
 }
 
 /**
  * 商品がアーカイブされているか。キャンセルの商品は発売月に関係なくアーカイブとする（issue #57、BR-38）。
  * それ以外は、発売月が当月（日本時間）より前ならステータスにかかわらずアーカイブとする。
+ * 発売月が未定（null）の商品は、キャンセル以外はアーカイブとしない（issue #62、BR-40）。
  * ステータスを省くと発売月だけで判定する（新しい発売月が当月より前かの判定に使う）。
  */
 export function isProductArchived(

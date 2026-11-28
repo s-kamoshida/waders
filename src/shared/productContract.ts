@@ -72,6 +72,12 @@ export const releaseMonthSchema = z
   .string()
   .regex(/^\d{4}-(0[1-9]|1[0-2])$/, '発売月は「2026-11」の形式で入力してください。');
 
+/**
+ * 発売月か、未定（null。issue #62、BR-40）。登録・編集・ドラッグ・リストに戻すで使う。
+ * 省くことはできない（未定は null で明示する）。延期の確認で入れる新しい発売月は月だけ（releaseMonthSchema）。
+ */
+export const releaseMonthOrUndeterminedSchema = releaseMonthSchema.nullable();
+
 /** 受注期限（日本時間の日付。例: 2026-11-20。その日の終わりまで期限内）。 */
 export const orderDeadlineSchema = z
   .string()
@@ -154,7 +160,7 @@ function checkDiscount(input: ProductCosts & { readonly discount: number | null 
 
 /**
  * 商品の入力（登録・編集）のスキーマ。
- * 必須は商品名と発売月。ステータスの既定は検討中、キャンセル可否の既定は不可、任意の項目の既定は未入力（null）。
+ * 必須は商品名と発売月（発売月は未定の null も可。issue #62）。ステータスの既定は検討中、キャンセル可否の既定は不可、任意の項目の既定は未入力（null）。
  */
 export const productInputSchema = z.object({
   name: z
@@ -162,7 +168,7 @@ export const productInputSchema = z.object({
     .trim()
     .min(1, '商品名を入力してください。')
     .max(MAXIMUM_PRODUCT_NAME_LENGTH, `商品名は ${MAXIMUM_PRODUCT_NAME_LENGTH} 文字以内で入力してください。`),
-  releaseMonth: releaseMonthSchema,
+  releaseMonth: releaseMonthOrUndeterminedSchema,
   status: productStatusSchema.default('considering'),
   cancelable: z.boolean().default(false),
   price: yenAmountSchema.nullable().default(null),
@@ -224,7 +230,8 @@ export type ProductInput = z.infer<typeof productInputSchema>;
 export const productSchema = z.object({
   id: z.string(),
   name: z.string(),
-  releaseMonth: z.string(),
+  /** 発売月。未定は null（issue #62）。 */
+  releaseMonth: z.string().nullable(),
   status: productStatusSchema,
   cancelable: z.boolean(),
   price: z.number().int().nullable(),
@@ -289,11 +296,13 @@ export const productImageUploadRequestSchema = z.object({
 /** 画像を付けるの本文。 */
 export type ProductImageUploadRequest = z.infer<typeof productImageUploadRequestSchema>;
 
-/** リストに戻す（POST /api/products/:productId/restore）の本文のスキーマ。当月以降かはサーバーが現在時刻で確かめる。 */
-export const restoreRequestSchema = z.object({ releaseMonth: releaseMonthSchema });
+/** リストに戻す（POST /api/products/:productId/restore）の本文のスキーマ。
+ * 新しい発売月は、未定（null）も選べる（issue #62）。当月以降かはサーバーが現在時刻で確かめる。 */
+export const restoreRequestSchema = z.object({ releaseMonth: releaseMonthOrUndeterminedSchema });
 
-/** 発売月だけを変える（PATCH /api/products/:productId/release-month。ドラッグアンドドロップ。issue #13）の本文のスキーマ。 */
-export const releaseMonthChangeRequestSchema = z.object({ releaseMonth: releaseMonthSchema });
+/** 発売月だけを変える（PATCH /api/products/:productId/release-month。ドラッグアンドドロップ。issue #13）の本文のスキーマ。
+ * null は未定のまとまりへの移動（issue #62）。 */
+export const releaseMonthChangeRequestSchema = z.object({ releaseMonth: releaseMonthOrUndeterminedSchema });
 
 /**
  * ステータスだけを変える（PATCH /api/products/:productId/status。詳細画面のプルダウン。issue #52）の本文のスキーマ。

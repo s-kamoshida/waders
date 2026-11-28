@@ -225,8 +225,12 @@ export function resolveOtherExpenseLabel(categories: readonly CategoryResponse[]
 /** 曜日の表記（日曜から）。 */
 const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
-/** 発売月（YYYY-MM）を「2026/12」の形にする（詳細画面。issue #52）。 */
-export function formatReleaseMonthLabel(releaseMonth: string): string {
+/** 発売月が未定の表記（issue #62）。 */
+export const UNDETERMINED_RELEASE_MONTH_LABEL = '未定';
+
+/** 発売月（YYYY-MM）を「2026/12」の形にする（詳細画面。issue #52）。未定（null）は「未定」にする（issue #62）。 */
+export function formatReleaseMonthLabel(releaseMonth: string | null): string {
+  if (releaseMonth === null) return UNDETERMINED_RELEASE_MONTH_LABEL;
   return releaseMonth.replace('-', '/');
 }
 

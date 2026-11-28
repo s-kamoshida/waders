@@ -4,6 +4,8 @@
  * 所属: クライアント（画面の部品）
  * 責務:
  *  - 追加（発売月の既定は当月、ステータスの既定は検討中）と編集（保存済みの値を表示）の入力
+ *  - 発売月の横の「未定」にチェックすると、発売月の欄を使えなくし、発売月を未定（null）で送る（issue #62、BR-40）。
+ *    チェックを外すと、欄に残っている月を使う。「保存して続けて追加」でもチェックを残す
  *  - 送信前に共有の検証ルールで確かめ、誤りは入力欄の下に表示する。サーバーが返した入力の誤りも同様に表示する
  *  - メーカー（登録済みのメーカーを入力の候補に出す）と複数行の備考を入力できる（issue #18）
  *  - カテゴリーを定義の並び順から選ぶ。定義にないカテゴリーは「名前（定義にない）」で示し、
@@ -51,6 +53,7 @@ import {
   formatUtcAsJapanDateTimeInput,
   getStatusLabel,
   resolveOtherExpenseLabel,
+  UNDETERMINED_RELEASE_MONTH_LABEL,
 } from '../productDisplay.ts';
 import { formatUndefinedCategoryLabel } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
@@ -62,9 +65,9 @@ import {
   type ProductImageFieldHandle,
 } from './ProductImageField.tsx';
 
-/** モーダルの用途。追加の場合は発売月の既定値を、編集の場合は対象の商品を持つ。 */
+/** モーダルの用途。追加の場合は発売月の既定値（null は未定。issue #62）を、編集の場合は対象の商品を持つ。 */
 export type ProductEditorMode =
-  | { readonly kind: 'create'; readonly defaultReleaseMonth: string }
+  | { readonly kind: 'create'; readonly defaultReleaseMonth: string | null }
   | { readonly kind: 'edit'; readonly product: ProductResponse };
 
 /** 保存の結果。imageSaveFailed は、商品を保存できて画像を保存できなかった場合に true（issue #41）。 */
@@ -107,7 +110,10 @@ const SAVE_METHOD_LABELS: Readonly<Record<SaveMethod, string>> = {
 /** 入力欄の値（入力中は文字列で持つ）。 */
 type FormValues = {
   name: string;
+  /** 発売月の欄の値（YYYY-MM）。未定にしている間も、チェックを外したときのために残す。 */
   releaseMonth: string;
+  /** 発売月を未定にするか（「未定」のチェック。issue #62）。 */
+  isReleaseMonthUndetermined: boolean;
   status: ProductStatus;
   cancelable: boolean;
   price: string;
@@ -150,12 +156,21 @@ const CLEARED_FOR_NEXT_PRODUCT = {
 /** 用途に応じた入力欄の初期値を作る。 */
 function createInitialValues(mode: ProductEditorMode): FormValues {
   if (mode.kind === 'create') {
-    return { ...CLEARED_FOR_NEXT_PRODUCT, releaseMonth: mode.defaultReleaseMonth, status: 'considering', cancelable: false, orderDeadline: '', categoryId: '' };
+    return {
+      ...CLEARED_FOR_NEXT_PRODUCT,
+      releaseMonth: mode.defaultReleaseMonth ?? '',
+      isReleaseMonthUndetermined: mode.defaultReleaseMonth === null,
+      status: 'considering',
+      cancelable: false,
+      orderDeadline: '',
+      categoryId: '',
+    };
   }
   const { product } = mode;
   return {
     name: product.name,
-    releaseMonth: product.releaseMonth,
+    releaseMonth: product.releaseMonth ?? '',
+    isReleaseMonthUndetermined: product.releaseMonth === null,
     status: product.status,
     cancelable: product.cancelable,
     price: product.price === null ? '' : String(product.price),
@@ -183,7 +198,7 @@ function convertToProductInput(values: FormValues, visibleFields: ReadonlySet<Ca
   const whenVisible = <Value,>(field: CategoryControlledField, value: Value): Value | null => (visibleFields.has(field) ? value : null);
   return {
     name: values.name,
-    releaseMonth: values.releaseMonth,
+    releaseMonth: values.isReleaseMonthUndetermined ? null : values.releaseMonth,
     status: values.status,
     cancelable: visibleFields.has('cancelable') && values.cancelable,
     price: convertToNumberOrNull(values.price),
@@ -566,15 +581,27 @@ export function ProductEditorDialog({
             <div className="field-row">
               <div className="field">
                 <label htmlFor={fieldId('releaseMonth')}>発売月</label>
-                <input
-                  id={fieldId('releaseMonth')}
-                  type="month"
-                  value={values.releaseMonth}
-                  disabled={isArchived}
-                  aria-invalid={fieldErrors.releaseMonth !== undefined}
-                  aria-describedby={describedBy('releaseMonth')}
-                  onChange={(event) => updateValue('releaseMonth', event.target.value)}
-                />
+                <div className="release-month-input">
+                  <input
+                    id={fieldId('releaseMonth')}
+                    type="month"
+                    value={values.releaseMonth}
+                    disabled={isArchived || values.isReleaseMonthUndetermined}
+                    aria-invalid={fieldErrors.releaseMonth !== undefined}
+                    aria-describedby={describedBy('releaseMonth')}
+                    onChange={(event) => updateValue('releaseMonth', event.target.value)}
+                  />
+                  <span className="release-month-undetermined">
+                    <input
+                      id={fieldId('releaseMonthUndetermined')}
+                      type="checkbox"
+                      checked={values.isReleaseMonthUndetermined}
+                      disabled={isArchived}
+                      onChange={(event) => updateValue('isReleaseMonthUndetermined', event.target.checked)}
+                    />
+                    <label htmlFor={fieldId('releaseMonthUndetermined')}>{UNDETERMINED_RELEASE_MONTH_LABEL}</label>
+                  </span>
+                </div>
                 {renderFieldError('releaseMonth')}
                 {isArchived && <span className="hint">{SCREEN_MESSAGES.archivedReleaseMonthHint}</span>}
               </div>

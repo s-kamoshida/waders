@@ -14,8 +14,8 @@ export type ProductId = string & { readonly brand: 'ProductId' };
 export type Product = {
   readonly id: ProductId;
   readonly name: string;
-  /** 発売月（例: 2026-11）。 */
-  readonly releaseMonth: string;
+  /** 発売月（例: 2026-11）。未定は null（issue #62、BR-40）。 */
+  readonly releaseMonth: string | null;
   readonly status: ProductStatus;
   /** 予約を取り消せるか（予約済の商品について）。 */
   readonly cancelable: boolean;
