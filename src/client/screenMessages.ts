@@ -19,6 +19,8 @@ export const SCREEN_MESSAGES = {
   emptyMonth: '商品はありません',
   /** 発売月が未定の商品のまとまりの見出し（issue #62）。 */
   undeterminedReleaseMonthGroup: '発売月未定',
+  /** 発売月未定のまとまりの見出しの集計の注釈（検討中も数えているため。issue #69）。 */
+  undeterminedSummaryNote: '※検討中を含む',
   deleteConfirmationTitle: '商品を削除しますか？',
   deleteConfirmationNote: '削除した商品は元に戻せません。',
   /** 「保存して続けて追加」で保存した場合の文言（issue #16）。 */

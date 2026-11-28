@@ -213,6 +213,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
         <ProductGroupList
           yearGroups={yearGroups}
           undeterminedGroup={undeterminedGroup}
+          undeterminedSummaryNote={SCREEN_MESSAGES.undeterminedSummaryNote}
           formatSummary={formatGroupSummary}
           today={today}
           onSelect={openDetail}
