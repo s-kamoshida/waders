@@ -7,6 +7,7 @@
 import type { CategoryResponse } from '../shared/categoryContract.ts';
 import { sumProductCostsYen, type ProductResponse } from '../shared/productContract.ts';
 import { formatYen } from './productDisplay.ts';
+import { SCREEN_MESSAGES } from './screenMessages.ts';
 
 /**
  * 年のまとめ方。暦年（1月〜12月）だけにした（issue #58。以前の年度 fiscal は廃止）。
@@ -31,6 +32,9 @@ export type MonthGroup = {
   readonly summary: GroupSummary;
 };
 
+/** 発売月が未定の商品のまとまり（issue #62、BR-40）。月のグループと同じ形で、month を null にする。 */
+export type UndeterminedGroup = Omit<MonthGroup, 'month'> & { readonly month: null };
+
 /** 年のグループ。 */
 export type YearGroup = {
   readonly key: string;
@@ -54,9 +58,18 @@ function isCountedInSummary(product: ProductResponse): boolean {
   return product.status !== 'unpurchased' && product.status !== 'canceled';
 }
 
-/** アーカイブに表示するか。キャンセルは発売月に関係なく、それ以外は発売月が当月より前ならアーカイブ（issue #9・#57）。 */
+/**
+ * アーカイブに表示するか。キャンセルは発売月に関係なく、それ以外は発売月が当月より前ならアーカイブ（issue #9・#57）。
+ * 発売月が未定の商品は、キャンセル以外はアーカイブにしない（issue #62）。
+ */
 function isArchivedProduct(product: ProductResponse, currentMonth: string): boolean {
-  return product.status === 'canceled' || product.releaseMonth < currentMonth;
+  if (product.status === 'canceled') return true;
+  return product.releaseMonth !== null && product.releaseMonth < currentMonth;
+}
+
+/** 発売月のある商品の発売月を、重複を含めて返す（未定の商品は含めない。issue #62）。 */
+function listReleaseMonths(products: readonly ProductResponse[]): string[] {
+  return products.flatMap((product) => (product.releaseMonth === null ? [] : [product.releaseMonth]));
 }
 
 /** 年月（YYYY-MM）に月数を足す。 */
@@ -68,7 +81,7 @@ function addMonths(month: string, count: number): string {
 
 /** 表示する月の一覧。当月（または当月より前の最も早い発売月）から、最も遅い発売月（または当月）まで。 */
 function listMonthsToShow(products: readonly ProductResponse[], currentMonth: string): string[] {
-  const releaseMonths = products.map((product) => product.releaseMonth).sort();
+  const releaseMonths = listReleaseMonths(products).sort();
   const firstMonth = [currentMonth, releaseMonths[0] ?? currentMonth].sort()[0] ?? currentMonth;
   const lastMonth = [currentMonth, releaseMonths.at(-1) ?? currentMonth].sort()[1] ?? currentMonth;
   const months: string[] = [];
@@ -99,12 +112,32 @@ function identifyYear(month: string): { key: string; label: string } {
   return { key: String(year), label: `${year}年` };
 }
 
-/** 月のグループを作る。商品はその月のものに絞り、並び替える。 */
-function buildMonthGroup(month: string, products: readonly ProductResponse[]): MonthGroup {
-  const monthProducts = products
+/** 発売月（未定は null）が同じ商品に絞り、同じ月の中の並び順に並び替える。 */
+function selectAndSortProductsOfMonth(month: string | null, products: readonly ProductResponse[]): ProductResponse[] {
+  return products
     .filter((product) => product.releaseMonth === month)
     .sort((left, right) => rankProduct(left) - rankProduct(right) || left.createdAt.localeCompare(right.createdAt));
+}
+
+/** 月のグループを作る。商品はその月のものに絞り、並び替える。 */
+function buildMonthGroup(month: string, products: readonly ProductResponse[]): MonthGroup {
+  const monthProducts = selectAndSortProductsOfMonth(month, products);
   return { month, label: month.replace('-', '/'), products: monthProducts, summary: summarizeProducts(monthProducts) };
+}
+
+/**
+ * 発売月が未定の商品のまとまりを作る（issue #62、BR-40）。並び順と集計は月のグループと同じ規則にする。
+ * 年の見出しの集計には含めない（年・月のグループとは別に、その下に表示する）。
+ * @param products 商品（順不同。発売月のある商品は除く）
+ */
+export function buildUndeterminedGroup(products: readonly ProductResponse[]): UndeterminedGroup {
+  const undeterminedProducts = selectAndSortProductsOfMonth(null, products);
+  return {
+    month: null,
+    label: SCREEN_MESSAGES.undeterminedReleaseMonthGroup,
+    products: undeterminedProducts,
+    summary: summarizeProducts(undeterminedProducts),
+  };
 }
 
 /** 並べ終えた月のグループを、続いている同じ暦年ごとにまとめる。 */
@@ -158,7 +191,7 @@ export function splitProductsByArchive<Item extends ProductResponse>(
  * @param _options 以前の呼び出し方のために受け付ける。省略してよく、yearMode を指定しても暦年でまとめる（issue #58）
  */
 export function buildArchiveGroups(products: readonly ProductResponse[], _options: { readonly yearMode?: YearMode } = {}): YearGroup[] {
-  const months = [...new Set(products.map((product) => product.releaseMonth))].sort().reverse();
+  const months = [...new Set(listReleaseMonths(products))].sort().reverse();
   return groupMonthsByYear(months.map((month) => buildMonthGroup(month, products)));
 }
 

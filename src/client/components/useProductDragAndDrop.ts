@@ -8,6 +8,7 @@
  *    掴んでいる間はページのスクロールを止め、指の下の月を落とす先にする。画面の上端・下端では、カードを囲む一覧の領域
  *    （ページの中でスクロールする領域。issue #21）をスクロールする。端の判定は画面の端で行う
  *  - 落とす先の月（月の並び・月の見出し。data-drop-month を持つ要素）を返し、同じ月に落とした場合は何もしない
+ *  - 発売月が未定のまとまり（issue #62）も落とす先にできる。落とす先のキーは UNDETERMINED_DROP_TARGET_KEY で、移動では null にする
  * 位置を style で動かす表示（指に付いて動くカード）は使わない（CSP の決まり）。
  */
 import { useCallback, useEffect, useRef, useState, type DragEvent, type HTMLAttributes } from 'react';
@@ -24,6 +25,19 @@ const AUTO_SCROLL_STEP_PIXELS = 12;
 /** 掴んだ後の指を離したときのクリックを無視する時間（ミリ秒）。クリックが来なかった場合に、次のタップを無視しないため。 */
 const CLICK_SUPPRESSION_MILLISECONDS = 500;
 
+/** 発売月が未定のまとまりの、落とす先のキー（issue #62）。年月（YYYY-MM）と重ならない値にする。 */
+export const UNDETERMINED_DROP_TARGET_KEY = 'undetermined';
+
+/** 発売月（未定は null）を、落とす先のキー（年月か UNDETERMINED_DROP_TARGET_KEY）にする。 */
+export function convertReleaseMonthToDropTargetKey(releaseMonth: string | null): string {
+  return releaseMonth ?? UNDETERMINED_DROP_TARGET_KEY;
+}
+
+/** 落とす先のキーを、発売月（未定は null）にする。 */
+function convertDropTargetKeyToReleaseMonth(dropTargetKey: string): string | null {
+  return dropTargetKey === UNDETERMINED_DROP_TARGET_KEY ? null : dropTargetKey;
+}
+
 /** 月の要素に付ける、落とす先としての属性と操作。 */
 export type MonthDropTargetProps = Pick<HTMLAttributes<HTMLElement>, 'onDragEnter' | 'onDragOver' | 'onDragLeave' | 'onDrop'> & {
   readonly 'data-drop-month': string;
@@ -37,7 +51,7 @@ export type CardDragHandlers = Pick<
 
 /** useProductDragAndDrop の結果。 */
 export type ProductDragAndDrop = {
-  /** 落とす先として強調する月（YYYY-MM）。 */
+  /** 落とす先として強調する月のキー（YYYY-MM か UNDETERMINED_DROP_TARGET_KEY）。 */
   readonly dropTargetMonth: string | null;
   /** タッチ操作で掴んでいる商品の ID。 */
   readonly grabbedProductId: string | null;
@@ -71,9 +85,9 @@ function findMonthAt(clientX: number, clientY: number): string | null {
 
 /**
  * 商品のドラッグアンドドロップを扱う。
- * @param onMoveProduct 別の月に落としたときに呼ぶ（同じ月なら呼ばない）
+ * @param onMoveProduct 別の月に落としたときに、新しい発売月（未定のまとまりなら null）を渡して呼ぶ（同じ月なら呼ばない）
  */
-export function useProductDragAndDrop(onMoveProduct: (product: ProductResponse, month: string) => void): ProductDragAndDrop {
+export function useProductDragAndDrop(onMoveProduct: (product: ProductResponse, releaseMonth: string | null) => void): ProductDragAndDrop {
   const [isMouseDragEnabled] = useState(canDragWithMouse);
   const [dropTargetMonth, setDropTargetMonth] = useState<string | null>(null);
   const [grabbedProductId, setGrabbedProductId] = useState<string | null>(null);
@@ -95,8 +109,10 @@ export function useProductDragAndDrop(onMoveProduct: (product: ProductResponse, 
       const product = draggingProductRef.current;
       draggingProductRef.current = null;
       updateDropTarget(null);
-      if (product === null || month === null || month === product.releaseMonth) return;
-      onMoveProduct(product, month);
+      if (product === null || month === null) return;
+      const releaseMonth = convertDropTargetKeyToReleaseMonth(month);
+      if (releaseMonth === product.releaseMonth) return;
+      onMoveProduct(product, releaseMonth);
     },
     [onMoveProduct, updateDropTarget],
   );

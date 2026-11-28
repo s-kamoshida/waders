@@ -7,14 +7,15 @@
  * ドラッグアンドドロップで発売月を移動できるか（リストだけ。issue #13）は呼び出し側が決める。
  * 商品は、スマートフォンの幅（横幅 600px 以下）では 1 行に 1 件のリスト形式、それより広い幅ではカードのグリッドで並べる（issue #15）。
  * カードにはカテゴリーの定義と並べ方を渡す（リスト形式では開催日時の代わりに開催期間を示す。PR #30 のレビュー）。
+ * 発売月が未定の商品のまとまり（issue #62）を渡すと、年・月のグループの下に、年と同じ階層の見出しで表示する。
  */
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import type { CategoryResponse } from '../../shared/categoryContract.ts';
 import type { ProductResponse } from '../../shared/productContract.ts';
-import type { GroupSummary, YearGroup } from '../productList.ts';
+import type { GroupSummary, MonthGroup, UndeterminedGroup, YearGroup } from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 import { ProductCard } from './ProductCard.tsx';
-import { useProductDragAndDrop } from './useProductDragAndDrop.ts';
+import { convertReleaseMonthToDropTargetKey, UNDETERMINED_DROP_TARGET_KEY, useProductDragAndDrop } from './useProductDragAndDrop.ts';
 
 /** 集合に値があれば取り除き、なければ加えた新しい集合を返す。 */
 function toggleSetValue(values: ReadonlySet<string>, value: string): Set<string> {
@@ -45,19 +46,31 @@ function useIsPhoneWidth(): boolean {
   return useSyncExternalStore(subscribePhoneWidthChange, readIsPhoneWidth, () => false);
 }
 
+/** ドラッグ中の案内の文言。落とす先のキー（年月か未定）から作る。 */
+function formatDragIndicator(dropTargetKey: string | null): string {
+  if (dropTargetKey === null) return '移動先の月まで動かしてください';
+  if (dropTargetKey === UNDETERMINED_DROP_TARGET_KEY) return `${SCREEN_MESSAGES.undeterminedReleaseMonthGroup} に移動`;
+  return `${dropTargetKey.replace('-', '/')} に移動`;
+}
+
 /** ProductGroupList の引数。 */
 export type ProductGroupListProps = {
   readonly yearGroups: readonly YearGroup[];
+  /** 発売月が未定の商品のまとまり（issue #62）。渡すと、年・月のグループの下に表示する。省くと表示しない。 */
+  readonly undeterminedGroup?: UndeterminedGroup;
   /** 見出しの集計の表記。 */
   readonly formatSummary: (summary: GroupSummary) => string;
   /** 日本時間の今日の日付（受注期限の警告の判定に使う）。 */
   readonly today: string;
   /** 商品を押したときに呼ぶ。 */
   readonly onSelect: (product: ProductResponse) => void;
-  /** 渡すと、月の見出しの右端に追加ボタンを置き、押したときにその月（YYYY-MM）を渡して呼ぶ。 */
-  readonly onAddToMonth?: (month: string) => void;
-  /** 渡すと、商品をドラッグアンドドロップで別の月に移動できる。別の月に落としたときに呼ぶ（issue #13）。 */
-  readonly onMoveProduct?: (product: ProductResponse, month: string) => void;
+  /** 渡すと、月の見出しの右端に追加ボタンを置き、押したときにその月（YYYY-MM。未定のまとまりは null）を渡して呼ぶ。 */
+  readonly onAddToMonth?: (month: string | null) => void;
+  /**
+   * 渡すと、商品をドラッグアンドドロップで別の月に移動できる。別の月に落としたときに、新しい発売月
+   * （未定のまとまりは null。issue #62）を渡して呼ぶ（issue #13）。
+   */
+  readonly onMoveProduct?: (product: ProductResponse, month: string | null) => void;
   /** カテゴリーの定義（カードの「送料無料」と「その他費用」の名前に使う。issue #27）。読めない・読み込み中は null。 */
   readonly categories?: readonly CategoryResponse[] | null;
 };
@@ -65,6 +78,7 @@ export type ProductGroupListProps = {
 /** 年・月のグループを表示する。 */
 export function ProductGroupList({
   yearGroups,
+  undeterminedGroup,
   formatSummary,
   today,
   onSelect,
@@ -75,13 +89,71 @@ export function ProductGroupList({
   const [collapsedYearKeys, setCollapsedYearKeys] = useState<ReadonlySet<string>>(new Set());
   const [collapsedMonths, setCollapsedMonths] = useState<ReadonlySet<string>>(new Set());
   const moveProduct = useCallback(
-    (product: ProductResponse, month: string) => onMoveProduct?.(product, month),
+    (product: ProductResponse, month: string | null) => onMoveProduct?.(product, month),
     [onMoveProduct],
   );
   const dragAndDrop = useProductDragAndDrop(moveProduct);
   const canMove = onMoveProduct !== undefined;
   const isPhoneWidth = useIsPhoneWidth();
   const productContainerClassName = isPhoneWidth ? 'product-list' : 'product-grid';
+
+  /** 月のまとまり（未定のまとまりを含む）の section に付ける属性（名前・落とす先の強調と操作）。 */
+  const getMonthSectionProps = (monthGroup: MonthGroup | UndeterminedGroup, className: string) => {
+    const dropTargetKey = convertReleaseMonthToDropTargetKey(monthGroup.month);
+    return {
+      className: dragAndDrop.dropTargetMonth === dropTargetKey ? `${className} month-group--drop-target` : className,
+      'aria-label': monthGroup.label,
+      ...(canMove ? dragAndDrop.getMonthDropTargetProps(dropTargetKey) : {}),
+    };
+  };
+
+  /** 月のまとまりの、折りたたみの見出しのボタン。 */
+  const renderToggle = (monthGroup: MonthGroup | UndeterminedGroup, isExpanded: boolean) => (
+    <button
+      type="button"
+      className="group-toggle"
+      aria-expanded={isExpanded}
+      onClick={() => setCollapsedMonths((current) => toggleSetValue(current, convertReleaseMonthToDropTargetKey(monthGroup.month)))}
+    >
+      <span className="group-caret" aria-hidden="true" />
+      <span className="group-label">{monthGroup.label}</span>{' '}
+      <span className="group-summary">{formatSummary(monthGroup.summary)}</span>
+    </button>
+  );
+
+  /** 月のまとまりの見出しの追加ボタン（onAddToMonth を渡した場合だけ）。 */
+  const renderAddButton = (monthGroup: MonthGroup | UndeterminedGroup) =>
+    onAddToMonth !== undefined && (
+      <button
+        type="button"
+        className="month-add-button"
+        aria-label={`${monthGroup.label}に商品を追加`}
+        onClick={() => onAddToMonth(monthGroup.month)}
+      >
+        ＋
+      </button>
+    );
+
+  /** 月のまとまりの商品の並び。商品がなければ「商品はありません」。 */
+  const renderProducts = (products: readonly ProductResponse[]) => {
+    if (products.length === 0) return <p className="empty-month">{SCREEN_MESSAGES.emptyMonth}</p>;
+    return (
+      <div className={productContainerClassName}>
+        {products.map((product) => (
+          <ProductCard
+            key={product.id}
+            product={product}
+            today={today}
+            onSelect={onSelect}
+            dragHandlers={canMove ? dragAndDrop.getCardHandlers(product) : undefined}
+            isGrabbed={dragAndDrop.grabbedProductId === product.id}
+            categories={categories}
+            layout={isPhoneWidth ? 'list' : 'grid'}
+          />
+        ))}
+      </div>
+    );
+  };
 
   const groups = yearGroups.map((yearGroup) => {
     const isYearExpanded = !collapsedYearKeys.has(yearGroup.key);
@@ -101,53 +173,14 @@ export function ProductGroupList({
         </h2>
         {isYearExpanded &&
           yearGroup.months.map((monthGroup) => {
-            const isMonthExpanded = !collapsedMonths.has(monthGroup.month);
+            const isMonthExpanded = !collapsedMonths.has(convertReleaseMonthToDropTargetKey(monthGroup.month));
             return (
-              <section
-                key={monthGroup.month}
-                className={dragAndDrop.dropTargetMonth === monthGroup.month ? 'month-group month-group--drop-target' : 'month-group'}
-                aria-label={monthGroup.label}
-                {...(canMove ? dragAndDrop.getMonthDropTargetProps(monthGroup.month) : {})}
-              >
+              <section key={monthGroup.month} {...getMonthSectionProps(monthGroup, 'month-group')}>
                 <h3 className="month-heading">
-                  <button
-                    type="button"
-                    className="group-toggle"
-                    aria-expanded={isMonthExpanded}
-                    onClick={() => setCollapsedMonths((current) => toggleSetValue(current, monthGroup.month))}
-                  >
-                    <span className="group-caret" aria-hidden="true" />
-                    <span className="group-label">{monthGroup.label}</span>{' '}
-                    <span className="group-summary">{formatSummary(monthGroup.summary)}</span>
-                  </button>
-                  {onAddToMonth !== undefined && (
-                    <button
-                      type="button"
-                      className="month-add-button"
-                      aria-label={`${monthGroup.label}に商品を追加`}
-                      onClick={() => onAddToMonth(monthGroup.month)}
-                    >
-                      ＋
-                    </button>
-                  )}
+                  {renderToggle(monthGroup, isMonthExpanded)}
+                  {renderAddButton(monthGroup)}
                 </h3>
-                {isMonthExpanded && monthGroup.products.length === 0 && <p className="empty-month">{SCREEN_MESSAGES.emptyMonth}</p>}
-                {isMonthExpanded && monthGroup.products.length > 0 && (
-                  <div className={productContainerClassName}>
-                    {monthGroup.products.map((product) => (
-                      <ProductCard
-                        key={product.id}
-                        product={product}
-                        today={today}
-                        onSelect={onSelect}
-                        dragHandlers={canMove ? dragAndDrop.getCardHandlers(product) : undefined}
-                        isGrabbed={dragAndDrop.grabbedProductId === product.id}
-                        categories={categories}
-                        layout={isPhoneWidth ? 'list' : 'grid'}
-                      />
-                    ))}
-                  </div>
-                )}
+                {isMonthExpanded && renderProducts(monthGroup.products)}
               </section>
             );
           })}
@@ -155,12 +188,23 @@ export function ProductGroupList({
     );
   });
 
+  const isUndeterminedExpanded = !collapsedMonths.has(UNDETERMINED_DROP_TARGET_KEY);
+
   return (
     <>
       {groups}
+      {undeterminedGroup !== undefined && (
+        <section {...getMonthSectionProps(undeterminedGroup, 'year-group undetermined-group')}>
+          <h2 className="year-heading undetermined-heading">
+            {renderToggle(undeterminedGroup, isUndeterminedExpanded)}
+            {renderAddButton(undeterminedGroup)}
+          </h2>
+          {isUndeterminedExpanded && renderProducts(undeterminedGroup.products)}
+        </section>
+      )}
       {dragAndDrop.grabbedProductId !== null && (
         <div className="drag-indicator" aria-hidden="true">
-          {dragAndDrop.dropTargetMonth === null ? '移動先の月まで動かしてください' : `${dragAndDrop.dropTargetMonth.replace('-', '/')} に移動`}
+          {formatDragIndicator(dragAndDrop.dropTargetMonth)}
         </div>
       )}
     </>

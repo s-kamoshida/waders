@@ -17,6 +17,8 @@ export const SCREEN_MESSAGES = {
   /** 値がない表示の読み上げ（「－」だけでは意味が伝わらないため。issue #63）。 */
   detailValueEmptyLabel: '未入力',
   emptyMonth: '商品はありません',
+  /** 発売月が未定の商品のまとまりの見出し（issue #62）。 */
+  undeterminedReleaseMonthGroup: '発売月未定',
   deleteConfirmationTitle: '商品を削除しますか？',
   deleteConfirmationNote: '削除した商品は元に戻せません。',
   /** 「保存して続けて追加」で保存した場合の文言（issue #16）。 */
@@ -64,10 +66,14 @@ export const SCREEN_MESSAGES = {
   /** カテゴリーごとの入力項目の説明（SCR-07。issue #27）。 */
   categoryFieldSettingsNote:
     'チェックした項目を、このカテゴリーの商品の追加・編集で入力できます。チェックを外しても、値が保存されている商品では表示します。',
-  /** ドラッグアンドドロップで発売月を移動した（issue #13）。monthLabel は「2027/02」の形。 */
+  /** ドラッグアンドドロップで発売月を移動した（issue #13）。monthLabel は「2027/02」の形（未定へは productMovedToUndetermined）。 */
   productMoved: (monthLabel: string) => `発売月を ${monthLabel} に移動しました`,
+  /** ドラッグアンドドロップで発売月を未定にした（issue #62）。 */
+  productMovedToUndetermined: '発売月を未定に移動しました',
   /** 移動を元に戻した。 */
   productMoveUndone: (monthLabel: string) => `発売月を ${monthLabel} に戻しました`,
+  /** 移動を元に戻して、発売月を未定に戻した（issue #62）。 */
+  productMoveUndoneToUndetermined: '発売月を未定に戻しました',
   productMoveFailed: '発売月を移動できませんでした。時間をおいて、もう一度お試しください。',
   undo: '元に戻す',
   archiveEmpty: 'アーカイブされた商品はありません',

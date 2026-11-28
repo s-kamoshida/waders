@@ -12,7 +12,7 @@
 import { useId, useState } from 'react';
 import type { DeliveryConfirmationRequest, ProductListItem } from '../../shared/productContract.ts';
 import { answerDeliveryConfirmation } from '../productApiClient.ts';
-import { getStatusLabel } from '../productDisplay.ts';
+import { formatReleaseMonthLabel, getStatusLabel } from '../productDisplay.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 import { validateNewReleaseMonth } from './RestoreDialog.tsx';
 
@@ -120,7 +120,7 @@ export function DeliveryConfirmationDialog({ products, currentMonth, onClose, on
               <div key={product.id} className="confirmation-item">
                 <p className="confirmation-item-name">{product.name}</p>
                 <p className="hint">
-                  発売月 {product.releaseMonth.replace('-', '/')} ・ {getStatusLabel('reserved', product.cancelable)} → 購入済
+                  発売月 {formatReleaseMonthLabel(product.releaseMonth)} ・ {getStatusLabel('reserved', product.cancelable)} → 購入済
                 </p>
                 <div className="segmented" role="radiogroup" aria-label={product.name}>
                   {ANSWER_OPTIONS.map(([value, label]) => (

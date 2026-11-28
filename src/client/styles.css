@@ -871,6 +871,29 @@ textarea {
   gap: 6px;
 }
 
+/* 発売月の欄と、その横の「未定」のチェック（issue #62） */
+.release-month-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.release-month-input input[type="month"] {
+  flex: 1;
+}
+
+.release-month-undetermined {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.field .release-month-undetermined input {
+  width: auto;
+}
+
 .delete-target {
   margin: 0;
   font-weight: 600;
@@ -984,6 +1007,18 @@ textarea {
 }
 
 .month-heading .group-toggle {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 発売月が未定の商品のまとまり（issue #62）。年と同じ階層の見出しに、月と同じ追加ボタンを置く */
+.undetermined-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.undetermined-heading .group-toggle {
   flex: 1;
   min-width: 0;
 }

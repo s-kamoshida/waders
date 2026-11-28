@@ -128,21 +128,21 @@ export type ProductService = {
   /**
    * アーカイブされた商品をリストに戻す。ステータスは自動遷移の前に戻し（キャンセルの商品は検討中にする。issue #57）、
    * 発売月を新しい月にし、延期の確認待ちを外す。
-   * @param releaseMonth 新しい発売月（当月以降）
+   * @param releaseMonth 新しい発売月（当月以降）。未定は null（issue #62）
    * @throws {ProductNotFoundError} 商品が存在しない場合
    * @throws {ProductNotArchivedError} 商品がアーカイブされていない場合
    * @throws {RestoreReleaseMonthInPastError} 新しい発売月が当月より前の場合
    */
-  restoreProduct(productId: ProductId, releaseMonth: string): Product;
+  restoreProduct(productId: ProductId, releaseMonth: string | null): Product;
   /**
    * 発売月だけを変える（ドラッグアンドドロップ。issue #13）。今と同じ月なら何もせずに今の商品を返す。
    * 変更は利用者の操作として変更履歴に記録する。
-   * @param releaseMonth 新しい発売月（当月以降）
+   * @param releaseMonth 新しい発売月（当月以降）。未定のまとまりへの移動は null（issue #62）
    * @throws {ProductNotFoundError} 商品が存在しない場合
    * @throws {ArchivedReleaseMonthChangeError} アーカイブされた商品の場合
    * @throws {RestoreReleaseMonthInPastError} 新しい発売月が当月より前の場合
    */
-  moveProductToReleaseMonth(productId: ProductId, releaseMonth: string): Product;
+  moveProductToReleaseMonth(productId: ProductId, releaseMonth: string | null): Product;
   /**
    * ステータスだけを変える（詳細画面のプルダウン。issue #52、BR-37）。アーカイブされた商品も変えられる。
    * キャンセルにした場合は、延期の確認待ちを外す（issue #57、BR-38）。
@@ -477,7 +477,7 @@ export function createProductService(dependencies: ProductServiceDependencies): 
       const current = findProductOrThrow(productId);
       const currentTime = clock.now();
       if (!isProductArchived(current, currentTime)) throw new ProductNotArchivedError(productId);
-      if (isProductArchived({ releaseMonth }, currentTime)) throw new RestoreReleaseMonthInPastError(releaseMonth);
+      if (releaseMonth !== null && isProductArchived({ releaseMonth }, currentTime)) throw new RestoreReleaseMonthInPastError(releaseMonth);
       const status = determineRestoredStatus(productRepository.listProductHistory(productId), current.status);
       return productRepository.runInTransaction(() => {
         productRepository.clearDeliveryConfirmationPending(productId);
@@ -490,7 +490,7 @@ export function createProductService(dependencies: ProductServiceDependencies): 
       const currentTime = clock.now();
       if (isProductArchived(current, currentTime)) throw new ArchivedReleaseMonthChangeError(productId);
       if (releaseMonth === current.releaseMonth) return current;
-      if (isProductArchived({ releaseMonth }, currentTime)) throw new RestoreReleaseMonthInPastError(releaseMonth);
+      if (releaseMonth !== null && isProductArchived({ releaseMonth }, currentTime)) throw new RestoreReleaseMonthInPastError(releaseMonth);
       return updateByUser(current, { releaseMonth }, currentTime);
     },
 

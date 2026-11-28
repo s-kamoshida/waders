@@ -141,3 +141,48 @@ describe('キャンセル（issue #57、BR-38）', () => {
     },
   );
 });
+
+describe('発売月が未定の商品（issue #62）', () => {
+  /** 発売月の未定（null）。実装の前でも型チェックを通すため、変換して使う。 */
+  const UNDETERMINED_RELEASE_MONTH = null as unknown as string;
+  /** ずっと先の日時（発売月による切り替えが起きないことを確かめるため）。 */
+  const farFuture = japanTime('2030-06-01T00:00');
+
+  it('予約済の商品は、何か月たっても購入済にしない（発売月による切り替えをしない）', () => {
+    const transition = determineAutomaticTransition({ status: 'reserved', releaseMonth: UNDETERMINED_RELEASE_MONTH, orderDeadline: null }, farFuture);
+
+    expect(transition).toBeNull();
+  });
+
+  it('検討中で受注期限がない商品は、何か月たっても未購入にしない', () => {
+    const transition = determineAutomaticTransition({ status: 'considering', releaseMonth: UNDETERMINED_RELEASE_MONTH, orderDeadline: null }, farFuture);
+
+    expect(transition).toBeNull();
+  });
+
+  it('検討中で受注期限を過ぎた商品は、今までどおり未購入にする（受注期限による切り替えは起きる）', () => {
+    const transition = determineAutomaticTransition(
+      { status: 'considering', releaseMonth: UNDETERMINED_RELEASE_MONTH, orderDeadline: '2026-11-20' },
+      japanTime('2026-11-21T00:00'),
+    );
+
+    expect(transition).toEqual({ status: 'unpurchased', awaitsDeliveryConfirmation: false });
+  });
+
+  it('検討中で受注期限がまだ先の商品は、未購入にしない', () => {
+    const transition = determineAutomaticTransition(
+      { status: 'considering', releaseMonth: UNDETERMINED_RELEASE_MONTH, orderDeadline: '2026-11-20' },
+      japanTime('2026-11-20T23:59'),
+    );
+
+    expect(transition).toBeNull();
+  });
+
+  it.each(['considering', 'reserved', 'purchased', 'unpurchased'] as const)('%s の商品は、何か月たってもアーカイブとしない', (status) => {
+    expect(isProductArchived({ status, releaseMonth: UNDETERMINED_RELEASE_MONTH }, farFuture)).toBe(false);
+  });
+
+  it('キャンセルにした商品は、発売月が未定でもアーカイブとする', () => {
+    expect(isProductArchived({ status: CANCELED_STATUS, releaseMonth: UNDETERMINED_RELEASE_MONTH }, japanTime('2026-11-17T12:00'))).toBe(true);
+  });
+});

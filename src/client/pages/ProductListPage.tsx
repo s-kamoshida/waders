@@ -21,7 +21,13 @@ import { ProductDetailDialog } from '../components/ProductDetailDialog.tsx';
 import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { fetchProducts, moveProductToReleaseMonth } from '../productApiClient.ts';
 import { formatDateInJapan, formatMonthInJapan } from '../productDisplay.ts';
-import { buildProductListGroups, collectMakerSuggestions, formatGroupSummary, splitProductsByArchive } from '../productList.ts';
+import {
+  buildProductListGroups,
+  buildUndeterminedGroup,
+  collectMakerSuggestions,
+  formatGroupSummary,
+  splitProductsByArchive,
+} from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 
 export { CATEGORY_FILTER_STORAGE_KEY } from '../components/CategoryFilterMenu.tsx';
@@ -30,6 +36,16 @@ export { CATEGORY_FILTER_STORAGE_KEY } from '../components/CategoryFilterMenu.ts
 const CARD_IMAGE_POLL_INTERVAL_MILLISECONDS = 2000;
 /** カード画像を待って読み直す回数の上限（2 秒ごとに 30 秒まで）。 */
 const MAXIMUM_CARD_IMAGE_POLL_COUNT = 15;
+
+/** 発売月を移動したときの知らせ（未定への移動は専用の文言。issue #62）。 */
+function formatMovedMessage(month: string | null): string {
+  return month === null ? SCREEN_MESSAGES.productMovedToUndetermined : SCREEN_MESSAGES.productMoved(month.replace('-', '/'));
+}
+
+/** 移動を元に戻したときの知らせ（未定に戻した場合は専用の文言。issue #62）。 */
+function formatMoveUndoneMessage(month: string | null): string {
+  return month === null ? SCREEN_MESSAGES.productMoveUndoneToUndetermined : SCREEN_MESSAGES.productMoveUndone(month.replace('-', '/'));
+}
 
 /** ProductListPage の引数。 */
 export type ProductListPageProps = {
@@ -89,10 +105,13 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
   };
 
   const categoryFilter = useCategoryFilter(products ?? []);
-  const yearGroups = useMemo(
-    () => buildProductListGroups(splitProductsByArchive(categoryFilter.filteredProducts, currentMonth).active, { currentMonth }),
+  const activeProducts = useMemo(
+    () => splitProductsByArchive(categoryFilter.filteredProducts, currentMonth).active,
     [categoryFilter.filteredProducts, currentMonth],
   );
+  const yearGroups = useMemo(() => buildProductListGroups(activeProducts, { currentMonth }), [activeProducts, currentMonth]);
+  /** 発売月が未定の商品のまとまり（issue #62）。商品がなくても、ドラッグの移動先と追加のために表示する。 */
+  const undeterminedGroup = useMemo(() => buildUndeterminedGroup(activeProducts), [activeProducts]);
 
   const makerSuggestions = useMemo(() => collectMakerSuggestions(products ?? []), [products]);
 
@@ -124,18 +143,17 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
     setNotice((current) => (current === expired ? null : current));
   }, []);
 
-  /** 発売月を移動して知らせる。元に戻す場合は、知らせに「元に戻す」を付けない。 */
+  /** 発売月を移動して知らせる（month が null なら未定にする。issue #62）。元に戻す場合は、知らせに「元に戻す」を付けない。 */
   const moveProduct = useCallback(
-    async (product: ProductResponse, month: string, isUndo = false) => {
+    async (product: ProductResponse, month: string | null, isUndo = false) => {
       try {
         await moveProductToReleaseMonth(product.id, month);
-        const monthLabel = month.replace('-', '/');
         setNotice(
           isUndo
-            ? { kind: 'success', message: SCREEN_MESSAGES.productMoveUndone(monthLabel) }
+            ? { kind: 'success', message: formatMoveUndoneMessage(month) }
             : {
                 kind: 'success',
-                message: SCREEN_MESSAGES.productMoved(monthLabel),
+                message: formatMovedMessage(month),
                 action: {
                   label: SCREEN_MESSAGES.undo,
                   onPress: () => void moveProduct({ ...product, releaseMonth: month }, product.releaseMonth, true),
@@ -194,6 +212,7 @@ export function ProductListPage({ currentTime, onProductsLoaded }: ProductListPa
       {products !== null && (
         <ProductGroupList
           yearGroups={yearGroups}
+          undeterminedGroup={undeterminedGroup}
           formatSummary={formatGroupSummary}
           today={today}
           onSelect={openDetail}

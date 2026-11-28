@@ -20,7 +20,13 @@ import { ProductGroupList } from '../components/ProductGroupList.tsx';
 import { RestoreDialog } from '../components/RestoreDialog.tsx';
 import { fetchProducts } from '../productApiClient.ts';
 import { formatDateInJapan, formatMonthInJapan } from '../productDisplay.ts';
-import { buildArchiveGroups, collectMakerSuggestions, formatArchiveSummary, splitProductsByArchive } from '../productList.ts';
+import {
+  buildArchiveGroups,
+  buildUndeterminedGroup,
+  collectMakerSuggestions,
+  formatArchiveSummary,
+  splitProductsByArchive,
+} from '../productList.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 
 /** 開いているモーダル（detail は商品の詳細画面。issue #52）。 */
@@ -61,6 +67,11 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
     [categoryFilter.filteredProducts, currentMonth],
   );
   const yearGroups = useMemo(() => buildArchiveGroups(archivedProducts), [archivedProducts]);
+  /** 発売月が未定のキャンセルの商品のまとまり（issue #62）。アーカイブでは、商品があるときだけ表示する。 */
+  const undeterminedGroup = useMemo(() => {
+    const group = buildUndeterminedGroup(archivedProducts);
+    return group.products.length === 0 ? undefined : group;
+  }, [archivedProducts]);
 
   const makerSuggestions = useMemo(() => collectMakerSuggestions(products ?? []), [products]);
 
@@ -105,6 +116,7 @@ export function ArchivePage({ currentTime }: ArchivePageProps) {
       {products !== null && (
         <ProductGroupList
           yearGroups={yearGroups}
+          undeterminedGroup={undeterminedGroup}
           formatSummary={formatArchiveSummary}
           today={today}
           onSelect={(selected) => {

@@ -4,12 +4,15 @@
  * 所属: クライアント（画面の部品）
  * 責務: 新しい発売月（既定は当月。当月以降のみ）を入力させ、商品をリストに戻す。
  * 発売月が当月以降の商品（キャンセルの商品。issue #57）は、その発売月を既定にする（戻すときに月が変わらないように）。
+ * 「未定」にチェックすると、新しい発売月の欄を使えなくし、発売月を未定（null）にして戻す（issue #62）。
+ * 発売月が未定の商品（キャンセルの商品）は、「未定」にチェックした状態で開く。
  * ステータスはサーバーが変更履歴から自動遷移の前に戻す（キャンセルの商品は検討中にする）。戻せたら onRestored を呼ぶ。
  * 見出しの行の「閉じる」ボタン（×）は「キャンセル」と同じく送らずに onClose を呼ぶ。送信中は押せない（issue #49）。
  */
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { releaseMonthSchema, type ProductResponse } from '../../shared/productContract.ts';
 import { ApiRequestError, restoreProduct } from '../productApiClient.ts';
+import { UNDETERMINED_RELEASE_MONTH_LABEL } from '../productDisplay.ts';
 import { SCREEN_MESSAGES } from '../screenMessages.ts';
 
 /** RestoreDialog の引数。 */
@@ -34,7 +37,10 @@ export function validateNewReleaseMonth(releaseMonth: string, currentMonth: stri
 
 /** リストに戻すモーダルを描画する。 */
 export function RestoreDialog({ product, currentMonth, onClose, onRestored }: RestoreDialogProps) {
-  const [releaseMonth, setReleaseMonth] = useState(product.releaseMonth >= currentMonth ? product.releaseMonth : currentMonth);
+  const [releaseMonth, setReleaseMonth] = useState(
+    product.releaseMonth !== null && product.releaseMonth >= currentMonth ? product.releaseMonth : currentMonth,
+  );
+  const [isUndetermined, setIsUndetermined] = useState(product.releaseMonth === null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -47,13 +53,13 @@ export function RestoreDialog({ product, currentMonth, onClose, onRestored }: Re
 
   const submitRestore = async (event: FormEvent) => {
     event.preventDefault();
-    const validationError = validateNewReleaseMonth(releaseMonth, currentMonth);
+    const validationError = isUndetermined ? null : validateNewReleaseMonth(releaseMonth, currentMonth);
     setFieldError(validationError);
     if (validationError !== null) return;
     setGeneralError(null);
     setIsSubmitting(true);
     try {
-      onRestored(await restoreProduct(product.id, releaseMonth));
+      onRestored(await restoreProduct(product.id, isUndetermined ? null : releaseMonth));
     } catch (error) {
       const isRejectedByServer = error instanceof ApiRequestError && error.status >= 400 && error.status < 500;
       setGeneralError(isRejectedByServer ? error.message : SCREEN_MESSAGES.restoreFailed);
@@ -90,16 +96,31 @@ export function RestoreDialog({ product, currentMonth, onClose, onRestored }: Re
             <p className="delete-target">{product.name}</p>
             <div className="field">
               <label htmlFor={`${idPrefix}-release-month`}>新しい発売月</label>
-              <input
-                id={`${idPrefix}-release-month`}
-                ref={releaseMonthInputRef}
-                type="month"
-                min={currentMonth}
-                value={releaseMonth}
-                aria-invalid={fieldError !== null}
-                aria-describedby={fieldError === null ? undefined : `${idPrefix}-release-month-error`}
-                onChange={(event) => setReleaseMonth(event.target.value)}
-              />
+              <div className="release-month-input">
+                <input
+                  id={`${idPrefix}-release-month`}
+                  ref={releaseMonthInputRef}
+                  type="month"
+                  min={currentMonth}
+                  value={releaseMonth}
+                  disabled={isUndetermined}
+                  aria-invalid={fieldError !== null}
+                  aria-describedby={fieldError === null ? undefined : `${idPrefix}-release-month-error`}
+                  onChange={(event) => setReleaseMonth(event.target.value)}
+                />
+                <span className="release-month-undetermined">
+                  <input
+                    id={`${idPrefix}-release-month-undetermined`}
+                    type="checkbox"
+                    checked={isUndetermined}
+                    onChange={(event) => {
+                      setIsUndetermined(event.target.checked);
+                      setFieldError(null);
+                    }}
+                  />
+                  <label htmlFor={`${idPrefix}-release-month-undetermined`}>{UNDETERMINED_RELEASE_MONTH_LABEL}</label>
+                </span>
+              </div>
               {fieldError !== null && (
                 <span id={`${idPrefix}-release-month-error`} className="field-error">
                   {fieldError}
