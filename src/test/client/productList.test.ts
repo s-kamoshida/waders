@@ -3,6 +3,7 @@ import {
   buildArchiveGroups,
   buildCategoryFilterOptions,
   buildProductListGroups,
+  buildUndeterminedGroup,
   filterProductsByCategory,
   formatArchiveSummary,
   formatGroupSummary,
@@ -134,7 +135,7 @@ describe('同じ月の中の並び順', () => {
 });
 
 describe('見出しの個数と合計金額', () => {
-  it('個数と、金額と送料の合計を求める。未購入は含めず、金額が未入力の商品は個数だけに含める', () => {
+  it('個数と、金額と送料の合計を求める。検討中（issue #69）と未購入は含めず、金額が未入力の商品は個数だけに含める', () => {
     const products = [
       createProduct({ releaseMonth: '2026-11', price: 19800, shippingFee: 0 }),
       createProduct({ releaseMonth: '2026-11', status: 'considering', price: 24200, shippingFee: null }),
@@ -146,11 +147,11 @@ describe('見出しの個数と合計金額', () => {
     const groups = buildProductListGroups(products, { currentMonth: '2026-11', yearMode: 'calendar' });
 
     expect(groups.map((group) => [group.label, group.summary])).toEqual([
-      ['2026年', { count: 3, totalYen: 44000 }],
+      ['2026年', { count: 2, totalYen: 19800 }],
       ['2027年', { count: 1, totalYen: 31600 }],
     ]);
     expect(groups[0]?.months.map((month) => month.summary)).toEqual([
-      { count: 3, totalYen: 44000 },
+      { count: 2, totalYen: 19800 },
       { count: 0, totalYen: 0 },
     ]);
   });
@@ -444,5 +445,70 @@ describe('ステータス「キャンセル」（issue #57）', () => {
 
     expect(groups[0]?.months[0]?.summary).toEqual({ count: 1, totalYen: 13200 });
     expect(groups[0]?.summary).toEqual({ count: 1, totalYen: 13200 });
+  });
+});
+
+describe('見出しの集計から検討中を除く（issue #69）', () => {
+  /** 発売月の未定（null）。 */
+  const UNDETERMINED_RELEASE_MONTH = null;
+
+  it('月と年の見出しの個数と合計金額に、検討中の商品を含めない（送料・手数料などの費用も含めない）', () => {
+    const products = [
+      createProduct({ releaseMonth: '2026-12', status: 'reserved', price: 10000, shippingFee: 800 }),
+      createProduct({ releaseMonth: '2026-12', status: 'purchased', price: 5000 }),
+      createProduct({ releaseMonth: '2026-12', status: 'considering', price: 24200, shippingFee: 660, handlingFee: 330 }),
+      createProduct({ releaseMonth: '2027-01', status: 'considering', price: 8000 }),
+    ];
+
+    const groups = buildProductListGroups(products, { currentMonth: '2026-11' });
+
+    expect(groups.find((group) => group.key === '2026')?.summary).toEqual({ count: 2, totalYen: 15800 });
+    expect(groups.find((group) => group.key === '2026')?.months.find((month) => month.month === '2026-12')?.summary).toEqual({
+      count: 2,
+      totalYen: 15800,
+    });
+    expect(groups.find((group) => group.key === '2027')?.summary).toEqual({ count: 0, totalYen: 0 });
+  });
+
+  it('検討中の商品は、値引きがあっても合計金額に影響しない（ほかの商品の合計から引かない）', () => {
+    const products = [
+      createProduct({ releaseMonth: '2026-12', status: 'reserved', price: 10000 }),
+      createProduct({ releaseMonth: '2026-12', status: 'considering', price: 3000, ...withDiscount(500) }),
+    ];
+
+    const [yearGroup] = buildProductListGroups(products, { currentMonth: '2026-11' });
+
+    expect(yearGroup?.summary).toEqual({ count: 1, totalYen: 10000 });
+  });
+
+  it('検討中の商品も、今までどおり月の中に表示する（集計にだけ含めない）', () => {
+    const considering = createProduct({ releaseMonth: '2026-12', status: 'considering', price: 3000 });
+
+    const groups = buildProductListGroups([considering], { currentMonth: '2026-11' });
+
+    expect(groups[0]?.months.find((month) => month.month === '2026-12')?.products.map((product) => product.id)).toEqual([considering.id]);
+  });
+
+  it('アーカイブの月と年の見出しの個数と合計金額にも、検討中の商品を含めない', () => {
+    const products = [
+      createProduct({ releaseMonth: '2026-10', status: 'purchased', price: 22000, shippingFee: 800 }),
+      createProduct({ releaseMonth: '2026-10', status: 'considering', price: 9800 }),
+    ];
+
+    const [yearGroup] = buildArchiveGroups(products);
+
+    expect(yearGroup?.summary).toEqual({ count: 1, totalYen: 22800 });
+    expect(yearGroup?.months[0]?.summary).toEqual({ count: 1, totalYen: 22800 });
+  });
+
+  it('発売月未定のまとまりの個数と合計金額には、検討中の商品も含める（未購入・キャンセルは今までどおり含めない）', () => {
+    const products = [
+      createProduct({ releaseMonth: UNDETERMINED_RELEASE_MONTH, status: 'reserved', price: 5000, shippingFee: 500 }),
+      createProduct({ releaseMonth: UNDETERMINED_RELEASE_MONTH, status: 'considering', price: 3000 }),
+      createProduct({ releaseMonth: UNDETERMINED_RELEASE_MONTH, status: 'unpurchased', price: 7000 }),
+      createProduct({ releaseMonth: UNDETERMINED_RELEASE_MONTH, status: CANCELED_STATUS, price: 9000 }),
+    ];
+
+    expect(buildUndeterminedGroup(products).summary).toEqual({ count: 2, totalYen: 8500 });
   });
 });
