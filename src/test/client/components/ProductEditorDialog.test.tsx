@@ -2048,3 +2048,89 @@ describe('右上の閉じるボタン（issue #49）', () => {
     expect(requests).toEqual([]);
   });
 });
+
+describe('発売月の「未定」（issue #62）', () => {
+  /** 発売月の未定（null）。実装の前でも型チェックを通すため、変換して使う。 */
+  const UNDETERMINED_RELEASE_MONTH = null as unknown as string;
+
+  /** 「未定」のチェックを返す。 */
+  function getUndeterminedCheckbox() {
+    return screen.getByRole('checkbox', { name: '未定' });
+  }
+
+  it('追加の場合、発売月の横に「未定」のチェックがあり、既定ではチェックしない', () => {
+    stubFetchRoutes({});
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    expect(getUndeterminedCheckbox()).not.toBeChecked();
+    expect(screen.getByLabelText('発売月')).toBeEnabled();
+  });
+
+  it('「未定」にチェックした場合、発売月の欄を使えなくし、保存すると発売月を null で送る', async () => {
+    const { requests } = stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct({ releaseMonth: UNDETERMINED_RELEASE_MONTH }) }) });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), '発売時期未定のフィギュア');
+    await userEvent.click(getUndeterminedCheckbox());
+    expect(screen.getByLabelText('発売月')).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ name: '発売時期未定のフィギュア', releaseMonth: null });
+  });
+
+  it('「未定」のチェックを外した場合、発売月の欄を使えるように戻し、入れた月を送る', async () => {
+    const { requests } = stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct() }) });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }} onClose={vi.fn()} onSaved={onSaved} />);
+
+    await userEvent.type(screen.getByLabelText('商品名'), '月の決まった商品');
+    await userEvent.click(getUndeterminedCheckbox());
+    await userEvent.click(getUndeterminedCheckbox());
+    expect(screen.getByLabelText('発売月')).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('発売月'), { target: { value: '2027-02' } });
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ releaseMonth: '2027-02' });
+  });
+
+  it('編集で発売月が未定の商品の場合、「未定」にチェックした状態で開き、変えずに保存すると発売月を null で送る', async () => {
+    const product = createProduct({ releaseMonth: UNDETERMINED_RELEASE_MONTH });
+    const { requests } = stubFetchRoutes({ 'PUT /api/products/product-1': () => ({ body: product }) });
+    const onSaved = vi.fn();
+    render(<ProductEditorDialog mode={{ kind: 'edit', product }} onClose={vi.fn()} onSaved={onSaved} />);
+
+    expect(getUndeterminedCheckbox()).toBeChecked();
+    expect(screen.getByLabelText('発売月')).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(requests[0]?.body).toMatchObject({ releaseMonth: null });
+  });
+
+  it('「保存して続けて追加」で保存した場合、次の商品の入力でも「未定」の選択を残す', async () => {
+    stubFetchRoutes({ 'POST /api/products': () => ({ status: 201, body: createProduct({ releaseMonth: UNDETERMINED_RELEASE_MONTH }) }) });
+    const onSavedAndContinued = vi.fn();
+    render(
+      <ProductEditorDialog
+        mode={{ kind: 'create', defaultReleaseMonth: '2026-11' }}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        onSavedAndContinued={onSavedAndContinued}
+      />,
+    );
+
+    await userEvent.type(screen.getByLabelText('商品名'), '未定の商品 1');
+    await userEvent.click(getUndeterminedCheckbox());
+    await userEvent.click(screen.getByRole('button', { name: '保存方法を選ぶ' }));
+    await userEvent.click(screen.getByRole('menuitemradio', { name: '保存して続けて追加' }));
+    await userEvent.click(screen.getByRole('button', { name: '保存して続けて追加' }));
+
+    await waitFor(() => expect(onSavedAndContinued).toHaveBeenCalled());
+    expect(screen.getByLabelText('商品名')).toHaveValue('');
+    expect(getUndeterminedCheckbox()).toBeChecked();
+    expect(screen.getByLabelText('発売月')).toBeDisabled();
+  });
+});

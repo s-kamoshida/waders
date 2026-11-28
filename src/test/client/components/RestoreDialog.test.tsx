@@ -183,3 +183,23 @@ describe('キャンセルの商品をリストに戻す（issue #57）', () => {
     expect(screen.getByLabelText('新しい発売月')).toHaveValue('2026-11');
   });
 });
+
+describe('リストに戻すで発売月を「未定」にする（issue #62）', () => {
+  it('「未定」にチェックした場合、新しい発売月の欄を使えなくし、「戻す」で発売月を null で送る', async () => {
+    const { requests } = stubFetchRoutes({
+      'POST /api/products/product-1/restore': () => ({ body: { ...product, status: 'reserved', releaseMonth: null } }),
+    });
+    const onRestored = vi.fn();
+    render(<RestoreDialog product={product} currentMonth="2026-11" onClose={vi.fn()} onRestored={onRestored} />);
+
+    expect(screen.getByRole('checkbox', { name: '未定' })).not.toBeChecked();
+    await userEvent.click(screen.getByRole('checkbox', { name: '未定' }));
+    expect(screen.getByLabelText('新しい発売月')).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: '戻す' }));
+
+    await waitFor(() => expect(onRestored).toHaveBeenCalled());
+    expect(requests).toEqual([
+      { method: 'POST', path: '/api/products/product-1/restore', body: { releaseMonth: null }, contentType: 'application/json' },
+    ]);
+  });
+});

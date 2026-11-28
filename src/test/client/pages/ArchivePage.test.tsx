@@ -448,3 +448,25 @@ describe('ステータス「キャンセル」の商品（issue #57）', () => {
     expect(await screen.findByText('アーカイブされた商品はありません')).toBeInTheDocument();
   });
 });
+
+describe('発売月が未定の商品とアーカイブ（issue #62）', () => {
+  /** 発売月の未定（null）。実装の前でも型チェックを通すため、変換して使う。 */
+  const UNDETERMINED_RELEASE_MONTH = null as unknown as string;
+  /** キャンセル。 */
+  const CANCELED = 'canceled' as ProductListItem['status'];
+
+  it('未定の商品はアーカイブに表示しない（キャンセルにした商品だけ「発売月未定」のまとまりに表示する）', async () => {
+    const products = [
+      createProduct({ name: '未定の予約済の商品', releaseMonth: UNDETERMINED_RELEASE_MONTH, status: 'reserved' }),
+      createProduct({ name: '未定でキャンセルした商品', releaseMonth: UNDETERMINED_RELEASE_MONTH, status: CANCELED }),
+      createProduct({ name: '10月に届いた商品', releaseMonth: '2026-10' }),
+    ];
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+    render(<ArchivePage currentTime={currentTime} />);
+
+    const undeterminedGroup = await screen.findByRole('region', { name: '発売月未定' });
+    expect(within(undeterminedGroup).getByText('未定でキャンセルした商品')).toBeInTheDocument();
+    expect(screen.queryByText('未定の予約済の商品')).not.toBeInTheDocument();
+    expect(screen.getByText('10月に届いた商品')).toBeInTheDocument();
+  });
+});

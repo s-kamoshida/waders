@@ -1457,3 +1457,135 @@ describe('ステータス「キャンセル」の商品（issue #57）', () => {
     await waitFor(() => expect(screen.queryByText('キャンセルする商品')).not.toBeInTheDocument());
   });
 });
+
+describe('発売月が未定の商品（issue #62）', () => {
+  /** 発売月の未定（null）。実装の前でも型チェックを通すため、変換して使う。 */
+  const UNDETERMINED_RELEASE_MONTH = null as unknown as string;
+
+  /** 月の商品 1 件と、未定の商品 2 件。 */
+  function createMixedProducts() {
+    return [
+      createProduct({ id: 'dated', name: '12月の商品', releaseMonth: '2026-12', price: 10000 }),
+      createProduct({ id: 'undetermined-reserved', name: '未定の予約済の商品', releaseMonth: UNDETERMINED_RELEASE_MONTH, price: 5000 }),
+      createProduct({ id: 'undetermined-considering', name: '未定の検討中の商品', releaseMonth: UNDETERMINED_RELEASE_MONTH, status: 'considering', price: 3000 }),
+    ];
+  }
+
+  /** マウスでカードを掴み、落とす先に落とす。 */
+  function dragCardTo(productName: string, target: HTMLElement): void {
+    const card = screen.getByRole('button', { name: new RegExp(productName) }).closest('article');
+    if (card === null) throw new Error(`カードが見つかりません: ${productName}`);
+    fireEvent.dragStart(card);
+    fireEvent.dragEnter(target);
+    fireEvent.dragOver(target);
+    fireEvent.drop(target);
+    fireEvent.dragEnd(card);
+  }
+
+  it('未定の商品は、年・月のまとまりの一番下の「発売月未定」のまとまりに、個数と合計金額の見込みとともに表示し、年の見出しには含めない', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createMixedProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('12月の商品');
+
+    const regions = screen.getAllByRole('region');
+    const undeterminedGroup = regions.at(-1);
+    if (undeterminedGroup === undefined) throw new Error('まとまりがない');
+    expect(undeterminedGroup).toHaveAccessibleName('発売月未定');
+    expect(within(undeterminedGroup).getByText('未定の予約済の商品')).toBeInTheDocument();
+    expect(within(undeterminedGroup).getByText('未定の検討中の商品')).toBeInTheDocument();
+    expect(within(undeterminedGroup).queryByText('12月の商品')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^発売月未定 / })).toHaveTextContent('2個（合計 8,000円見込）');
+    expect(screen.getByRole('button', { name: /^2026年 / })).toHaveTextContent('1個（合計 10,000円見込）');
+  });
+
+  it('未定のまとまりの中の並び順は、月のまとまりと同じ（予約済が検討中より上）', async () => {
+    const products = createMixedProducts().reverse();
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+    const undeterminedGroup = await screen.findByRole('region', { name: '発売月未定' });
+
+    const names = within(undeterminedGroup)
+      .getAllByRole('button', { name: /未定の/ })
+      .map((button) => button.textContent ?? '');
+    expect(names[0]).toContain('未定の予約済の商品');
+    expect(names[1]).toContain('未定の検討中の商品');
+  });
+
+  it('未定の商品がない場合も、「発売月未定」のまとまりを表示する（ドラッグの移動先と追加のため）', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: [createProduct({ name: '12月の商品', releaseMonth: '2026-12' })] } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    const undeterminedGroup = await screen.findByRole('region', { name: '発売月未定' });
+    expect(within(undeterminedGroup).getByText('商品はありません')).toBeInTheDocument();
+  });
+
+  it('未定のまとまりの見出しの＋を押した場合、発売月を未定にした状態で追加のモーダルを開き、保存すると発売月を null で送る', async () => {
+    const added = createProduct({ name: '追加した未定の商品', releaseMonth: UNDETERMINED_RELEASE_MONTH });
+    const { requests } = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products: [] } }),
+      'POST /api/products': () => ({ status: 201, body: added }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '発売月未定に商品を追加' }));
+    const dialog = screen.getByRole('dialog', { name: '商品を追加' });
+    expect(within(dialog).getByRole('checkbox', { name: '未定' })).toBeChecked();
+    expect(within(dialog).getByLabelText('発売月')).toBeDisabled();
+    await userEvent.type(within(dialog).getByLabelText('商品名'), '追加した未定の商品');
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(requests.find((recorded) => recorded.method === 'POST')).toBeDefined());
+    expect(requests.find((recorded) => recorded.method === 'POST')?.body).toMatchObject({ name: '追加した未定の商品', releaseMonth: null });
+  });
+
+  it('月の商品を「発売月未定」のまとまりに落とした場合、発売月を null にする移動を送り、「発売月を未定に移動しました」と表示する', async () => {
+    let products = createMixedProducts();
+    const { requests } = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products } }),
+      'PATCH /api/products/dated/release-month': (body) => {
+        const releaseMonth = (body as { releaseMonth: string | null }).releaseMonth as string;
+        products = products.map((product) => (product.id === 'dated' ? { ...product, releaseMonth } : product));
+        return { body: products.find((product) => product.id === 'dated') };
+      },
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('12月の商品');
+
+    dragCardTo('12月の商品', screen.getByRole('region', { name: '発売月未定' }));
+
+    await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'PATCH')).toHaveLength(1));
+    expect(requests.find((recorded) => recorded.method === 'PATCH')).toMatchObject({
+      path: '/api/products/dated/release-month',
+      body: { releaseMonth: null },
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('発売月を未定に移動しました');
+  });
+
+  it('未定の商品を月のまとまりに落とした場合、その月への移動を送る', async () => {
+    const { requests } = stubFetchRoutes({
+      'GET /api/products': () => ({ body: { products: createMixedProducts() } }),
+      'PATCH /api/products/undetermined-reserved/release-month': () => ({ body: createMixedProducts()[1] }),
+    });
+    render(<ProductListPage currentTime={currentTime} />);
+    await screen.findByText('未定の予約済の商品');
+
+    dragCardTo('未定の予約済の商品', screen.getByRole('region', { name: '2026/12' }));
+
+    await waitFor(() => expect(requests.filter((recorded) => recorded.method === 'PATCH')).toHaveLength(1));
+    expect(requests.find((recorded) => recorded.method === 'PATCH')).toMatchObject({
+      path: '/api/products/undetermined-reserved/release-month',
+      body: { releaseMonth: '2026-12' },
+    });
+  });
+
+  it('未定の商品の詳細画面では、発売月を「未定」と表示する', async () => {
+    stubFetchRoutes({ 'GET /api/products': () => ({ body: { products: createMixedProducts() } }) });
+    render(<ProductListPage currentTime={currentTime} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /未定の予約済の商品/ }));
+
+    const detail = screen.getByRole('dialog', { name: '商品の詳細' });
+    const term = within(detail).getByText('発売月', { selector: 'dt' });
+    expect(term.nextElementSibling).toHaveTextContent(/^未定$/);
+  });
+});
